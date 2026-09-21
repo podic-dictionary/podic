@@ -1,12 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "../SettingsContext";
 import { useAiStream } from "../hooks/useAiStream";
-import { getOverlay, saveOverlay, type OverlayEntry } from "../api";
+import { deleteOverlay, getOverlay, saveOverlay, type OverlayEntry } from "../api";
 import ConfirmDialog from "./ConfirmDialog";
 import ModelPicker from "./ModelPicker";
 import Markdown from "./Markdown";
+import { TrashIcon } from "./icons";
 import type { Entry } from "../types";
 import { entrySummary } from "./entrySummary";
+
+/// 复制到剪贴板。iOS WKWebView 里 navigator.clipboard 常缺失或被拒，
+/// 统一走「clipboard API → 隐藏 textarea + execCommand」两级兜底
+async function copyText(t: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(t);
+      return true;
+    }
+  } catch {
+    // 落入 execCommand 兜底
+  }
+  const ta = document.createElement("textarea");
+  ta.value = t;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  return ok;
+}
 
 const TABS: { id: "explain" | "examples" | "fallback"; label: string; hint: string }[] = [
   { id: "explain", label: "深度讲解", hint: "词义 · 词源 · 辨析 · 搭配" },
@@ -64,6 +93,32 @@ export default function AiPanel({ entry }: { entry: Entry }) {
   const [overlays, setOverlays] = useState<Record<string, OverlayEntry>>({});
   const [fromCache, setFromCache] = useState(false);
   const [confirmRegen, setConfirmRegen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+
+  const onCopy = async () => {
+    if (await copyText(text)) {
+      setCopied(true);
+      window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 1600);
+    }
+  };
+
+  const onDelete = () => {
+    deleteOverlay(entry.lang, entry.headword, tab)
+      .then(() => {
+        setOverlays((o) => {
+          const next = { ...o };
+          delete next[tab];
+          return next;
+        });
+        reset();
+        setFromCache(false);
+      })
+      .catch(() => {});
+  };
 
   // 展开/词条变化：加载已生成的 AI 内容
   useEffect(() => {
@@ -206,10 +261,23 @@ export default function AiPanel({ entry }: { entry: Entry }) {
         )}
         {!running && text && (
           <button
-            onClick={() => navigator.clipboard.writeText(text)}
-            className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            onClick={onCopy}
+            className={`text-xs transition-colors ${
+              copied
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            }`}
           >
-            复制
+            {copied ? "已复制 ✓" : "复制"}
+          </button>
+        )}
+        {!running && overlays[tab] && (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            title="删除这条 AI 生成结果"
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-500"
+          >
+            <TrashIcon size={12} /> 删除
           </button>
         )}
       </div>
@@ -231,6 +299,18 @@ export default function AiPanel({ entry }: { entry: Entry }) {
           start();
         }}
         onCancel={() => setConfirmRegen(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="删除这条 AI 结果？"
+        message={`「${entry.headword}」的${TABS.find((t) => t.id === tab)?.label ?? ""}结果将从本机删除，需要时可重新生成。`}
+        confirmText="删除"
+        onConfirm={() => {
+          setConfirmDelete(false);
+          onDelete();
+        }}
+        onCancel={() => setConfirmDelete(false)}
       />
     </section>
   );

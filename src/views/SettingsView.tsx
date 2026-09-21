@@ -163,26 +163,44 @@ export default function SettingsView({
   const patch = (id: string, kv: Partial<Draft>) =>
     setDrafts((ds) => ds.map((d) => (d.id === id ? { ...d, ...kv } : d)));
 
-  const onSave = async () => {
+  const onSave = async (): Promise<boolean> => {
+    // 校验：填了内容的 Provider 必须有名称；全空的草稿静默跳过
+    // （api_key 为掩码 "••••" 时表示已存有 key，要算作有内容，避免丢配置）
+    const nonEmpty = (d: Draft) =>
+      Boolean(d.name.trim() || d.base_url.trim() || d.api_key.trim() || d.models.some((m) => m.trim()));
+    for (const d of drafts) {
+      if (nonEmpty(d) && !d.name.trim()) {
+        setStatus("请先填写 Provider 名称再保存");
+        return false;
+      }
+    }
     setStatus("保存中…");
     try {
       await saveSettings({
-        providers: drafts.map((d) => ({
-          id: d.id,
-          name: d.name,
-          protocol: d.protocol,
-          base_url: d.base_url,
-          api_key: d.api_key.includes("•") ? "" : d.api_key,
-          models: d.models.map((m) => m.trim()).filter(Boolean),
-          active_model: d.active_model,
-        })),
+        providers: drafts
+          .filter(nonEmpty)
+          .map((d) => {
+            const models = d.models.map((m) => m.trim()).filter(Boolean);
+            return {
+              id: d.id,
+              name: d.name.trim(),
+              protocol: d.protocol,
+              base_url: d.base_url.trim(),
+              api_key: d.api_key.includes("•") ? "" : d.api_key,
+              models,
+              // 表单没有单独的默认模型入口：跟随模型列表第一项
+              active_model: models[0] ?? "",
+            };
+          }),
         manifest_url: manifest,
       });
       await reload();
       setStatus("已保存 ✓");
       setTimeout(() => setStatus(""), 2000);
+      return true;
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
 
@@ -190,13 +208,17 @@ export default function SettingsView({
     setTesting(id);
     try {
       const d = drafts.find((x) => x.id === id)!;
-      // 先保存再测试，确保用最新配置
-      await onSave();
+      // 先保存再测试，确保用最新配置；模型显式取当前输入列表的第一项
+      // （active_model 只在保存时同步，测试不能依赖它，否则新填的模型发不出去）
+      if (!(await onSave())) return;
       setStatus("");
-      const r = await testProvider(id, d.active_model || undefined);
+      const model = d.models.map((m) => m.trim()).filter(Boolean)[0];
+      const r = await testProvider(id, model);
       setTestRes((m) => ({
         ...m,
-        [id]: r.ok ? { ok: true, msg: `已连通，${r.latency_ms}ms` } : { ok: false, msg: `失败：${r.error}` },
+        [id]: r.ok
+          ? { ok: true, msg: `已连通，${model || "（未指定模型）"} · ${r.latency_ms}ms` }
+          : { ok: false, msg: `失败：${r.error}` },
       }));
     } catch (e) {
       setTestRes((m) => ({

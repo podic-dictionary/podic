@@ -67,6 +67,12 @@ export const saveOverlay = (o: {
     body: JSON.stringify(o),
   });
 
+export const deleteOverlay = (lang: string, headword: string, kind: OverlayKind) =>
+  api<{ ok: boolean }>(
+    `/ai/overlay?lang=${encodeURIComponent(lang)}&headword=${encodeURIComponent(headword)}&kind=${encodeURIComponent(kind)}`,
+    { method: "DELETE" },
+  );
+
 
 // ---- 在线更新 ----
 

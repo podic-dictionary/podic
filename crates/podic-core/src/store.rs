@@ -118,6 +118,14 @@ pub fn overlay_get_all(conn: &Connection, lang: &str, headword: &str) -> Result<
     Ok(rows.flatten().collect())
 }
 
+pub fn overlay_delete(conn: &Connection, lang: &str, headword: &str, kind: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM user_overlay WHERE lang = ?1 AND headword = ?2 AND kind = ?3",
+        rusqlite::params![lang, headword, kind],
+    )?;
+    Ok(())
+}
+
 pub fn overlay_put(
     conn: &Connection,
     lang: &str,

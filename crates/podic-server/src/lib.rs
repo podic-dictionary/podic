@@ -57,7 +57,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/favorites/{id}", axum::routing::delete(routes::remove_favorite))
         .route("/api/ai/run", axum::routing::post(routes::ai_run))
         .route("/api/ai/cancel", axum::routing::post(routes::ai_cancel))
-        .route("/api/ai/overlay", axum::routing::get(routes::get_overlay).post(routes::save_overlay))
+        .route("/api/ai/overlay", axum::routing::get(routes::get_overlay).post(routes::save_overlay).delete(routes::delete_overlay))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))

@@ -613,6 +613,22 @@ pub async fn get_overlay(
     Ok(Json(json!({ "overlays": overlays })))
 }
 
+#[derive(Deserialize)]
+pub struct OverlayDeleteReq {
+    pub lang: String,
+    pub headword: String,
+    pub kind: String,
+}
+
+pub async fn delete_overlay(
+    State(state): State<AppState>,
+    Query(req): Query<OverlayDeleteReq>,
+) -> ApiResult<Json<Value>> {
+    let core = lock(&state);
+    podic_core::store::overlay_delete(&core.conn, &req.lang, &req.headword, &req.kind)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub async fn save_overlay(
     State(state): State<AppState>,
     Json(req): Json<OverlaySaveReq>,
