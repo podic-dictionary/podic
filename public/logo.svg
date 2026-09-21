@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="podic-title">
+  <title id="podic-title">Podic</title>
+  <path fill="#059669" d="M144 0h224c104 0 144 40 144 144v224c0 104-40 144-144 144H144C40 512 0 472 0 368V144C0 40 40 0 144 0Z"/>
+  <g fill="#fff">
+    <path d="M96 144c52-14 102-8 148 20v212c-46-28-96-34-148-20Z"/>
+    <path d="M268 164c46-28 96-34 148-20v212c-52-14-102-8-148 20Z"/>
+  </g>
+  <g fill="none" stroke="#059669" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m140 282 32-76 32 76m-51-28h38"/>
+    <path d="M340 202v18m-36 0h72m-16 0c-4 28-23 52-54 66m16-48c10 20 27 36 52 48"/>
+  </g>
+</svg>

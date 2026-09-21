@@ -1,0 +1,282 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- 全局色板：朱砂印谱 ----------
+   瓷青灰阶（zinc）+ 朱砂主色（emerald 位）+ 石青（violet 位，AI 区）+ 藤金（amber 位）。
+   危险色（red 位）换成冷调酒绛，与朱砂主色区分。
+   一处定义，全站所有以这些色名开头的工具类自动跟随。 */
+@theme {
+  --color-zinc-50: #f7f9f4;
+  --color-zinc-100: #eef1ea;
+  --color-zinc-200: #dfe4da;
+  --color-zinc-300: #c6cdc0;
+  --color-zinc-400: #99a294;
+  --color-zinc-500: #6d766b;
+  --color-zinc-600: #525a51;
+  --color-zinc-700: #3c423b;
+  --color-zinc-800: #292e29;
+  --color-zinc-900: #1c211d;
+  --color-zinc-950: #11150f;
+
+  --color-emerald-50: #fdf3ef;
+  --color-emerald-100: #fae2d8;
+  --color-emerald-200: #f4c4b1;
+  --color-emerald-300: #ea9c7f;
+  --color-emerald-400: #dd6f45;
+  --color-emerald-500: #d0502a;
+  --color-emerald-600: #bf3a18;
+  --color-emerald-700: #9e2f13;
+  --color-emerald-800: #7c2610;
+  --color-emerald-900: #5a1d0c;
+  --color-emerald-950: #330f06;
+
+  --color-violet-50: #eef3fe;
+  --color-violet-100: #dce6fc;
+  --color-violet-200: #bccff9;
+  --color-violet-300: #8fadf2;
+  --color-violet-400: #5f85e8;
+  --color-violet-500: #3f66d8;
+  --color-violet-600: #2f54c0;
+  --color-violet-700: #27439c;
+  --color-violet-800: #22397c;
+  --color-violet-900: #1f315f;
+  --color-violet-950: #131c33;
+
+  --color-amber-50: #fdf7e7;
+  --color-amber-100: #faecc4;
+  --color-amber-200: #f6e09b;
+  --color-amber-300: #f2d478;
+  --color-amber-400: #e9bc3f;
+  --color-amber-500: #d9a516;
+  --color-amber-600: #b8870f;
+  --color-amber-700: #96690b;
+  --color-amber-800: #6f4d08;
+  --color-amber-900: #472f06;
+  --color-amber-950: #2c1e04;
+
+  --color-red-50: #fdf2f4;
+  --color-red-100: #fbe0e5;
+  --color-red-200: #f6c2cb;
+  --color-red-300: #ef9aa8;
+  --color-red-400: #e04f63;
+  --color-red-500: #cf2745;
+  --color-red-600: #b31d3a;
+  --color-red-700: #941a33;
+  --color-red-800: #741529;
+  --color-red-900: #54101f;
+  --color-red-950: #2e0911;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+/* 应用式布局：整页不滚动，只有内容区滚动（内容不足一屏时无滚动反馈） */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* ---------- 设计语言：朱砂印谱 ----------
+   词典衬线（系统衬线栈，零外部依赖）+ 瓷青/松烟氛围底 + 印章细节 */
+:root {
+  --font-dict: Georgia, "Iowan Old Style", "Times New Roman", "Songti SC", "STSong",
+    "Noto Serif CJK SC", "SimSun", serif;
+}
+
+/* 词典衬线：词条头、例句原文、大号数字 */
+.font-dict {
+  font-family: var(--font-dict);
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+/* 文本选中与焦点：朱砂印泥色 */
+::selection {
+  background: rgb(191 58 24 / 0.16);
+}
+.dark ::selection {
+  background: rgb(221 111 69 / 0.32);
+}
+:focus-visible {
+  outline: 2px solid rgb(191 58 24 / 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 滚动条：细而淡 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(198 205 192 / 0.9) transparent;
+}
+.dark * {
+  scrollbar-color: rgb(60 66 59 / 0.9) transparent;
+}
+
+/* 氛围底：亮色 = 瓷青底 + 青瓷/朱砂/金三向晕染；暗色 = 松烟墨绿夜底 + 玉光/炭火微晕。
+   body::before 渐变，body::after 极淡噪点，均 fixed 不随内容滚动。 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(50rem 26rem at 12% -10%, rgb(63 145 118 / 0.09), transparent 60%),
+    radial-gradient(44rem 20rem at 96% -6%, rgb(191 58 24 / 0.06), transparent 55%),
+    radial-gradient(60rem 30rem at 50% 115%, rgb(217 165 22 / 0.05), transparent 60%),
+    linear-gradient(to bottom, #f8faf3, #edf0e9);
+}
+.dark body::before {
+  background:
+    radial-gradient(52rem 26rem at 14% -10%, rgb(72 187 154 / 0.08), transparent 60%),
+    radial-gradient(40rem 18rem at 92% -6%, rgb(221 111 69 / 0.07), transparent 55%),
+    radial-gradient(60rem 30rem at 50% 118%, rgb(47 84 192 / 0.06), transparent 62%),
+    linear-gradient(to bottom, #101612, #0b100d);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.dark body::after {
+  opacity: 0.05;
+}
+
+/* 卡片基调：细边框 + 双层柔和阴影；hover 轻浮起 */
+.podic-card {
+  border: 1px solid rgb(198 205 192 / 0.7);
+  box-shadow:
+    0 1px 2px rgb(28 33 29 / 0.04),
+    0 12px 32px -20px rgb(28 33 29 / 0.16);
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.35s;
+}
+.podic-card:hover {
+  transform: translateY(-2px);
+  border-color: rgb(176 186 168 / 0.9);
+  box-shadow:
+    0 1px 2px rgb(28 33 29 / 0.05),
+    0 18px 44px -20px rgb(28 33 29 / 0.22);
+}
+.dark .podic-card {
+  border-color: rgb(52 62 55 / 0.8);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 12px 32px -18px rgb(0 0 0 / 0.5);
+}
+.dark .podic-card:hover {
+  border-color: rgb(74 86 77);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.35),
+    0 18px 44px -18px rgb(0 0 0 / 0.6);
+}
+
+/* 印章：header 品牌、空态落款。盖印微倾，hover 回正 */
+.seal {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.375rem;
+  background: linear-gradient(145deg, #d0502a, #9e2f13);
+  color: #fdf3ef;
+  font-family: var(--font-dict);
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow:
+    0 2px 6px rgb(158 47 19 / 0.35),
+    inset 0 0 0 1.5px rgb(253 243 239 / 0.28);
+  transform: rotate(-3deg);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  user-select: none;
+}
+.seal:hover {
+  transform: rotate(0deg) scale(1.04);
+}
+
+/* 竖排落款：查词空态（CJK 词典的记忆点）。
+   不用 writing-mode（headless/旧 WebView 缺竖排字体度量会叠字），逐字 flex 列足够稳 */
+.motto-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8em;
+  font-family: var(--font-dict);
+  color: rgb(109 118 107 / 0.45);
+  user-select: none;
+}
+.dark .motto-col {
+  color: rgb(153 162 148 / 0.4);
+}
+
+/* 结果卡入场：错峰淡入上移（查询返回时逐张浮现） */
+@keyframes podic-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.podic-enter {
+  animation: podic-enter 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .podic-enter {
+    animation: none;
+  }
+  .podic-card,
+  .podic-card:hover {
+    transform: none;
+  }
+}
+
+/* 眉批小标题：铅印式字距 */
+.eyebrow {
+  font-size: 0.6875rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* 朗读中声波跳动 */
+@keyframes podic-wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+.podic-wave {
+  animation: podic-wave 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+/* 操作手性：动作按钮行。
+   右手（默认）= row-reverse，主按钮贴最右、辅助文字在其左；
+   左手 = 覆盖回正常流向，主按钮贴最左。 */
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  /* 窄屏放不下时整项换行，不压缩按钮文字 */
+  flex-wrap: wrap;
+}
+.action-row > * {
+  flex: 0 0 auto;
+}
+html.hand-left .action-row {
+  flex-direction: row;
+  justify-content: flex-start;
+}

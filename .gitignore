@@ -1,0 +1,40 @@
+# data & build artifacts
+data/raw/
+data/work/
+packs/
+dist/
+podic-data/
+
+# node
+node_modules/
+
+# rust
+target/
+
+# env / secrets
+.env
+.env.*
+*.local.json
+
+# android（构建产物与大文件不进 git：签名资产在 ~/.config/podic 配置仓）
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/
+android/app/src/main/assets/web/
+android/app/src/main/assets/packs/
+android/.idea/
+*.apk
+*.aab
+
+# misc
+.DS_Store
+*.log
+__pycache__/
+*.pyc
+
+# ios 构建产物
+ios/Frameworks/
+ios/Resources/
+ios/Podic.xcodeproj/

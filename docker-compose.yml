@@ -1,0 +1,8 @@
+services:
+  podic:
+    build: .
+    container_name: podic
+    network_mode: host   # 本机 PVE 环境约定：host 网络避免端口映射问题
+    restart: unless-stopped
+    volumes:
+      - ./podic-data:/data

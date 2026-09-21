@@ -1,0 +1,61 @@
+# XcodeGen 工程描述：brew install xcodegen && xcodegen generate
+# 在 ios/ 目录下执行；依赖 Frameworks/PodicMobile.xcframework 与 Resources
+# （scripts/build-ios.sh 产出，仅 macOS）
+name: Podic
+options:
+  bundleIdPrefix: com.felix021
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Podic:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - path: Assets.xcassets
+      # folder reference 按 目录名/ 拷进 bundle 根：Podic.app/web、Podic.app/packs
+      # （ViewController 用 resourceURL/web、resourceURL/packs 定位）。
+      # 注意：必须写在 sources 段（buildPhase: resources）——XcodeGen 的 resources
+      # 段会静默忽略 type: folder，pbxproj 里连引用都不生成
+      - path: Resources/web
+        type: folder
+        buildPhase: resources
+      - path: Resources/packs
+        type: folder
+        buildPhase: resources
+    dependencies:
+      # podic_mobile 是静态库：只参与链接，embed 会让 .a 进 bundle（App Store 90171 拒审）
+      - framework: Frameworks/PodicMobile.xcframework
+        embed: false
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleDisplayName: Podic
+        # 深链接查询：podic://search?q=hi&lang=en（AppDelegate 接住转给 WebView）
+        CFBundleURLTypes:
+          - CFBundleURLName: cn.felix021.podic.search
+            CFBundleURLSchemes: [podic]
+        # TestFlight 合规问一次答一次：仅用系统自带的免申报加密
+        ITSAppUsesNonExemptEncryption: false
+        # iPhone 锁竖屏（词典）；iPad 多任务要求显式声明方向（ASC 90474）
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/bridging.h
+        PRODUCT_BUNDLE_IDENTIFIER: com.felix021.podic
+        DEVELOPMENT_TEAM: 6749ZYTN49
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "0.2.2"
+        CURRENT_PROJECT_VERSION: "1"
+        LIBRARY_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Frameworks/PodicMobile.xcframework/ios-arm64"
+        OTHER_LDFLAGS: "$(inherited) -lpodic_mobile -lc++"
