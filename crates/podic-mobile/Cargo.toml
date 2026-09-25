@@ -11,5 +11,3 @@ crate-type = ["cdylib", "staticlib"]
 podic-core = { path = "../podic-core" }
 podic-server = { path = "../podic-server" }
 jni = "0.21"
-axum.workspace = true
-tokio.workspace = true

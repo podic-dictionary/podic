@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Podic 主模块",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libpodic_ohos.so": "file:./src/main/cpp/types/libpodic_ohos"
+  }
+}

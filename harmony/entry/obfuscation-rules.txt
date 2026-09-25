@@ -1,0 +1,2 @@
+# 混淆规则（release 构建开启混淆时生效，当前默认关闭）
+-keep-global-name

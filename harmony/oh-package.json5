@@ -1,0 +1,8 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "Podic 鸿蒙壳（HarmonyOS NEXT）",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}

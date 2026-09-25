@@ -1,0 +1,10 @@
+{
+  "app": {
+    "bundleName": "com.felix021.podic",
+    "vendor": "felix021",
+    "versionCode": 2000000,
+    "versionName": "0.2.2",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

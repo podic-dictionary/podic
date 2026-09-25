@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/podic-core", "crates/podic-server", "crates/podic-mobile"]
+members = ["crates/podic-core", "crates/podic-server", "crates/podic-mobile", "crates/podic-ohos"]
 
 [workspace.package]
 version = "0.1.0"

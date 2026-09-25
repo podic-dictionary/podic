@@ -15,8 +15,9 @@
 └─────────────────────────────────────────┘
 ```
 
-- `crates/podic-server/src/lib.rs`：`init_state` / `build_router` / `serve`，桌面 bin 与移动壳共用
+- `crates/podic-server/src/lib.rs`：`init_state` / `build_router` / `serve` / `start_background`，桌面 bin 与移动壳共用
 - `crates/podic-mobile`：cdylib（Android JNI）+ staticlib（iOS C ABI `podic_start_server`），后台线程起 tokio，返回实际端口
+- `crates/podic-ohos`：cdylib（鸿蒙 NAPI `#[napi] startServer`），复用同一 `start_background`，详见 [docs/harmony.md](harmony.md)
 - 前端 `dist/` 与词典包随包分发：首启/升级拷到 `filesDir/data`（packs 缺才装，绝不覆盖用户数据）
 
 ## Android
@@ -56,3 +57,9 @@ ssh <your-mac-host> 'cd code/podic-ios-build && scripts/release-ios.sh'
   `buildPhase: resources`）；静态库 xcframework 勿 embed（.a 进 bundle App Store 拒审）；
   ASC 校验要求 1024 App 图标（90022）与 UISupportedInterfaceOrientations（90474）；
   ssh 无头签名要先解锁 keychain 并 set-key-partition-list 放行 codesign
+
+## 鸿蒙（HarmonyOS NEXT）
+
+同一 `start_background` + ArkUI `Web` 组件加载 `127.0.0.1`，Rust 侧用 NAPI（`napi-ohos`）暴露
+`startServer`。工程在 `harmony/`，构建 `scripts/build-harmony.sh`。完整环境准备、构建步骤与
+待真机验证清单见 [docs/harmony.md](harmony.md)。

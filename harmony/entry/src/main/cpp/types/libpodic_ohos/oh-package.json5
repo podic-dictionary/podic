@@ -1,0 +1,6 @@
+{
+  "name": "libpodic_ohos.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "Podic Rust 后端（NAPI）"
+}

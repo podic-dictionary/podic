@@ -83,10 +83,12 @@ export default function App() {
   useEffect(() => {
     const w = window as unknown as {
       PodicAndroid?: { setCanGoBack: (v: boolean) => void };
+      PodicHarmony?: { setCanGoBack: (v: boolean) => void };
       __podicGoBack?: () => void;
     };
     const canGoBack = view !== "search" || settingsSub !== null;
     w.PodicAndroid?.setCanGoBack(canGoBack);
+    w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
       if (settingsSub) setSettingsSub(null);
       else if (view !== "search") switchView("search");
