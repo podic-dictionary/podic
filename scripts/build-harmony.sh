@@ -45,6 +45,13 @@ chmod +x "$WRAP"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$PWD/$WRAP"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_AR="$SDK/native/llvm/bin/llvm-ar"
 
+# C 依赖（ring/libsqlite3-sys 等）同样要交叉编译：cc crate 找不到目标编译器会
+# 静默回退宿主 cc，产出错误架构的 .o（链接期报 incompatible with aarch64linux）。
+# wrapper 同时可作编译驱动（clang 见 -c 会编译），直接复用。
+export CC_aarch64_unknown_linux_ohos="$PWD/$WRAP"
+export CXX_aarch64_unknown_linux_ohos="$PWD/$WRAP"
+export AR_aarch64_unknown_linux_ohos="$SDK/native/llvm/bin/llvm-ar"
+
 echo "[1/4] 前端构建"
 npx vite build
 
@@ -56,6 +63,7 @@ cp "target/$RUST_TARGET/release/libpodic_ohos.so" harmony/entry/libs/arm64-v8a/
 
 echo "[3/4] 资源：dist 前端 + 词典包 -> rawfile"
 RAWFILE=harmony/entry/src/main/resources/rawfile
+mkdir -p "$RAWFILE" # 首次构建时该目录不存在（rawfile 内容不入库）
 rm -rf "$RAWFILE/web"
 cp -r dist "$RAWFILE/web"
 mkdir -p "$RAWFILE/packs"
