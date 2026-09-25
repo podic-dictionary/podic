@@ -56,6 +56,9 @@ App 内「词典包 → 检查更新」读取 manifest 直链（`releases/latest
 src/                 React 前端（查词 / 翻译 / 生词本 / 词典包 / 设置）
 crates/podic-core    纯库：词典包管理、五级查询（精确/屈折/FTS/前缀/中文反查）、AI 双协议客户端
 crates/podic-server  Axum HTTP 壳（SSE 流式：AI 与下载进度）
+crates/podic-mobile  移动壳：Android JNI + iOS C ABI
+crates/podic-ohos    鸿蒙壳：HarmonyOS NEXT NAPI（见 docs/harmony.md）
+android/ ios/ harmony/  三端宿主工程（WebView + 本地后端）
 scripts/pipeline/    Python 数据管道（下载/清洗/建包/精修/发布）
 packs/               构建产物 podic-{en,fr,ja}-<ver>.db + manifest.json
 ```

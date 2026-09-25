@@ -1,0 +1,15 @@
+# 鸿蒙构建产物（.so 与资源由 scripts/build-harmony.sh 生成，不进 git）
+/build/
+/.hvigor/
+/.cxx/
+/oh_modules/
+/.idea/
+/local.properties
+/entry/build/
+/entry/oh_modules/
+/entry/.preview/
+/entry/libs/
+/entry/src/main/resources/rawfile/web/
+/entry/src/main/resources/rawfile/packs/
+/entry/src/main/resources/rawfile/web-manifest.json
+/entry/src/main/resources/rawfile/packs-manifest.json

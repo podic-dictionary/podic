@@ -1,0 +1,19 @@
+[package]
+name = "podic-ohos"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "podic_ohos"
+crate-type = ["cdylib"]
+
+[dependencies]
+podic-server = { path = "../podic-server" }
+
+# 仅鸿蒙目标引入 NAPI 绑定（宿主构建不拉 ohos 相关依赖）
+[target.'cfg(target_env = "ohos")'.dependencies]
+napi-ohos = { version = "1.2", default-features = false, features = ["napi8"] }
+napi-derive-ohos = "1.2"
+
+[build-dependencies]
+napi-build-ohos = "1.2"

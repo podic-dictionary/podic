@@ -106,11 +106,13 @@ export default function App() {
   useEffect(() => {
     const w = window as unknown as {
       PodicAndroid?: { setCanGoBack: (v: boolean) => void };
+      PodicHarmony?: { setCanGoBack: (v: boolean) => void };
       __podicGoBack?: () => void;
     };
     // 查词根且无二级页才交给壳直接退出；阅读文章内返回（回列表）走 __podicGoBack
     const canGoBack = view !== "search" || settingsSub !== null;
     w.PodicAndroid?.setCanGoBack(canGoBack);
+    w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
       if (settingsSub) setSettingsSub(null);
       else if (view === "reading" && articleId !== null) setArticleId(null);

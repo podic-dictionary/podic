@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Podic offline dictionary"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Podic offline dictionary"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Podic"
+    }
+  ]
+}

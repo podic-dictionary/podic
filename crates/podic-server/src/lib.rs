@@ -9,7 +9,7 @@ pub use state::{AppState, Core};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// 初始化数据目录并装配 AppState（打开 app.db、挂载词典包、读设置）
 pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error>> {
@@ -92,4 +92,72 @@ pub async fn serve(addr: &str, data_dir: PathBuf, dist_dir: PathBuf) -> Result<(
     println!("podic server listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// 在后台线程启动完整后端（静态前端取自 `data_dir/web`），返回实际监听端口。
+///
+/// - `port <= 0` 时由内核挑空闲端口
+/// - 幂等：重复调用返回首次启动的端口；绑定/启动失败返回 -1
+///
+/// 供移动端壳复用：Android JNI / iOS C ABI / 鸿蒙 NAPI 都据此在设备内起本地服务，
+/// 宿主 WebView 再加载 `http://127.0.0.1:{port}`。
+pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
+    static STARTED: OnceLock<u16> = OnceLock::new();
+    if let Some(p) = STARTED.get() {
+        return *p as i32;
+    }
+    let dist_dir = data_dir.join("web");
+
+    // 先用 std listener 绑定拿实际端口，再交给 tokio
+    let addr = format!("127.0.0.1:{}", if port > 0 { port } else { 0 });
+    let std_listener = match std::net::TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("podic bind {addr}: {e}");
+            return -1;
+        }
+    };
+    let actual = std_listener.local_addr().map(|a| a.port()).unwrap_or(0);
+    if STARTED.set(actual).is_err() {
+        return STARTED.get().map(|p| *p as i32).unwrap_or(-1);
+    }
+
+    std::thread::Builder::new()
+        .name("podic-server".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("podic tokio runtime: {e}");
+                    return;
+                }
+            };
+            rt.block_on(async move {
+                let listener = match tokio::net::TcpListener::from_std(std_listener) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("podic listener: {e}");
+                        return;
+                    }
+                };
+                let state = match init_state(&data_dir) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("podic init state: {e}");
+                        return;
+                    }
+                };
+                let app = build_router(state, &dist_dir);
+                if let Err(e) = axum::serve(listener, app).await {
+                    eprintln!("podic serve: {e}");
+                }
+            });
+        })
+        .ok();
+
+    actual as i32
 }
