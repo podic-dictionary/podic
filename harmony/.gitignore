@@ -13,3 +13,7 @@
 /entry/src/main/resources/rawfile/packs/
 /entry/src/main/resources/rawfile/web-manifest.json
 /entry/src/main/resources/rawfile/packs-manifest.json
+
+.build/
+.sign-profile.json
+.sign-profile.p7b

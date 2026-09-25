@@ -59,7 +59,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.felix021.podic
         DEVELOPMENT_TEAM: 6749ZYTN49
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.2.3"
+        MARKETING_VERSION: "1.1"
         CURRENT_PROJECT_VERSION: "1"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Frameworks/PodicMobile.xcframework/ios-arm64"
         OTHER_LDFLAGS: "$(inherited) -lpodic_mobile -lc++"
