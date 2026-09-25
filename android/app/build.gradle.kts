@@ -29,8 +29,8 @@ android {
         applicationId = "com.felix021.podic"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.2.2"
+        versionCode = 7
+        versionName = "0.2.3"
         ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
     }
 
@@ -45,6 +45,10 @@ android {
     }
 
     buildTypes {
+        // debug = dev 包：包名 .dev 后缀、桌面名 Podic Dev（见 src/debug/res），可与正式版共存
+        getByName("debug") {
+            applicationIdSuffix = ".dev"
+        }
         getByName("release") {
             isMinifyEnabled = false
             val releaseStore = podicEnv("PODIC_RELEASE_KEYSTORE")

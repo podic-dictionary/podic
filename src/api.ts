@@ -1,5 +1,5 @@
 // 唯一的 HTTP 出口：所有后端调用都从这里走
-import type { Entry, PackInfo, Sentence, SuggestItem } from "./types";
+import type { ArticleFull, ArticleMeta, Entry, PackInfo, Sentence, SuggestItem, UserDictEntry, WordStatus } from "./types";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`/api${path}`, init);
@@ -157,6 +157,7 @@ export interface ProviderView {
   base_url: string;
   models: string[];
   active_model: string;
+  labels?: Record<string, string>;
   has_key: boolean;
 }
 
@@ -203,10 +204,81 @@ export const addFavorite = (f: {
 export const removeFavorite = (id: number) =>
   api<{ ok: boolean }>(`/favorites/${id}`, { method: "DELETE" });
 
+// ---- 阅读：文章 / 用户词典 / 生词标记 ----
+
+/** 抓取网页正文（后端 Readability 提取；SPA 页面会 422 提示手动粘贴） */
+export const fetchArticleFromUrl = (url: string) =>
+  api<{ title: string; content: string; chars: number }>("/reader/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+
+/** 对已渲染 HTML 提正文（移动壳原生渲染 SPA 后走这里） */
+export const extractFromHtml = (url: string, html: string) =>
+  api<{ title: string; content: string; chars: number }>("/reader/extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, html }),
+  });
+
+export const listArticles = () =>
+  api<{ articles: ArticleMeta[] }>("/articles").then((r) => r.articles);
+
+export const getArticle = (id: number) =>
+  api<{ article: ArticleFull }>(`/articles/${id}`).then((r) => r.article);
+
+export const createArticle = (lang: string, title: string, content: string) =>
+  api<{ article: ArticleFull }>("/articles", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lang, title, content }),
+  }).then((r) => r.article);
+
+export const deleteArticle = (id: number) =>
+  api<{ ok: boolean }>(`/articles/${id}`, { method: "DELETE" });
+
+export const listUserDict = (lang?: string, q = "") =>
+  api<{ entries: UserDictEntry[] }>(`/user-dict?${qs({ lang, q })}`).then((r) => r.entries);
+
+export const saveUserDict = (o: {
+  lang: string;
+  headword: string;
+  reading?: string;
+  pos?: string[];
+  senses: unknown[];
+  source?: string;
+  model?: string;
+  /** 点词时的 surface norm（屈折形镜像，供下次直接命中） */
+  alt_norm?: string;
+  /** 生成该词条的 ai_cache key（done 事件下发），删词条时服务端连带清缓存 */
+  cache_key?: string;
+}) => api<{ id: number; created: boolean }>("/user-dict", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(o),
+});
+
+export const deleteUserDict = (id: number) =>
+  api<{ ok: boolean }>(`/user-dict/${id}`, { method: "DELETE" });
+
+/** 全量生词标记 {norm: status}（表小） */
+export const getWordStatus = (lang: string) =>
+  api<{ statuses: Record<string, WordStatus> }>(`/word-status?lang=${encodeURIComponent(lang)}`).then((r) => r.statuses);
+
+export const setWordStatus = (lang: string, norm: string, status: WordStatus | "none") =>
+  api<{ ok: boolean }>("/word-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lang, norm, status }),
+  });
+
 // ---- AI（SSE 流式） ----
 
+export type AiTask = "explain" | "examples" | "translate" | "fallback" | "complete" | "analyze";
+
 export interface AiRunParams {
-  task: "explain" | "examples" | "translate" | "fallback";
+  task: AiTask;
   text: string;
   context?: unknown;
   provider_id: string;
@@ -217,7 +289,8 @@ export interface AiRunParams {
 
 export interface AiStreamHandle {
   cancel: () => void;
-  done: Promise<void>;
+  /** 正常结束 resolve，带服务端 done 事件的 cache_key（入库类任务存下来，删词条可连带清缓存）；取消/出错 resolve null */
+  done: Promise<string | null>;
 }
 
 export function aiRun(
@@ -226,6 +299,7 @@ export function aiRun(
 ): AiStreamHandle {
   const controller = new AbortController();
   let taskId: string | null = null;
+  let cacheKey: string | null = null;
 
   const done = (async () => {
     const resp = await fetch("/api/ai/run", {
@@ -237,13 +311,15 @@ export function aiRun(
     if (!resp.ok || !resp.body) throw new Error(`${resp.status}: ${await resp.text().catch(() => resp.statusText)}`);
 
     await readSSE(resp, (ev) => {
-      const e = ev as { type: string; text?: string; message?: string; task_id?: string };
+      const e = ev as { type: string; text?: string; message?: string; task_id?: string; cache_key?: string };
       if (e.type === "start") taskId = e.task_id ?? null;
       else if (e.type === "delta") onDelta(e.text ?? "");
       else if (e.type === "error") throw new Error(e.message);
+      else if (e.type === "done") cacheKey = e.cache_key ?? null;
       // done 结束本流
       if (e.type === "done") return "stop";
     });
+    return cacheKey;
   })();
 
   return {

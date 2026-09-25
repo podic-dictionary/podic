@@ -1,5 +1,5 @@
 export type Lang = "en" | "fr" | "ja";
-export type View = "search" | "translate" | "favorites" | "settings";
+export type View = "search" | "translate" | "reading" | "favorites" | "settings";
 
 export interface PackInfo {
   lang: Lang;
@@ -31,7 +31,7 @@ export interface Entry {
   freq: number;
   senses?: Sense[];
   extra?: { tags?: string[]; collins?: number; oxford?: number; refined?: boolean; source?: string };
-  matched_by: "exact" | "form" | "fts" | "prefix" | "zh" | "zh-fts";
+  matched_by: "exact" | "form" | "user" | "fts" | "prefix" | "zh" | "zh-fts";
   rule?: string;
 }
 
@@ -45,4 +45,44 @@ export interface Sentence {
   id: number;
   text: string;
   translation: string[];
+}
+
+// ---------------- 阅读 ----------------
+
+/** 服务端分词产物（段落 → token）；norm 为空串表示非词 */
+export interface ReaderToken {
+  t: string;
+  is_word: boolean;
+  norm: string;
+  space_after: boolean;
+}
+
+export interface ArticleMeta {
+  id: number;
+  lang: Lang;
+  title: string;
+  char_count: number;
+  token_count: number;
+  created_at: string;
+}
+
+export interface ArticleFull extends ArticleMeta {
+  content: string;
+  paragraphs: ReaderToken[][];
+}
+
+export type WordStatus = "known" | "new";
+
+/** 用户词典（AI 阅读补录，词典扩充源） */
+export interface UserDictEntry {
+  id: number;
+  lang: Lang;
+  norm: string;
+  headword: string;
+  reading: string | null;
+  pos: string | null;
+  senses: string;
+  source: string;
+  model: string | null;
+  created_at: string;
 }

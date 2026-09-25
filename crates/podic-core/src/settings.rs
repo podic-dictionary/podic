@@ -15,6 +15,9 @@ pub struct ProviderConfig {
     pub api_key: String,
     pub models: Vec<String>,
     pub active_model: String,
+    /// 模型展示名称（real model name -> 显示别名），缺省用原名
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

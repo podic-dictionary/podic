@@ -28,6 +28,11 @@ PKG = "com.felix021.podic"
 AAB = "android/app/build/outputs/bundle/release/app-release.aab"
 ASSETS = "store-assets/play"
 TRACK = "alpha"  # 老版 API 轨道名，Console 里显示为「封闭测试」（closed 会 404）
+VERSION = json.load(open("package.json"))["version"]
+RELEASE_NOTES = [
+    {"language": "zh-CN", "text": "新增「阅读」视图：粘贴文章逐词点读，缺词 AI 补录进用户词典，划选 AI 解析，生词/认识标记。"},
+    {"language": "en-US", "text": "New Reading view: paste an article for tap-to-lookup reading, AI fills missing words into your dictionary, selection AI analysis, and known/new word marking."},
+]
 
 sa = json.load(open(SA_PATH))
 proxy = os.environ["PODIC_PROXY"]  # 访问 googleapis 用的代理（如 http://<proxy-host>:7890）
@@ -139,7 +144,7 @@ else:
                  raw=open(AAB, "rb").read(), ctype="application/octet-stream")
     vc = bundle["versionCode"]
     print(f"[2] AAB 上传 ✓ versionCode={vc} ({size // 1048576}MB)")
-track_body = {"track": TRACK, "releases": [{"name": f"0.2.2 ({vc})", "versionCodes": [vc], "status": "draft"}]}
+track_body = {"track": TRACK, "releases": [{"name": f"{VERSION} ({vc})", "versionCodes": [vc], "status": "draft", "releaseNotes": RELEASE_NOTES}]}
 api("PUT", f"edits/{edit_id}/tracks/{TRACK}", track_body)
 print(f"[2] 轨道 {TRACK} 挂 versionCode={vc}（draft）✓")
 

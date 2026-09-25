@@ -17,3 +17,5 @@ serde.workspace = true
 serde_json.workspace = true
 tokio-stream.workspace = true
 sha2.workspace = true
+dom_smoothie = "0.18.2"
+reqwest = { workspace = true, features = ["http2"] }

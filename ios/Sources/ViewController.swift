@@ -3,14 +3,19 @@ import WebKit
 
 /// WKWebView 指向设备内 podic 后端（127.0.0.1:{port}）。
 /// 首启把 Bundle 里的 web/ 与 packs/*.db 落到 Documents/data（packs 不覆盖已有文件）。
-class ViewController: UIViewController, WKNavigationDelegate {
+class ViewController: UIViewController, WKNavigationDelegate, WKScriptMessageHandler {
     private(set) var webView: WKWebView!
     /// 待执行的深链接查询（podic:// URL / launch 参数 -search hi -lang en），页面加载完后执行
     var pendingSearch: (query: String, lang: String?)?
+    /// SPA 渲染用的离屏 WebView（同屏只留一个，新请求会换掉旧的）
+    private var renderView: WKWebView?
+    /// 进行中渲染请求的 token（换请求/超时后置空，迟到回调靠它丢弃）
+    private var renderToken: String?
 
     override func loadView() {
         webView = WKWebView(frame: .zero)
         webView.navigationDelegate = self
+        webView.configuration.userContentController.add(self, name: "podicRender")
         view = webView
     }
 
@@ -66,7 +71,74 @@ class ViewController: UIViewController, WKNavigationDelegate {
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        MainActor.assumeIsolated { self.flushPendingSearch() }
+        MainActor.assumeIsolated {
+            if webView === self.webView {
+                self.flushPendingSearch()
+            } else {
+                self.renderViewDidFinish(webView)
+            }
+        }
+    }
+
+    // MARK: - SPA 原生渲染（阅读抓取 fallback）
+    // JS 调 webkit.messageHandlers.podicRender.postMessage({url, token})；
+    // 渲染完成后回 window.__podicRenderResult(token, html)。空 html 表示失败/超时
+
+    nonisolated func userContentController(_ userContentController: WKUserContentController,
+                                           didReceive message: WKScriptMessage) {
+        guard message.name == "podicRender",
+              let m = message.body as? [String: String],
+              let url = m["url"], let token = m["token"] else { return }
+        MainActor.assumeIsolated { self.startRender(url: url, token: token) }
+    }
+
+    private func startRender(url: String, token: String) {
+        renderView?.navigationDelegate = nil
+        renderView = nil
+        renderToken = nil
+
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844)) // 离屏，给个常规视口尺寸
+        wv.navigationDelegate = self
+        renderView = wv
+        renderToken = token
+
+        wv.load(URLRequest(url: URL(string: url)!))
+        // 总超时兜底
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            if self?.renderToken == token { self?.finishRender("") }
+        }
+    }
+
+    private func renderViewDidFinish(_ wv: WKWebView) {
+        // SPA hydration 等待；具体站点的渲染时长玄学，先固定 2.5s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            wv.evaluateJavaScript("document.documentElement.outerHTML") { result, _ in
+                MainActor.assumeIsolated {
+                    // token/视图已被新请求换掉时静默丢弃
+                    if self?.renderView === wv { self?.finishRender(result as? String ?? "") }
+                }
+            }
+        }
+    }
+
+    private func finishRender(_ html: String) {
+        guard let token = renderToken else { return }
+        renderToken = nil
+        webView.evaluateJavaScript(
+            "window.__podicRenderResult?.(\(Self.jsJson(token)), \(Self.jsJson(html)))",
+            completionHandler: nil
+        )
+        renderView?.navigationDelegate = nil
+        renderView = nil
+    }
+
+    /// 字符串 -> JS 字面量（JSON 编码去数组括号）
+    private static func jsJson(_ s: String) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]),
+              var str = String(data: data, encoding: .utf8), str.count >= 2 else { return "\"\"" }
+        str.removeFirst()
+        str.removeLast()
+        return str
     }
 
     /// Bundle Resources/web 与 Resources/packs -> Documents/data

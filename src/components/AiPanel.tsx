@@ -5,37 +5,10 @@ import { deleteOverlay, getOverlay, saveOverlay, type OverlayEntry } from "../ap
 import ConfirmDialog from "./ConfirmDialog";
 import ModelPicker from "./ModelPicker";
 import Markdown from "./Markdown";
-import { TrashIcon } from "./icons";
+import { CopyIcon, TrashIcon } from "./icons";
+import { copyText } from "./clipboard";
 import type { Entry } from "../types";
 import { entrySummary } from "./entrySummary";
-
-/// 复制到剪贴板。iOS WKWebView 里 navigator.clipboard 常缺失或被拒，
-/// 统一走「clipboard API → 隐藏 textarea + execCommand」两级兜底
-async function copyText(t: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(t);
-      return true;
-    }
-  } catch {
-    // 落入 execCommand 兜底
-  }
-  const ta = document.createElement("textarea");
-  ta.value = t;
-  ta.style.position = "fixed";
-  ta.style.opacity = "0";
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  let ok = false;
-  try {
-    ok = document.execCommand("copy");
-  } catch {
-    ok = false;
-  }
-  document.body.removeChild(ta);
-  return ok;
-}
 
 const TABS: { id: "explain" | "examples" | "fallback"; label: string; hint: string }[] = [
   { id: "explain", label: "深度讲解", hint: "词义 · 词源 · 辨析 · 搭配" },
@@ -61,6 +34,14 @@ function tryParseExamples(text: string): { text: string; zh?: string }[] | null 
     if (saved.length > 0) return saved;
   }
   return null;
+}
+
+/// 拷贝用文本：渲染成什么样就拷什么样（例句 tab 原文是 JSON，转成 markdown 列表）
+function copyableText(tab: string, text: string): string {
+  if (tab !== "examples") return text;
+  const list = tryParseExamples(text);
+  if (!list) return text;
+  return list.map((s, i) => `${i + 1}. ${s.text}${s.zh ? `\n   ${s.zh}` : ""}`).join("\n");
 }
 
 function ExamplesView({ text }: { text: string }) {
@@ -99,7 +80,7 @@ export default function AiPanel({ entry }: { entry: Entry }) {
   useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
 
   const onCopy = async () => {
-    if (await copyText(text)) {
+    if (await copyText(copyableText(tab, text))) {
       setCopied(true);
       window.clearTimeout(copiedTimer.current);
       copiedTimer.current = window.setTimeout(() => setCopied(false), 1600);
@@ -240,7 +221,7 @@ export default function AiPanel({ entry }: { entry: Entry }) {
         className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900"
       />
 
-      <div className="action-row mt-2">
+      <div className="action-row mt-2 flex-wrap">
         <button
           onClick={go}
           disabled={!aiChoice.providerId}
@@ -256,28 +237,31 @@ export default function AiPanel({ entry }: { entry: Entry }) {
         {running && <span className="text-xs text-zinc-400">生成中…</span>}
         {!running && fromCache && overlays[tab] && (
           <span className="text-xs text-violet-500/80 dark:text-violet-400/70" title="AI 生成的结果已保存在本机，再次查看直接加载">
-            ✦ 已保存<span className="hidden sm:inline"> {overlays[tab].created_at.slice(0, 10)}</span>
+            ✦<span className="hidden sm:inline"> 已保存 {overlays[tab].created_at.slice(0, 10)}</span>
           </span>
         )}
         {!running && text && (
           <button
             onClick={onCopy}
-            className={`text-xs transition-colors ${
+            title="复制内容"
+            className={`flex items-center gap-1 text-xs transition-colors ${
               copied
                 ? "text-emerald-600 dark:text-emerald-400"
                 : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
             }`}
           >
-            {copied ? "已复制 ✓" : "复制"}
+            <CopyIcon size={12} />
+            <span className="hidden sm:inline">{copied ? "已复制 ✓" : "复制"}</span>
           </button>
         )}
         {!running && overlays[tab] && (
           <button
             onClick={() => setConfirmDelete(true)}
             title="删除这条 AI 生成结果"
-            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-500"
+            className="flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-red-500"
           >
-            <TrashIcon size={12} /> 删除
+            <TrashIcon size={12} />
+            <span className="hidden sm:inline">删除</span>
           </button>
         )}
       </div>

@@ -18,8 +18,15 @@ object AssetsInstaller {
         val installed = if (marker.isFile) marker.readText().trim() else null
         val upgraded = installed != code.toString()
 
-        if (upgraded) {
-            val web = File(dataDir, "web")
+        // web 按 index.html 指纹判断是否替换：vite 产物的资源名带内容 hash，前端有变
+        // index.html 必变。本地反复重打包（versionCode 不变）也能拿到新前端
+        val web = File(dataDir, "web")
+        val webStale = run {
+            val newHtml = runCatching { ctx.assets.open("web/index.html").use { it.readBytes() } }.getOrNull()
+            val oldHtml = runCatching { File(web, "index.html").takeIf { it.isFile }?.readBytes() }.getOrNull()
+            newHtml != oldHtml
+        }
+        if (webStale) {
             web.deleteRecursively()
             copyDir(ctx, "web", web)
         }

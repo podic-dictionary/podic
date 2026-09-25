@@ -61,6 +61,40 @@ pub fn build(task: &str, text: &str, context: Option<&Value>) -> Prompt {
             max_tokens: 3000,
             temperature: 0.2,
         },
+        // 阅读器点词补全：词典完全 miss 时生成结构化词条，入库用户词典。
+        // 严格 JSON（无围栏）：senses 每项必须含 zh（服务端入库前有 schema 校验）
+        "complete" => {
+            let ctx = context.cloned().unwrap_or(Value::Null);
+            let lang = ctx.get("lang").and_then(|v| v.as_str()).unwrap_or("");
+            let sentence = ctx.get("sentence").and_then(|v| v.as_str()).unwrap_or("");
+            Prompt {
+                system: "你是双语词典编纂者。只输出 JSON，不要围栏、不要多余文字。".into(),
+                user: format!(
+                    "查词典补全词条。词语：{text}（{lang}，{lang_name}）\n所在句：{sentence}\n\
+                     若是屈折形式，先还原原形。输出格式：\n\
+                     {{\"headword\": \"原形\", \"reading\": \"读音或假名，无则空串\", \"pos\": [\"词性缩写如 n./v./adj.\"], \"senses\": [{{\"pos\": [\"n.\"], \"zh\": \"中文释义\"}}], \"note\": \"一句话用法提示，可空串\"}}\n\
+                     senses 最多 3 条，每条必须含非空 zh。专有名词按 pos=[\"n.\"] 给一条释义。",
+                    lang_name = lang_name(lang),
+                ),
+                max_tokens: 600,
+                temperature: 0.2,
+            }
+        }
+        // 阅读器划选解析：整句/词组的翻译 + 语法解析 + 结合上下文的语境理解
+        "analyze" => {
+            let ctx = context.cloned().unwrap_or(Value::Null);
+            let pretty = serde_json::to_string(&ctx).unwrap_or_default();
+            Prompt {
+                system: "你是一位精通英法日三语的语言老师，面向中文母语者。用简体中文回答，Markdown，控制在 300 字内，不堆砌套话。".into(),
+                user: format!(
+                    "解析选中的内容：{text}\n上下文：\n```json\n{pretty}\n```\n\
+                     按以下三部分输出，用 ## 小标题：\n\
+                     ## 译文（整段翻译）\n## 解析（关键词汇、语法结构、固定搭配）\n## 语境（结合上下文说明这句话的作用与含义）"
+                ),
+                max_tokens: 1200,
+                temperature: 0.3,
+            }
+        }
         _ => {
             // fallback：词典缺释义时的兜底
             Prompt {

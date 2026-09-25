@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { aiRun, type AiStreamHandle } from "../api";
+import { aiRun, type AiStreamHandle, type AiTask } from "../api";
 
 const FLUSH_MS = 120;
 
@@ -27,10 +27,10 @@ export function useAiStream() {
 
   const run = useCallback(
     async (
-      task: "explain" | "examples" | "translate" | "fallback",
+      task: AiTask,
       input: string,
       opts?: { context?: unknown; provider_id?: string; model?: string; fresh?: boolean },
-      onDone?: (full: string) => void,
+      onDone?: (full: string, cacheKey: string | null) => void,
     ) => {
       handleRef.current?.cancel();
       pendingRef.current = "";
@@ -62,8 +62,8 @@ export function useAiStream() {
       );
       handleRef.current = handle;
       try {
-        await handle.done;
-        onDone?.(full);
+        const key = await handle.done;
+        onDone?.(full, key);
       } catch (e) {
         if (!`${e}`.includes("abort")) setError(e instanceof Error ? e.message : String(e));
       } finally {

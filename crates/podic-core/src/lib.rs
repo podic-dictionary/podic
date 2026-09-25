@@ -6,6 +6,7 @@ pub mod error;
 pub mod lookup;
 pub mod norm;
 pub mod packs;
+pub mod reader;
 pub mod settings;
 pub mod store;
 pub mod update;

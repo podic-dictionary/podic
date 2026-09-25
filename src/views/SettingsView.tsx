@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { attributions, saveSettings, testProvider } from "../api";
+import {
+  attributions, deleteUserDict, listUserDict, saveSettings, testProvider,
+} from "../api";
+import type { UserDictEntry } from "../types";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
   ChevronLeftIcon, EyeIcon, EyeOffIcon, PlusIcon, TrashIcon, XIcon, ZapIcon,
@@ -7,14 +10,19 @@ import {
 import PacksView from "./PacksView";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
+interface ModelRow {
+  name: string; // 真实模型名（发请求用）
+  label: string; // 展示名称（可空，仅用于界面显示）
+}
+
 interface Draft {
   id: string;
   name: string;
   protocol: "openai" | "anthropic";
   base_url: string;
   api_key: string;
-  models: string[]; // 逐行列表输入
-  active_model: string; // 不在表单展示，保存时透传
+  models: ModelRow[]; // 逐行列表输入
+  active_model: string; // 不在表单展示，保存时同步为列表第一项
 }
 
 const emptyDraft = (): Draft => ({
@@ -26,9 +34,11 @@ const emptyDraft = (): Draft => ({
   models: [],
   active_model: "",
 });
+const firstModel = (d: Draft) => d.models.map((r) => r.name.trim()).filter(Boolean)[0];
 
 const inputCls =
-  "w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-emerald-600";
+  "rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-emerald-600";
+const inputRow = `${inputCls} w-full`;
 
 const THEME_OPTS: { id: ThemeMode; label: string }[] = [
   { id: "light", label: "亮色" },
@@ -118,7 +128,104 @@ function SubHeader({
   );
 }
 
-export type SettingsSub = null | "ai" | "about" | "updates" | "packs";
+export type SettingsSub = null | "ai" | "about" | "updates" | "packs" | "userdict";
+
+/// AI 词典：阅读器里 AI 补录的词条（词典扩充源），可搜索/删除
+function UserDictPage({ onBack }: { onBack: () => void }) {
+  const [q, setQ] = useState("");
+  const [entries, setEntries] = useState<UserDictEntry[] | null>(null);
+  const [confirmDel, setConfirmDel] = useState<UserDictEntry | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      listUserDict(undefined, q.trim()).then(setEntries).catch(() => setEntries([]));
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  const firstZh = (e: UserDictEntry) => {
+    try {
+      const arr = JSON.parse(e.senses) as { zh?: string }[];
+      return arr.map((x) => x.zh).filter(Boolean).join("；");
+    } catch {
+      return "";
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl p-4">
+      <SubHeader title="AI 词典" onBack={onBack} />
+      <p className="mt-1 text-xs text-zinc-400">
+        阅读时遇到词典缺词，AI 自动补录到这里，之后查词/阅读直接命中
+      </p>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="搜索词条…"
+        className="mt-3 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-emerald-600"
+      />
+
+      {entries === null && <p className="py-8 text-center text-sm text-zinc-400">加载中…</p>}
+      {entries !== null && entries.length === 0 && (
+        <p className="py-8 text-center text-sm text-zinc-400">{q ? "无匹配词条" : "还没有补录词条"}</p>
+      )}
+
+      <ul className="mt-3 space-y-2">
+        {(entries ?? []).map((e) => {
+          let pos: string[] = [];
+          try {
+            pos = e.pos ? (JSON.parse(e.pos) as string[]) : [];
+          } catch { /* 忽略坏数据 */ }
+          return (
+            <li
+              key={e.id}
+              className="flex items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white/85 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/80"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">
+                  <span className="font-dict text-base">{e.headword}</span>
+                  {e.reading && <span className="ml-2 text-xs text-zinc-400">{e.reading}</span>}
+                  {pos.map((x) => (
+                    <span key={x} className="ml-2 rounded bg-emerald-50 px-1 py-0.5 text-xs text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                      {x}
+                    </span>
+                  ))}
+                  <span className="ml-2 rounded bg-zinc-100 px-1 py-0.5 text-xs text-zinc-400 dark:bg-zinc-800">{e.lang}</span>
+                </p>
+                <p className="mt-0.5 truncate text-xs text-zinc-400">{firstZh(e)}</p>
+              </div>
+              <button
+                onClick={() => setConfirmDel(e)}
+                title="删除词条"
+                className="p-2 text-zinc-300 transition-colors hover:text-red-500 dark:text-zinc-600"
+              >
+                <TrashIcon size={15} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <ConfirmDialog
+        open={confirmDel !== null}
+        title="删除这个词条？"
+        message={`「${confirmDel?.headword ?? ""}」将从 AI 词典移除，下次在阅读中点词会重新补录。`}
+        confirmText="删除"
+        onConfirm={() => {
+          if (confirmDel) {
+            const del = confirmDel;
+            deleteUserDict(del.id)
+              .then(() => setEntries((es) => es?.filter((x) => x.id !== del.id) ?? es))
+              .catch(() => {});
+          }
+          setConfirmDel(null);
+        }}
+        onCancel={() => setConfirmDel(null)}
+      />
+    </div>
+  );
+}
 
 export default function SettingsView({
   sub,
@@ -147,7 +254,7 @@ export default function SettingsView({
         providers.map((p) => ({
           ...p,
           api_key: p.has_key ? "••••••••" : "",
-          models: [...p.models],
+          models: p.models.map((m) => ({ name: m, label: p.labels?.[m] ?? "" })),
         })),
       );
       setManifest(manifestUrl);
@@ -167,7 +274,7 @@ export default function SettingsView({
     // 校验：填了内容的 Provider 必须有名称；全空的草稿静默跳过
     // （api_key 为掩码 "••••" 时表示已存有 key，要算作有内容，避免丢配置）
     const nonEmpty = (d: Draft) =>
-      Boolean(d.name.trim() || d.base_url.trim() || d.api_key.trim() || d.models.some((m) => m.trim()));
+      Boolean(d.name.trim() || d.base_url.trim() || d.api_key.trim() || d.models.some((r) => r.name.trim()));
     for (const d of drafts) {
       if (nonEmpty(d) && !d.name.trim()) {
         setStatus("请先填写 Provider 名称再保存");
@@ -180,7 +287,12 @@ export default function SettingsView({
         providers: drafts
           .filter(nonEmpty)
           .map((d) => {
-            const models = d.models.map((m) => m.trim()).filter(Boolean);
+            const models = d.models.map((r) => r.name.trim()).filter(Boolean);
+            const labels = Object.fromEntries(
+              d.models
+                .filter((r) => r.name.trim() && r.label.trim())
+                .map((r) => [r.name.trim(), r.label.trim()]),
+            );
             return {
               id: d.id,
               name: d.name.trim(),
@@ -188,6 +300,7 @@ export default function SettingsView({
               base_url: d.base_url.trim(),
               api_key: d.api_key.includes("•") ? "" : d.api_key,
               models,
+              labels,
               // 表单没有单独的默认模型入口：跟随模型列表第一项
               active_model: models[0] ?? "",
             };
@@ -212,7 +325,7 @@ export default function SettingsView({
       // （active_model 只在保存时同步，测试不能依赖它，否则新填的模型发不出去）
       if (!(await onSave())) return;
       setStatus("");
-      const model = d.models.map((m) => m.trim()).filter(Boolean)[0];
+      const model = firstModel(d);
       const r = await testProvider(id, model);
       setTestRes((m) => ({
         ...m,
@@ -288,7 +401,7 @@ export default function SettingsView({
                       value={d.base_url}
                       onChange={(e) => patch(d.id, { base_url: e.target.value })}
                       placeholder={d.protocol === "anthropic" ? "留空 = 官方 api.anthropic.com" : "如 https://api.openai.com/v1"}
-                      className={inputCls}
+                      className={inputRow}
                     />
                   </div>
                   <div>
@@ -299,7 +412,7 @@ export default function SettingsView({
                         onChange={(e) => patch(d.id, { api_key: e.target.value })}
                         placeholder="sk-…"
                         type={showKey[d.id] ? "text" : "password"}
-                        className={`${inputCls} pr-10`}
+                        className={`${inputRow} pr-10`}
                       />
                       <button
                         onClick={() => setShowKey((s) => ({ ...s, [d.id]: !s[d.id] }))}
@@ -313,15 +426,27 @@ export default function SettingsView({
                   <div>
                     <p className="mb-1 text-xs text-zinc-400">模型列表</p>
                     <div className="space-y-1.5">
-                      {d.models.map((m, i) => (
+                      {d.models.map((r, i) => (
                         <div key={i} className="flex items-center gap-1.5">
                           <input
-                            value={m}
+                            value={r.name}
                             onChange={(e) =>
-                              patch(d.id, { models: d.models.map((x, j) => (j === i ? e.target.value : x)) })
+                              patch(d.id, {
+                                models: d.models.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                              })
                             }
                             placeholder="model-name"
-                            className={inputCls}
+                            className={`${inputCls} min-w-0 flex-1`}
+                          />
+                          <input
+                            value={r.label}
+                            onChange={(e) =>
+                              patch(d.id, {
+                                models: d.models.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)),
+                              })
+                            }
+                            placeholder="展示名称（可选）"
+                            className={`${inputCls} w-28 shrink-0 text-xs`}
                           />
                           <button
                             onClick={() => patch(d.id, { models: d.models.filter((_, j) => j !== i) })}
@@ -334,7 +459,7 @@ export default function SettingsView({
                       ))}
                     </div>
                     <button
-                      onClick={() => patch(d.id, { models: [...d.models, ""] })}
+                      onClick={() => patch(d.id, { models: [...d.models, { name: "", label: "" }] })}
                       className="mt-1.5 flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
                     >
                       <PlusIcon size={12} /> 添加模型
@@ -387,6 +512,11 @@ export default function SettingsView({
         />
       </div>
     );
+  }
+
+  // ---- 二级页：AI 词典 ----
+  if (sub === "userdict") {
+    return <UserDictPage onBack={() => setSub(null)} />;
   }
 
   // ---- 二级页：词典包管理 ----
@@ -497,6 +627,7 @@ export default function SettingsView({
           hint={providers.length > 0 ? `${providers.length} 个` : "未配置"}
           onClick={() => setSub("ai")}
         />
+        <Row label="AI 词典" hint="阅读补录的词条" onClick={() => setSub("userdict")} />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
         <Row label="词典包更新源" hint={manifest ? "已配置" : "未配置"} onClick={() => setSub("updates")} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />

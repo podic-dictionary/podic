@@ -81,6 +81,29 @@ fn fts_escape(q: &str) -> String {
     format!("\"{}\"", q.replace('"', "\"\""))
 }
 
+/// 用户词典（AI 补录）条目转 Entry：负 id 避免与包内 id 撞 seen 键
+fn user_entry(ud: &crate::store::UserDictEntry) -> Entry {
+    let mut extra = serde_json::Map::new();
+    extra.insert("source".into(), Value::String(ud.source.clone()));
+    if let Some(m) = &ud.model {
+        extra.insert("model".into(), Value::String(m.clone()));
+    }
+    Entry {
+        lang: ud.lang.clone(),
+        entry_id: -ud.id,
+        headword: ud.headword.clone(),
+        reading: ud.reading.clone(),
+        ipa: None,
+        pos: parse_json(ud.pos.clone()),
+        gender: None,
+        freq: 0.0,
+        senses: parse_json(Some(ud.senses.clone())),
+        extra: Some(Value::Object(extra)),
+        matched_by: "user".into(),
+        rule: None,
+    }
+}
+
 pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) -> Result<Vec<Entry>> {
     let q = query.trim();
     if q.is_empty() {
@@ -106,7 +129,7 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
             vec![norm_q.clone()]
         };
 
-        // ① norm 精确 + ② form 屈折精确
+        // ① norm 精确 + ② form 屈折精确 + ②' user_dict（AI 补录）
         for cand in &candidates {
             let sql = format!("SELECT {SELECT_ENTRY} FROM {lang}.entry e WHERE e.norm = ?1");
             let mut stmt = conn.prepare(&sql)?;
@@ -131,6 +154,28 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
                 let e = r?;
                 if seen.insert((lang.clone(), e.entry_id)) {
                     out.push(e);
+                }
+            }
+
+            // 用户词典命中（norm 精确 + form 镜像）。包优先去重：仅当包里已有该 headword
+            // 且本次查询确实能经包解析到它（surface 就是它，或包 form 把 surface 指到它）时跳过；
+            // 包缺该屈折形时保留 user 词条——这正是 AI 补全的价值所在
+            let pack_covers = |ud_norm: &str| -> Result<bool> {
+                let sql = format!(
+                    "SELECT EXISTS(SELECT 1 FROM {lang}.entry e WHERE e.norm = ?1 \
+                     AND (e.norm = ?2 OR EXISTS(SELECT 1 FROM {lang}.form f WHERE f.form_norm = ?2 AND f.entry_id = e.id)))"
+                );
+                Ok(conn.query_row(&sql, rusqlite::params![ud_norm, cand], |r| r.get::<_, i64>(0))? == 1)
+            };
+            for src in [
+                crate::store::user_dict_by_norm(conn, lang, cand)?,
+                crate::store::user_dict_by_form(conn, lang, cand)?,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if seen.insert((lang.clone(), -src.id)) && !pack_covers(&src.norm)? {
+                    out.push(user_entry(&src));
                 }
             }
         }
@@ -189,7 +234,7 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
         }
     }
 
-    const PRIO: &[&str] = &["exact", "form", "fts", "prefix", "zh"];
+    const PRIO: &[&str] = &["exact", "form", "user", "fts", "prefix", "zh"];
     out.sort_by(|a, b| {
         let pa = PRIO.iter().position(|m| *m == a.matched_by).unwrap_or(9);
         let pb = PRIO.iter().position(|m| *m == b.matched_by).unwrap_or(9);
@@ -219,6 +264,15 @@ pub fn suggest(conn: &Connection, langs: &[String], prefix: &str, limit: usize) 
             Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
         })?;
         out.extend(rows.flatten());
+        // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描）
+        let sql = "SELECT headword, reading FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
+        if let Ok(mut stmt) = conn.prepare(sql) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![lang, lower, upper], |r| {
+                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
+            }) {
+                out.extend(rows.flatten());
+            }
+        }
     }
     Ok(out)
 }
@@ -289,4 +343,82 @@ pub fn examples(conn: &Connection, lang: &str, entry_id: i64, limit: usize) -> R
         })
     })?;
     Ok(rows.flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// 内存库 + init_app_db（user_dict 在 main）+ ATTACH 一个最小 en 包 schema
+    fn fixture() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::store::init_app_db(&conn).unwrap();
+        conn.execute("ATTACH ':memory:' AS en", []).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE en.entry(id INTEGER PRIMARY KEY, norm TEXT NOT NULL, headword TEXT NOT NULL,
+                reading TEXT, ipa TEXT, pos TEXT, gender TEXT, freq REAL NOT NULL DEFAULT 0, senses TEXT, extra TEXT);
+             CREATE TABLE en.form(form_norm TEXT NOT NULL, entry_id INTEGER NOT NULL, rule TEXT);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_entry(conn: &Connection, norm: &str, headword: &str, freq: f64) {
+        conn.execute(
+            "INSERT INTO en.entry(norm, headword, freq) VALUES (?1, ?2, ?3)",
+            rusqlite::params![norm, headword, freq],
+        )
+        .unwrap();
+    }
+
+    fn upsert_ud(conn: &Connection, headword: &str, senses: &str, alt_norm: Option<&str>) {
+        crate::store::user_dict_upsert(conn, "en", headword, None, None, senses, "ai", None, alt_norm, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn user_dict_hit_ranked_above_prefix() {
+        let conn = fixture();
+        upsert_ud(&conn, "blorp", r#"[{"pos":["n."],"zh":"测试词"}]"#, None);
+        insert_entry(&conn, "blorpish", "blorpish", 50.0);
+        let langs = vec!["en".to_string()];
+
+        let items = lookup(&conn, &langs, "blorp", 20).unwrap();
+        assert_eq!(items[0].matched_by, "user");
+        assert!(items[0].entry_id < 0);
+        assert_eq!(items[0].senses.as_ref().unwrap()[0]["zh"], "测试词");
+        assert_eq!(items[1].matched_by, "prefix");
+
+        // suggest 联想并入用户词典
+        let s = suggest(&conn, &langs, "blor", 10).unwrap();
+        assert!(s.iter().any(|x| x.headword == "blorp"));
+    }
+
+    #[test]
+    fn pack_entry_shadows_dup_user_dict() {
+        let conn = fixture();
+        insert_entry(&conn, "manger", "manger", 100.0);
+        // AI 补录 manger（包里已有）+ 屈折镜像 mangeait
+        upsert_ud(&conn, "manger", r#"[{"pos":["v."],"zh":"吃"}]"#, Some("mangeait"));
+        let langs = vec!["en".to_string()];
+
+        // surface 原形：包 exact 命中，user 平行弱词条被去重
+        let items = lookup(&conn, &langs, "manger", 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].entry_id > 0);
+
+        // 包缺 mangeait 这条屈折形：user 词条（form 镜像）应保留——AI 补全的价值所在
+        let items = lookup(&conn, &langs, "mangeait", 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].matched_by, "user");
+        assert_eq!(items[0].headword, "manger");
+
+        // 包补上该屈折形后：user 被去重，只剩包词条
+        conn.execute("INSERT INTO en.form(form_norm, entry_id, rule) VALUES ('mangeait', 1, 'impf')", [])
+            .unwrap();
+        let items = lookup(&conn, &langs, "mangeait", 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].matched_by, "form");
+    }
 }

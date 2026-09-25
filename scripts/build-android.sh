@@ -8,8 +8,10 @@ cd "$(dirname "$0")/.."
 BUILD_TYPE="${1:-debug}"
 case "$BUILD_TYPE" in
   bundle) GRADLE_TASK=bundleRelease; OUT_DIR=app/build/outputs/bundle/release ;;
+  # dev = debug 变体的显式别名：包名 com.felix021.podic.dev + 桌面名 Podic Dev，可与正式版共存
+  dev) GRADLE_TASK=assembleDebug; OUT_DIR=app/build/outputs/apk/debug ;;
   debug|release) GRADLE_TASK="assemble${BUILD_TYPE^}"; OUT_DIR=app/build/outputs/apk/$BUILD_TYPE ;;
-  *) echo "用法: $0 [debug|release|bundle]"; exit 1 ;;
+  *) echo "用法: $0 [dev|debug|release|bundle]"; exit 1 ;;
 esac
 export PODIC_CONFIG_DIR="${PODIC_CONFIG_DIR:-$HOME/.config/podic}"
 

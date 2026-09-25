@@ -1,6 +1,7 @@
 //! podic-server 库入口：装配 AppState / 路由，供桌面 bin 与移动端壳（podic-mobile）复用。
 
 pub mod error;
+pub mod reader_routes;
 pub mod routes;
 pub mod state;
 
@@ -24,11 +25,23 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
         println!("已挂载词典包: {} {} ({} 词条)", p.lang, p.version, p.entry_count);
     }
 
+    // ja 分词词表预热（UNION ~0.5s）：放进启动时，避免首篇 ja 文章保存时全局长持锁
+    let mut reader_vocab = HashMap::new();
+    if packs.langs().iter().any(|l| l == "ja") {
+        match podic_core::reader::build_vocab(&conn, "ja") {
+            Ok(v) => {
+                reader_vocab.insert("ja".to_string(), v);
+            }
+            Err(e) => eprintln!("ja 分词词表预热失败（将懒构建）: {e}"),
+        }
+    }
+
     let core = Core {
         conn,
         packs,
         settings: podic_core::settings::Settings::load(&data_dir.join("settings.json"))?,
         data_dir: data_dir.to_path_buf(),
+        reader_vocab,
     };
     Ok(AppState {
         core: Arc::new(Mutex::new(core)),
@@ -58,6 +71,14 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/ai/run", axum::routing::post(routes::ai_run))
         .route("/api/ai/cancel", axum::routing::post(routes::ai_cancel))
         .route("/api/ai/overlay", axum::routing::get(routes::get_overlay).post(routes::save_overlay).delete(routes::delete_overlay))
+        .route("/api/reader/tokenize", axum::routing::post(reader_routes::tokenize))
+        .route("/api/reader/fetch", axum::routing::post(reader_routes::fetch_article))
+        .route("/api/reader/extract", axum::routing::post(reader_routes::extract_article))
+        .route("/api/articles", axum::routing::get(reader_routes::list_articles).post(reader_routes::create_article))
+        .route("/api/articles/{id}", axum::routing::get(reader_routes::get_article).delete(reader_routes::delete_article))
+        .route("/api/user-dict", axum::routing::get(reader_routes::list_user_dict).post(reader_routes::save_user_dict))
+        .route("/api/user-dict/{id}", axum::routing::delete(reader_routes::delete_user_dict))
+        .route("/api/word-status", axum::routing::get(reader_routes::list_word_status).post(reader_routes::set_word_status))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))

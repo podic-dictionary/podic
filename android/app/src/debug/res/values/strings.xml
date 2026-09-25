@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- dev 包（debug 变体）：包名 com.felix021.podic.dev，与正式版共存 -->
+<resources>
+    <string name="app_name">Podic Dev</string>
+</resources>

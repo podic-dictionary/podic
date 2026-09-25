@@ -21,7 +21,7 @@ fn langs_of(core: &Core, langs: Option<String>) -> Vec<String> {
     }
 }
 
-fn lock(state: &AppState) -> std::sync::MutexGuard<'_, Core> {
+pub(crate) fn lock(state: &AppState) -> std::sync::MutexGuard<'_, Core> {
     state.core.lock().unwrap()
 }
 
@@ -57,6 +57,7 @@ pub async fn import_pack(
     let mut core = lock(&state);
     let Core { conn, packs, .. } = &mut *core;
     let info = packs.import(conn, &bytes)?;
+    core.invalidate_vocab(&info.lang);
     Ok(Json(json!(info)))
 }
 
@@ -67,6 +68,7 @@ pub async fn remove_pack(
     let mut core = lock(&state);
     let Core { conn, packs, .. } = &mut *core;
     packs.remove(conn, &lang)?;
+    core.invalidate_vocab(&lang);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -140,6 +142,7 @@ pub async fn install_pack(
                         let renamed = std::fs::rename(&tmp, &dest).map_err(podic_core::Error::Io);
                         match renamed.and_then(|_| packs.attach(conn, &dest)) {
                             Ok(info) => {
+                                core.invalidate_vocab(&info.lang);
                                 let _ = tx.send(sse_event(json!({ "type": "done", "pack": info })));
                             }
                             Err(e) => {
@@ -254,6 +257,8 @@ struct ProviderView {
     base_url: String,
     models: Vec<String>,
     active_model: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    labels: std::collections::BTreeMap<String, String>,
     has_key: bool,
 }
 
@@ -275,6 +280,7 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
                 base_url: p.base_url.clone(),
                 models: p.models.clone(),
                 active_model: p.active_model.clone(),
+                labels: p.labels.clone(),
                 has_key: !p.api_key.is_empty(),
             }
         })
@@ -298,6 +304,8 @@ pub struct ProviderIn {
     models: Vec<String>,
     #[serde(default)]
     active_model: String,
+    #[serde(default)]
+    labels: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -339,6 +347,7 @@ pub async fn save_settings(
             api_key,
             models: p.models,
             active_model: p.active_model,
+            labels: p.labels,
         });
     }
     core.settings.providers = providers;
@@ -387,7 +396,7 @@ pub async fn remove_favorite(
 
 #[derive(Deserialize)]
 pub struct AiRunReq {
-    /// explain | examples | translate | fallback
+    /// explain | examples | translate | fallback | complete | analyze
     pub task: String,
     pub text: String,
     #[serde(default)]
@@ -471,7 +480,8 @@ pub async fn ai_run(
 
         if let Some(content) = cached {
             let _ = tx.send(sse_event(json!({ "type": "delta", "text": content })));
-            let _ = tx.send(sse_event(json!({ "type": "done", "cached": true })));
+            // cache_key 随 done 下发：入库类任务（AI 词典）存下来，删词条时连带清缓存
+            let _ = tx.send(sse_event(json!({ "type": "done", "cached": true, "cache_key": cache_key })));
             return;
         }
 
@@ -499,7 +509,8 @@ pub async fn ai_run(
                 }
                 let _ = tx.send(sse_event(json!({
                         "type": "done",
-                        "usage": { "input": outcome.usage.input, "output": outcome.usage.output }
+                        "usage": { "input": outcome.usage.input, "output": outcome.usage.output },
+                        "cache_key": cache_key
                     })));
             }
             Err(e) => {

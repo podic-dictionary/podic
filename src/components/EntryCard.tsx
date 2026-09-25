@@ -168,6 +168,11 @@ export default function EntryCard({ entry, autoExamples = true }: { entry: Entry
               ✦ AI 精修
             </span>
           )}
+          {entry.extra?.source === "ai" && (
+            <span className="text-xs text-violet-600 dark:text-violet-400">
+              ✦ AI 词典
+            </span>
+          )}
         </div>
       )}
 

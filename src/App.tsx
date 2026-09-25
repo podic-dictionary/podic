@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 import { FONT_ZOOM, useSettings } from "./SettingsContext";
 import ConfirmDialog from "./components/ConfirmDialog";
 import LanguageSwitcher from "./components/LanguageSwitcher";
-import { GearIcon, LanguagesIcon, SearchIcon, StarIcon } from "./components/icons";
+import { BookOpenIcon, ChevronLeftIcon, GearIcon, LanguagesIcon, SearchIcon, StarIcon } from "./components/icons";
+import ReadingView from "./views/ReadingView";
 import SearchView from "./views/SearchView";
 import TranslateView from "./views/TranslateView";
 import FavoritesView from "./views/FavoritesView";
@@ -16,6 +17,7 @@ const VIEWS: {
 }[] = [
   { id: "search", label: "查词", icon: SearchIcon },
   { id: "translate", label: "翻译", icon: LanguagesIcon },
+  { id: "reading", label: "阅读", icon: BookOpenIcon },
   { id: "favorites", label: "生词本", icon: StarIcon },
   { id: "settings", label: "设置", icon: GearIcon },
 ];
@@ -24,6 +26,19 @@ export default function App() {
   const [view, setView] = useState<View>("search");
   // 设置页二级页状态提升：返回键/浏览器返回的导航语义需要感知它
   const [settingsSub, setSettingsSub] = useState<SettingsSub>(null);
+  // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
+  // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章
+  const [articleId, setArticleId] = useState<number | "new" | null>(() => {
+    try {
+      const v = localStorage.getItem("podic.reading.article");
+      if (!v) return null;
+      if (v === "new") return "new";
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  });
   // 语言选择持久化，恢复上次使用的语种（脏值回退英文）
   const [lang, setLangState] = useState<Lang>(() => {
     try {
@@ -52,7 +67,15 @@ export default function App() {
     if (mainRef.current) scrollPos.current[view] = mainRef.current.scrollTop;
     setView(v);
     if (v !== "settings") setSettingsSub(null);
+    // 阅读态不因切 tab 清掉：回阅读 tab 还在原文章里
   };
+
+  useEffect(() => {
+    try {
+      if (typeof articleId === "number") localStorage.setItem("podic.reading.article", String(articleId));
+      else localStorage.removeItem("podic.reading.article"); // null / "new" 都不跨启动保留
+    } catch { /* 静默 */ }
+  }, [articleId]);
 
   // ---- 返回语义（Android 返回键 / 浏览器返回）----
   // 栈结构: [进入前历史, base(查词根), sentinel(查词根哨兵), ...导航条目]
@@ -72,30 +95,38 @@ export default function App() {
       restoring.current = false;
       return;
     }
-    const state = { podic: 1, view, sub: settingsSub };
+    const state = { podic: 1, view, sub: settingsSub, article: articleId };
     const hs = { ...(history.state ?? {}) } as Record<string, unknown>;
     delete hs.sentinel;
     if (JSON.stringify(hs) !== JSON.stringify(state)) {
       history.pushState(state, "");
     }
-  }, [view, settingsSub]);
+  }, [view, settingsSub, articleId]);
   // 把「能否应用内返回」与回退动作同步给 App 壳（WebView 的 canGoBack 不认 pushState）
   useEffect(() => {
     const w = window as unknown as {
       PodicAndroid?: { setCanGoBack: (v: boolean) => void };
       __podicGoBack?: () => void;
     };
+    // 查词根且无二级页才交给壳直接退出；阅读文章内返回（回列表）走 __podicGoBack
     const canGoBack = view !== "search" || settingsSub !== null;
     w.PodicAndroid?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
       if (settingsSub) setSettingsSub(null);
+      else if (view === "reading" && articleId !== null) setArticleId(null);
       else if (view !== "search") switchView("search");
     };
-  }, [view, settingsSub]);
+  }, [view, settingsSub, articleId]);
 
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
-      const s = e.state as { podic?: number; view?: View; sub?: SettingsSub; sentinel?: boolean } | null;
+      const s = e.state as {
+        podic?: number;
+        view?: View;
+        sub?: SettingsSub;
+        article?: number | "new" | null;
+        sentinel?: boolean;
+      } | null;
       if (!s?.podic) {
         if (exitAllowed.current) return; // 确认过退出，放行离开页面
         // 兜底：跨过 base 的返回，推回哨兵并弹确认
@@ -112,6 +143,7 @@ export default function App() {
       restoring.current = true;
       setView(s.view ?? "search");
       setSettingsSub(s.sub ?? null);
+      setArticleId(s.article ?? null);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -121,10 +153,10 @@ export default function App() {
     if (mainRef.current) mainRef.current.scrollTop = scrollPos.current[view] ?? 0;
   }, [view]);
 
-  // 进设置二级页时内容区回到顶部（原先 SettingsView 里 querySelector("main") 跨层摸 DOM，收归这里）
+  // 进设置二级页/阅读文章时内容区回到顶部（原先 SettingsView 里 querySelector("main") 跨层摸 DOM，收归这里）
   useEffect(() => {
-    if (settingsSub) mainRef.current?.scrollTo(0, 0);
-  }, [settingsSub]);
+    if (settingsSub || articleId !== null) mainRef.current?.scrollTo(0, 0);
+  }, [settingsSub, articleId]);
 
   // 生词本点词 -> 切到查词并查询（SearchView 监听该事件）
   const openWord = (w: string, l: string) => {
@@ -165,13 +197,24 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar: logo + language switcher（右手时选项靠右） */}
+        {/* header 整体按手性镜像：右手=装饰在左、控件在右（拇指位）；左手相反 */}
         <header
-          className={`sticky top-0 z-10 flex h-12 shrink-0 items-center border-b border-zinc-200/70 bg-white/60 px-4 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/60 ${
-            hand === "right" ? "justify-between" : "gap-2.5"
+          className={`sticky top-0 z-10 flex h-12 shrink-0 items-center justify-between border-b border-zinc-200/70 bg-white/60 px-4 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/60 ${
+            hand === "left" ? "flex-row-reverse" : ""
           }`}
         >
+          {/* 印章 / 语言切换 / 返回 是独立子元素，justify-between 才能把控件推到拇指侧 */}
           <div className="seal" aria-label="Podic">典</div>
-          <LanguageSwitcher value={lang} onChange={setLang} />
+          {view !== "reading" && <LanguageSwitcher value={lang} onChange={setLang} />}
+          {view === "reading" && articleId !== null && (
+            <button
+              onClick={() => setArticleId(null)}
+              className="flex items-center gap-1 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50/60 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/40"
+            >
+              <ChevronLeftIcon size={15} className="text-emerald-600 dark:text-emerald-400" />
+              返回
+            </button>
+          )}
         </header>
 
         <main
@@ -183,6 +226,9 @@ export default function App() {
             <div key={v.id} className="h-full" style={{ display: view === v.id ? "block" : "none" }}>
               {v.id === "search" && <SearchView lang={lang} onLangChange={setLang} />}
               {v.id === "translate" && <TranslateView />}
+              {v.id === "reading" && (
+                <ReadingView lang={lang} articleId={articleId} setArticleId={setArticleId} />
+              )}
               {v.id === "favorites" && <FavoritesView active={view === "favorites"} onOpenWord={openWord} />}
               {v.id === "settings" && <SettingsView sub={settingsSub} setSub={setSettingsSub} />}
             </div>
