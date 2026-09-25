@@ -17,3 +17,4 @@
 .build/
 .sign-profile.json
 .sign-profile.p7b
+.sdk-home/

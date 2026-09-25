@@ -108,7 +108,7 @@ cd harmony
 if [ -n "${OHOS_BASE_SDK_HOME:-}" ] || [ -d "$SDK" ]; then
   API=$(cat "$SDK/native/oh-uni-package.json" 2>/dev/null | grep -o '"apiVersion": *"[0-9]*"' | grep -o '[0-9]*' | head -1)
   if [ -n "$API" ]; then
-    OHOS_SDK_HOME="${PODIC_OHOS_SDK_HOME:-harmony/.sdk-home}"
+    OHOS_SDK_HOME="${PODIC_OHOS_SDK_HOME:-.sdk-home}" # 此时 cwd 已是 harmony/
     mkdir -p "$OHOS_SDK_HOME/$API"
     for c in native toolchains ets js previewer; do
       ln -sfn "$SDK/$c" "$OHOS_SDK_HOME/$API/$c"
