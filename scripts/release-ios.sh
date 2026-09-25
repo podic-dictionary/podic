@@ -42,11 +42,11 @@ echo "[2/5] 生成 Xcode 工程"
 (cd ios && xcodegen generate)
 
 echo "[3/5] archive（不签名，签名在 export 阶段）"
+# iOS 版本以 project.yml 的 MARKETING_VERSION 为准（ASC 已有已发布的 1.0，iOS 版本线独立于 package.json）
 (cd ios && xcodebuild archive \
   -project Podic.xcodeproj -scheme Podic \
   -destination 'generic/platform=iOS' \
   -archivePath build/Podic.xcarchive \
-  # iOS 版本以 project.yml 的 MARKETING_VERSION 为准（ASC 已有已发布的 1.0，iOS 版本线独立于 package.json）
   CURRENT_PROJECT_VERSION="$BUILD" \
   CODE_SIGNING_ALLOWED=NO -quiet)
 
