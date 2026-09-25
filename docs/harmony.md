@@ -100,3 +100,34 @@ scripts/build-harmony.sh assembleApp  # 上架用 .app
   当前选用 `napi-ohos` 是为了走社区标准、降低 ABI 出错概率。
 - **`ohrs` CLI**：`cargo install cargo-ohrs` 后 `ohrs build`，可替代脚本里的
   `cargo build` + 手写 clang wrapper（会读同一个 `OHOS_NDK_HOME`）。
+
+## oniro 模拟器实测记录（2026-09）
+
+oniro（Eclipse 的 OpenHarmony 发行版）x86_64 模拟器 + command-line-tools（HarmonyOS 6.0.1 SDK）全流程已跑通：
+`hdc install` 成功、Rust 后端在设备内监听 `127.0.0.1`、词典包与 web 资产首启正确落入沙箱。
+踩过的坑，均已固化进 `scripts/build-harmony.sh`：
+
+1. **双 ABI**：模拟器是 x86_64，真机是 arm64，`.so` 两个目标都要编（脚本按 sysroot 自动探测）。
+2. **C 依赖交叉编译**：cc crate 找不到目标编译器会静默回退宿主 cc，产物架构错误；
+   需把 SDK clang wrapper 同时指给 cargo linker 与 `CC/CXX/AR_<target>`。
+3. **OpenHarmony 编译类型**：工程 `runtimeOS` 必须为 `"OpenHarmony"`
+   （`compatibleSdkVersion: 12` + `compileSdkVersion: <API>` 数字格式）。
+   声明成 HarmonyOS 的包在纯 OpenHarmony 系统上会被 installd 强制 fs-verity 代码签名，
+   而无 fs-verity 的系统（oniro 内核未编 CONFIG_FS_VERITY）一律拒装（9568393）；
+   OpenHarmony 类型在 `IsSupportOHCodeSign()` 不满足时直接跳过该检查。
+   副作用：hvigor 需要 `OHOS_BASE_SDK_HOME`（版本化布局 `<home>/<API>/<组件>`，脚本就地生成符号链接），
+   且 HarmonyOS 版 SDK 的 `ets/api/device-define/` 缺 `phone.json`（脚本自动补）。
+4. **签名材料**：用 SDK 自带 `toolchains/lib/OpenHarmony.p12`（口令为公开默认值 123456，非机密），
+   HAP 与 profile 都以 `openharmony application profile release` key 签名，
+   证书链 `OpenHarmonyProfileRelease.pem`（其根在系统受信根列表里）。
+   profile 用 release 模板（debug 类型要绑设备 UDID，模拟器读不到 UDID），
+   `distribution-certificate` 填链中第三张（leaf）证书，且 PEM 必须以换行结尾。
+   产物 `podic-signed.hap`，安装 `hdc install <hap>`。
+5. **镜像容量**：内置三词典包的 HAP 约 380M，oniro 镜像 userdata.img 默认仅 1.3G，
+   需停机扩容：`truncate -s 6G userdata.img && e2fsck -f -y && resize2fs`。
+
+已知遗留（oniro 镜像侧缺陷，应用层无解）：
+- 镜像内置的 `com.ohos.arkwebcore/ArkWebCore.hap` 是 arm64-only，x86_64 模拟器上装不上，
+  导致 Web 组件 `libarkweb_engine.so` 加载失败、应用白屏。等 oniro 出修复镜像，
+  或改用 DevEco 模拟器（其 arkweb 与系统 ABI 匹配）验证 UI；后端链路已全部验证可用。
+- 真机（HarmonyOS NEXT）分发需走 AGC 华为签名，本地签名材料仅适用于 OpenHarmony 系统侧验证。

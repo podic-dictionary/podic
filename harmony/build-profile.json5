@@ -5,8 +5,11 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "compatibleSdkVersion": "5.0.0(12)",
-        "runtimeOS": "HarmonyOS",
+        // OpenHarmony 编译类型：oniro 模拟器等纯 OpenHarmony 系统对 HarmonyOS 编译的
+        // 包强制 fs-verity 代码签名（缺 fs-verity 的系统装不上）；OpenHarmony 类型无此要求
+        "compatibleSdkVersion": 12,
+        "compileSdkVersion": 21,
+        "runtimeOS": "OpenHarmony",
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,

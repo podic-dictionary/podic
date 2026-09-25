@@ -46,7 +46,8 @@ echo "[3/5] archive（不签名，签名在 export 阶段）"
   -project Podic.xcodeproj -scheme Podic \
   -destination 'generic/platform=iOS' \
   -archivePath build/Podic.xcarchive \
-  MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
+  # iOS 版本以 project.yml 的 MARKETING_VERSION 为准（ASC 已有已发布的 1.0，iOS 版本线独立于 package.json）
+  CURRENT_PROJECT_VERSION="$BUILD" \
   CODE_SIGNING_ALLOWED=NO -quiet)
 
 echo "[4/5] export（云托管签名）"

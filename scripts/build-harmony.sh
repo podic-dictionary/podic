@@ -103,6 +103,23 @@ write_manifest packs "$RAWFILE/packs-manifest.json"
 echo "[4/4] hvigor 打包"
 TASK="${1:-assembleHap}"
 cd harmony
+# OpenHarmony 编译类型需要显式 SDK home（版本化布局 <home>/<api>/<component>，
+# 用符号链接就地生成，指向 SDK 的 openharmony 组件目录）
+if [ -n "${OHOS_BASE_SDK_HOME:-}" ] || [ -d "$SDK" ]; then
+  API=$(cat "$SDK/native/oh-uni-package.json" 2>/dev/null | grep -o '"apiVersion": *"[0-9]*"' | grep -o '[0-9]*' | head -1)
+  if [ -n "$API" ]; then
+    OHOS_SDK_HOME="${PODIC_OHOS_SDK_HOME:-harmony/.sdk-home}"
+    mkdir -p "$OHOS_SDK_HOME/$API"
+    for c in native toolchains ets js previewer; do
+      ln -sfn "$SDK/$c" "$OHOS_SDK_HOME/$API/$c"
+    done
+    export OHOS_BASE_SDK_HOME="$PWD/$OHOS_SDK_HOME"
+  fi
+fi
+# HarmonyOS 版 SDK 的 device-define 缺 phone.json（OpenHarmony 才有），补一份
+if [ -d "$SDK/ets/api/device-define" ] && [ ! -f "$SDK/ets/api/device-define/phone.json" ] && [ -f "$SDK/ets/api/device-define/default.json" ]; then
+  cp "$SDK/ets/api/device-define/default.json" "$SDK/ets/api/device-define/phone.json"
+fi
 if [ -x ./hvigorw ]; then
   HV=./hvigorw
 elif [ -n "${PODIC_DEVECO_HOME:-}" ] && [ -x "$PODIC_DEVECO_HOME/tools/hvigor/bin/hvigorw" ]; then
@@ -115,3 +132,43 @@ else
   exit 0
 fi
 "$HV" --no-daemon "$TASK"
+
+# [5/5] 用 SDK 自带的 OpenHarmony 官方 CA 签名（口令为公开默认值 123456，非机密）。
+# oniro 等纯 OpenHarmony 系统要求：应用须以 `openharmony application profile release`
+# key 签名（证书链 OpenHarmonyProfileRelease.pem，根在系统受信列表里）。
+SIGN_TOOL="$SDK/toolchains/lib/hap-sign-tool.jar"
+KEYSTORE="$SDK/toolchains/lib/OpenHarmony.p12"
+CERT_CHAIN="$SDK/toolchains/lib/OpenHarmonyProfileRelease.pem"
+HAP_DIR=entry/build/default/outputs/default
+if [ -f "$SIGN_TOOL" ] && [ -f "$HAP_DIR/entry-default-unsigned.hap" ] && command -v java >/dev/null 2>&1; then
+  # profile（debug 类型需绑定设备 UDID，模拟器无 UDID，统一用 release 模板）
+  PODIC_PROFILE_CERT="$CERT_CHAIN" python3 - "$SDK/toolchains/lib/UnsgnedReleasedProfileTemplate.json" <<'PYEOF'
+import json, sys, uuid, time, os
+tpl = json.load(open(sys.argv[1]))
+now = int(time.time())
+tpl['uuid'] = str(uuid.uuid4())
+tpl['validity'] = {'not-before': now, 'not-after': now + 10*365*24*3600}
+tpl['bundle-info']['bundle-name'] = 'com.felix021.podic'
+tpl['bundle-info']['apl'] = 'normal'
+tpl['bundle-info']['app-feature'] = 'hos_normal_app'
+certs = open(os.environ.get('PODIC_PROFILE_CERT', '')).read().split('-----END CERTIFICATE-----')
+leaf = certs[2].strip() + '\n-----END CERTIFICATE-----\n'  # 链顺序 root→ca→leaf
+tpl['bundle-info']['distribution-certificate'] = leaf
+json.dump(tpl, open('.sign-profile.json', 'w'), indent=2)
+PYEOF
+  if [ -f .sign-profile.json ]; then
+    java -jar "$SIGN_TOOL" sign-profile \
+      -keyAlias "openharmony application profile release" -keyPwd 123456 \
+      -signAlg SHA256withECDSA -mode localSign \
+      -profileCertFile "$CERT_CHAIN" -inFile .sign-profile.json \
+      -keystoreFile "$KEYSTORE" -keystorePwd 123456 -outFile .sign-profile.p7b >/dev/null
+    java -jar "$SIGN_TOOL" sign-app \
+      -keyAlias "openharmony application profile release" -keyPwd 123456 \
+      -signAlg SHA256withECDSA -mode localSign \
+      -appCertFile "$CERT_CHAIN" -profileFile .sign-profile.p7b \
+      -inFile "$HAP_DIR/entry-default-unsigned.hap" \
+      -keystoreFile "$KEYSTORE" -keystorePwd 123456 \
+      -outFile "$HAP_DIR/podic-signed.hap" >/dev/null && \
+      echo "已签名: $HAP_DIR/podic-signed.hap"
+  fi
+fi
