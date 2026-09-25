@@ -30,36 +30,47 @@ else
   exit 1
 fi
 
-RUST_TARGET=aarch64-unknown-linux-ohos
+# ABI 列表：真机 arm64 + 模拟器 x86_64（sysroot 缺 x86_64 时只编 arm64）
+ABIS="arm64-v8a:aarch64-unknown-linux-ohos:aarch64-linux-ohos"
+if [ -d "$SDK/native/sysroot/usr/lib/x86_64-linux-ohos" ]; then
+  ABIS="$ABIS
+x86_64:x86_64-unknown-linux-ohos:x86_64-linux-ohos"
+fi
 
-# Rust 交叉链接 ohos 需要显式 sysroot：生成 clang wrapper，再用环境变量指给 cargo
+# 交叉编译需要显式指工具链：cargo 链接器 + cc crate 的 C 编译器都指向 SDK clang
+# wrapper（不指的话 cc 找不到目标编译器会静默回退宿主 cc，产物架构错误）。
+# wrapper 可同时作编译驱动（clang 见 -c 会编译）。
 BUILD_DIR="harmony/.build"
 mkdir -p "$BUILD_DIR"
-WRAP="$BUILD_DIR/aarch64-linux-ohos-clang.sh"
-cat > "$WRAP" <<EOF
+for entry in $ABIS; do
+  DIR="${entry%%:*}"; rest="${entry#*:}"
+  TGT="${rest%%:*}"; TRIPLE="${rest#*:}"
+  WRAP="$BUILD_DIR/$TRIPLE-clang.sh"
+  cat > "$WRAP" <<EOF
 #!/bin/sh
-exec "$SDK/native/llvm/bin/clang" -target aarch64-linux-ohos \\
+exec "$SDK/native/llvm/bin/clang" -target "$TRIPLE" \\
   --sysroot="$SDK/native/sysroot" -D__MUSL__ "\$@"
 EOF
-chmod +x "$WRAP"
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$PWD/$WRAP"
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_AR="$SDK/native/llvm/bin/llvm-ar"
-
-# C 依赖（ring/libsqlite3-sys 等）同样要交叉编译：cc crate 找不到目标编译器会
-# 静默回退宿主 cc，产出错误架构的 .o（链接期报 incompatible with aarch64linux）。
-# wrapper 同时可作编译驱动（clang 见 -c 会编译），直接复用。
-export CC_aarch64_unknown_linux_ohos="$PWD/$WRAP"
-export CXX_aarch64_unknown_linux_ohos="$PWD/$WRAP"
-export AR_aarch64_unknown_linux_ohos="$SDK/native/llvm/bin/llvm-ar"
+  chmod +x "$WRAP"
+  V=$(echo "$TGT" | tr 'a-z-' 'A-Z_'); v=$(echo "$TGT" | tr 'A-Z-' 'a-z_')
+  export "CARGO_TARGET_${V}_LINKER=$PWD/$WRAP"
+  export "CARGO_TARGET_${V}_AR=$SDK/native/llvm/bin/llvm-ar"
+  export "CC_${v}=$PWD/$WRAP"
+  export "CXX_${v}=$PWD/$WRAP"
+  export "AR_${v}=$SDK/native/llvm/bin/llvm-ar"
+done
 
 echo "[1/4] 前端构建"
 npx vite build
 
-echo "[2/4] Rust NAPI .so（$RUST_TARGET）"
-rustup target add "$RUST_TARGET" >/dev/null 2>&1 || true
-cargo build --release -p podic-ohos --target "$RUST_TARGET"
-mkdir -p harmony/entry/libs/arm64-v8a
-cp "target/$RUST_TARGET/release/libpodic_ohos.so" harmony/entry/libs/arm64-v8a/
+echo "[2/4] Rust NAPI .so（$(echo "$ABIS" | cut -d: -f2 | tr '\n' ' ')）"
+for entry in $ABIS; do
+  DIR="${entry%%:*}"; TGT="${entry#*:}"; TGT="${TGT%%:*}"
+  rustup target add "$TGT" >/dev/null 2>&1 || true
+  cargo build --release -p podic-ohos --target "$TGT"
+  mkdir -p "harmony/entry/libs/$DIR"
+  cp "target/$TGT/release/libpodic_ohos.so" "harmony/entry/libs/$DIR/"
+done
 
 echo "[3/4] 资源：dist 前端 + 词典包 -> rawfile"
 RAWFILE=harmony/entry/src/main/resources/rawfile
