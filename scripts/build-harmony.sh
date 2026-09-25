@@ -88,6 +88,8 @@ if [ -x ./hvigorw ]; then
   HV=./hvigorw
 elif [ -n "${PODIC_DEVECO_HOME:-}" ] && [ -x "$PODIC_DEVECO_HOME/tools/hvigor/bin/hvigorw" ]; then
   HV="$PODIC_DEVECO_HOME/tools/hvigor/bin/hvigorw"
+elif command -v hvigorw >/dev/null 2>&1; then
+  HV=hvigorw # command-line-tools 独立安装时 hvigorw 在其 bin/ 下（PATH 可达）
 else
   echo "未找到 hvigorw：请先在 DevEco Studio 打开 harmony/ 生成 hvigor 包装，或设置 PODIC_DEVECO_HOME" >&2
   echo "Rust .so 与资源已就绪，可在 DevEco 里直接 Run/打包。" >&2

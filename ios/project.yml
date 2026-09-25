@@ -40,6 +40,10 @@ targets:
             CFBundleURLSchemes: [podic]
         # TestFlight 合规问一次答一次：仅用系统自带的免申报加密
         ITSAppUsesNonExemptEncryption: false
+        # 版本走 build settings（XcodeGen 会原样写入 $(...)，归档时展开）；
+        # 不写死数字——此前 plist 里残留 1.0 导致 xcodebuild 的版本覆盖失效、ASC 拒收
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # iPhone 锁竖屏（词典）；iPad 多任务要求显式声明方向（ASC 90474）
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -55,7 +59,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.felix021.podic
         DEVELOPMENT_TEAM: 6749ZYTN49
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "0.2.2"
+        MARKETING_VERSION: "0.2.3"
         CURRENT_PROJECT_VERSION: "1"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/Frameworks/PodicMobile.xcframework/ios-arm64"
         OTHER_LDFLAGS: "$(inherited) -lpodic_mobile -lc++"
