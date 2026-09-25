@@ -15,6 +15,7 @@
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ AAB = "android/app/build/outputs/bundle/release/app-release.aab"
 ASSETS = "store-assets/play"
 TRACK = "alpha"  # 老版 API 轨道名，Console 里显示为「封闭测试」（closed 会 404）
 VERSION = json.load(open("package.json"))["version"]
+VC = int(re.search(r"versionCode\s*=\s*(\d+)", open("android/app/build.gradle.kts").read()).group(1))
 RELEASE_NOTES = [
     {"language": "zh-CN", "text": "新增「阅读」视图：粘贴文章逐词点读，缺词 AI 补录进用户词典，划选 AI 解析，生词/认识标记。"},
     {"language": "en-US", "text": "New Reading view: paste an article for tap-to-lookup reading, AI fills missing words into your dictionary, selection AI analysis, and known/new word marking."},
@@ -133,9 +135,10 @@ print(f"[1] edit={edit_id}")
 if "--aab" in sys.argv:
     AAB = sys.argv[sys.argv.index("--aab") + 1]
 size = os.path.getsize(AAB)
+# 注意：edit 会继承 app 全部已有 bundles（不止本 edit 上传的），必须按预期 versionCode 判断
 have = [b["versionCode"] for b in api("GET", f"edits/{edit_id}/bundles").get("bundles", [])]
-if have:
-    vc = have[0]
+if VC in have:
+    vc = VC
     print(f"[2] AAB 已在 edit 里，跳过上传（versionCode={vc}）")
 else:
     bundle = api("POST",
@@ -143,6 +146,7 @@ else:
                  f"{PKG}/edits/{edit_id}/bundles?uploadType=media",
                  raw=open(AAB, "rb").read(), ctype="application/octet-stream")
     vc = bundle["versionCode"]
+    assert vc == VC, f"上传的 versionCode={vc} 与预期 {VC} 不符"
     print(f"[2] AAB 上传 ✓ versionCode={vc} ({size // 1048576}MB)")
 track_body = {"track": TRACK, "releases": [{"name": f"{VERSION} ({vc})", "versionCodes": [vc], "status": "draft", "releaseNotes": RELEASE_NOTES}]}
 api("PUT", f"edits/{edit_id}/tracks/{TRACK}", track_body)
@@ -160,9 +164,6 @@ if "--assets" in sys.argv:
 
 
 def upload_image(lang, etype, path):
-    existing = api("GET", f"edits/{edit_id}/listings/{lang}/{etype}") or {"images": []}
-    for im in existing.get("images", []):
-        api("DELETE", f"edits/{edit_id}/listings/{lang}/{etype}/{im['id']}")
     data = open(path, "rb").read()
     url = ("https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/"
            f"{PKG}/edits/{edit_id}/listings/{lang}/{etype}?uploadType=media")
@@ -171,11 +172,17 @@ def upload_image(lang, etype, path):
 
 shots = ["phone-1-search-en.png", "phone-2-search-fr.png", "phone-3-ai-explain.png", "phone-4-translate.png"]
 for lang in L10N:
+    # 清空一次再整批上传；逐张「删后传」会把先传的都删掉，只剩最后一张
+    existing = api("GET", f"edits/{edit_id}/listings/{lang}/phoneScreenshots") or {"images": []}
+    for im in existing.get("images", []):
+        api("DELETE", f"edits/{edit_id}/listings/{lang}/phoneScreenshots/{im['id']}")
     for s in shots:
         upload_image(lang, "phoneScreenshots", os.path.join(ASSETS, s))
     upload_image(lang, "featureGraphic", os.path.join(ASSETS, "feature-graphic.png"))
     upload_image(lang, "icon", os.path.join(ASSETS, "app-icon-512.png"))
-    print(f"[4] {lang} 图片 ✓（{len(shots)} 截图 + 特色图 + 图标）")
+    n = len(api("GET", f"edits/{edit_id}/listings/{lang}/phoneScreenshots").get("images", []))
+    assert n == len(shots), f"{lang} 截图只有 {n} 张"
+    print(f"[4] {lang} 图片 ✓（{n} 截图 + 特色图 + 图标）")
 
 # ---------- 5. 提交 edit（仅草稿变更，不发布）----------
 api("POST", f"edits/{edit_id}:commit")
