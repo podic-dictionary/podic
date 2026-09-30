@@ -23,14 +23,10 @@ SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)" \
 echo "[3/4] XCFramework"
 rm -rf ios/Frameworks
 mkdir -p ios/Frameworks
-# headers 目录是可选的（Swift 壳自带 bridging.h）
-HDR=()
-if [ -d crates/podic-mobile/include ]; then
-  HDR=(-headers crates/podic-mobile/include)
-fi
+# headers 不需要（Swift 壳自带 bridging.h）；注意 macOS 自带 bash 3.2 的 set -u 下
+# 空数组展开报 unbound，别用可选参数数组
 xcodebuild -create-xcframework \
   -library target/aarch64-apple-ios/release/libpodic_mobile.a \
-  "${HDR[@]}" \
   -library target/aarch64-apple-ios-sim/release/libpodic_mobile.a \
   -output ios/Frameworks/PodicMobile.xcframework
 

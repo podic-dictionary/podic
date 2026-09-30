@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MAC="${PODIC_MAC:-mbp.x.felix021.cn}"
-RIG=~/code/podic-ios-build              # Mac 侧工作副本
+RIG='~/code/podic-ios-build'            # Mac 侧工作副本（~ 留给远端 shell 展开，别本地展开）
 RCODESIGN="${RCODESIGN:-$HOME/code/oh-my-term/gitea/oh-my-term/_work/target/apple-codesign-root/bin/rcodesign}"
 SIGNER=~/.config/podic/apple-distribution-signer.pem
 PROFILE=~/.config/podic/podic_appstore.mobileprovision
@@ -37,16 +37,20 @@ rsync -az --delete \
   ./ "$MAC:$RIG/"
 
 echo "[2/5] Mac：依赖产物 + 未签名编译"
-ssh "$MAC" 'bash -l -c "
+ssh "$MAC" "PODIC_IOS_BUILD='$PODIC_IOS_BUILD' bash -l -c '
+  set -e
   cd ~/code/podic-ios-build
-  scripts/build-ios.sh
+  bash scripts/build-ios.sh
   (cd ios && xcodegen generate)
-  xcodebuild -project Podic.xcodeproj -scheme Podic \
+  # dd 不在 rsync 范围内，跨运行残留的 XCBuildData 会串味，发布构建一律清掉
+  rm -rf ios/build/dd
+  xcodebuild -project ios/Podic.xcodeproj -scheme Podic \
+    -configuration Release \
     -destination \"generic/platform=iOS\" \
-    -derivedDataPath build/dd build \
-    CURRENT_PROJECT_VERSION=\"$PODIC_IOS_BUILD\" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -quiet
-  ls build/dd/Build/Products/Release-iphoneos/
-"'
+    -derivedDataPath ios/build/dd build \
+    CURRENT_PROJECT_VERSION=\"\$PODIC_IOS_BUILD\" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  ls ios/build/dd/Build/Products/Release-iphoneos/
+'"
 
 echo "[3/5] 取回 .app 并签名（Linux rcodesign）"
 WORK=$(mktemp -d ~/tmp/ios-sign.XXXX)
@@ -63,11 +67,13 @@ ls -lh "$WORK/app.ipa"
 
 echo "[4/5] Mac：altool 上传"
 rsync -az "$WORK/app.ipa" "$MAC:$RIG/ios/build/"
-ssh "$MAC" 'bash -l -c "
-  source ~/.config/podic/env.sh
+# ASC 凭据以 Linux 侧配置仓为单一事实来源，经 ssh 环境传入；Mac 只需 ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8
+PODIC_CONFIG_DIR="${PODIC_CONFIG_DIR:-$HOME/.config/podic}"
+source "$PODIC_CONFIG_DIR/env.sh"
+ssh "$MAC" "PODIC_ASC_KEY_ID='$PODIC_ASC_KEY_ID' PODIC_ASC_ISSUER_ID='$PODIC_ASC_ISSUER_ID' bash -l -c '
   xcrun altool --upload-app --type ios -f ~/code/podic-ios-build/ios/build/app.ipa \
-    --apiKey \"$PODIC_ASC_KEY_ID\" --apiIssuer \"$PODIC_ASC_ISSUER\"
-"'
+    --apiKey \"\$PODIC_ASC_KEY_ID\" --apiIssuer \"\$PODIC_ASC_ISSUER_ID\"
+'"
 
 echo "[5/5] 完成。processing 状态稍后用 ASC API 查（VALID 后 TestFlight 可用）"
 echo "临时目录: $WORK"
