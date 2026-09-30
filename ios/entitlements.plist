@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rcodesign 签名用：App Store 分发只需这两条（无推送/支付等能力） -->
+	<key>application-identifier</key>
+	<string>6749ZYTN49.com.felix021.podic</string>
+	<key>get-task-allow</key>
+	<false/>
+</dict>
+</plist>
