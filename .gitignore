@@ -1,6 +1,5 @@
-# data & build artifacts
-data/raw/
-data/work/
+# data & build artifacts（worktree 里 data 是指向主仓的符号链接，一并忽略）
+/data
 packs/
 dist/
 podic-data/
