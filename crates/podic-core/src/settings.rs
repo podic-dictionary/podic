@@ -31,10 +31,15 @@ pub enum Protocol {
 pub struct Settings {
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
-    /// 词典包更新 manifest 地址（GitHub release 直链或自定义）
+    /// 词典包更新 manifest 地址（GitHub release 直链或自定义；空 = 用 DEFAULT_MANIFEST_URL）
     #[serde(default)]
     pub manifest_url: String,
 }
+
+/// 词典包更新源默认地址（podic-dictionary/dict 的 latest release manifest）。
+/// 国内网络可整串套镜像前缀（如 https://gh-proxy.com/ + 本地址）
+pub const DEFAULT_MANIFEST_URL: &str =
+    "https://github.com/podic-dictionary/dict/releases/latest/download/manifest.json";
 
 impl Settings {
     pub fn load(path: &Path) -> std::io::Result<Settings> {

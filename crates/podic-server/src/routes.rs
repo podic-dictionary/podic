@@ -86,10 +86,17 @@ pub async fn check_updates(
 ) -> ApiResult<Json<Value>> {
     let (url, installed) = {
         let core = lock(&state);
+        let configured = core.settings.manifest_url.trim();
         (
             p.manifest
                 .clone()
-                .unwrap_or_else(|| core.settings.manifest_url.clone()),
+                .unwrap_or_else(|| {
+                    if configured.is_empty() {
+                        podic_core::settings::DEFAULT_MANIFEST_URL.to_string()
+                    } else {
+                        configured.to_string()
+                    }
+                }),
             core.packs.list(),
         )
     };

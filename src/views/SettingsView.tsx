@@ -537,12 +537,13 @@ export default function SettingsView({
       <div className="mx-auto max-w-2xl p-4">
         <SubHeader title="词典包更新源" onBack={() => setSub(null)} />
         <p className="mt-1 text-xs text-zinc-400">
-          指向 manifest.json 的直链，用于「词典包」页的在线检查更新（如 GitHub/Gitea release 直链）
+          用于「词典包」页的在线检查更新；留空用默认源（podic-dictionary/dict 的 release）。
+          国内网络可整串套镜像前缀加速，如 https://gh-proxy.com/https://github.com/…
         </p>
         <input
           value={manifest}
           onChange={(e) => setManifest(e.target.value)}
-          placeholder="manifest.json 直链"
+          placeholder="留空 = 默认源（dict releases manifest）"
           className="mt-3 w-full rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
         />
         <div className="action-row mt-4">
