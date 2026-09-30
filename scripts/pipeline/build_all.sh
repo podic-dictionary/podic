@@ -11,6 +11,7 @@ python3 scripts/pipeline/build_en.py
 python3 scripts/pipeline/build_en_cedict.py
 python3 scripts/pipeline/build_fr.py
 python3 scripts/pipeline/build_fr_cfdict.py
+python3 scripts/pipeline/build_fr_wiktionary.py
 python3 scripts/pipeline/build_ja.py
 
 # 例句依赖 Tatoeba（大文件，可选）
@@ -23,7 +24,7 @@ else
 fi
 
 python3 scripts/pipeline/build_pack.py --lang en --version "$VERSION" --sources ecdict,cedict $EXAMPLES
-python3 scripts/pipeline/build_pack.py --lang fr --version "$VERSION" --sources lexique,cfdict $EXAMPLES
+python3 scripts/pipeline/build_pack.py --lang fr --version "$VERSION" --sources lexique,cfdict,fr_wiktionary $EXAMPLES
 python3 scripts/pipeline/build_pack.py --lang ja --version "$VERSION" --sources jmdict_eng,kanjidic2 $EXAMPLES
 
 # 精修（需要 ANTHROPIC_API_KEY/AUTH_TOKEN；fr 为 --rank-file 可选传 Tatoeba 词频）
