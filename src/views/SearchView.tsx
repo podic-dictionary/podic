@@ -75,7 +75,15 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
 
   return (
     <div className="mx-auto max-w-2xl p-4">
-      <SearchBar langs={lang} onSearch={onSearch} />
+      <SearchBar
+        langs={lang}
+        onSearch={onSearch}
+        onClear={() => {
+          setResults(null);
+          setError("");
+          setQuery("");
+        }}
+      />
 
       <div className="mt-6 space-y-7">
         {/* 空态落款：竖排「拾字为舟」+ 小印 */}

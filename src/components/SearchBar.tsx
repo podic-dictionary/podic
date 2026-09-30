@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { suggest } from "../api";
 import { getHistory, type HistoryItem } from "../history";
 import type { Lang, SuggestItem } from "../types";
+import { XIcon } from "./icons";
 
 const LANG_LABEL: Record<string, string> = { en: "英", fr: "法", ja: "日" };
 
 export default function SearchBar({
   langs,
   onSearch,
+  onClear,
 }: {
   langs: string;
   onSearch: (q: string, lang?: Lang) => void;
+  /** 一键清空后通知父级重置结果区（回到空态） */
+  onClear?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SuggestItem[]>([]);
@@ -19,6 +23,7 @@ export default function SearchBar({
   const timer = useRef<number | undefined>(undefined);
   const seq = useRef(0); // 竞态防护：响应回来时输入已变则丢弃
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -68,6 +73,14 @@ export default function SearchBar({
     onSearch(q, lang);
   };
 
+  // 一键清空：作废在途联想 + 复用 onChange("") 的五项重置 + 通知父级清结果区，焦点留在输入框
+  const clear = () => {
+    ++seq.current;
+    onChange("");
+    onClear?.();
+    inputRef.current?.focus();
+  };
+
   const v = query.trim().toLowerCase();
   const histShown = v ? matchedHistory(query).slice(0, 3) : history.slice(0, 10);
   const sugShown = items.filter((it) => !histShown.some((h) => h.headword === it.headword));
@@ -75,6 +88,7 @@ export default function SearchBar({
   return (
     <div ref={boxRef} className="relative">
       <input
+        ref={inputRef}
         value={query}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && go(query)}
@@ -83,10 +97,19 @@ export default function SearchBar({
           setOpen(true);
         }}
         placeholder="查一个词…"
-        className="font-dict w-full border-0 border-b-2 border-zinc-300 bg-transparent px-1 py-2.5 text-2xl tracking-tight outline-none
+        className="font-dict w-full border-0 border-b-2 border-zinc-300 bg-transparent py-2.5 pl-1 pr-8 text-2xl tracking-tight outline-none
                    transition-colors placeholder:text-zinc-300 focus:border-emerald-600
                    dark:border-zinc-700 dark:placeholder:text-zinc-600 dark:focus:border-emerald-400"
       />
+      {query && (
+        <button
+          onClick={clear}
+          title="清空"
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 text-zinc-300 transition-colors hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
+        >
+          <XIcon size={16} />
+        </button>
+      )}
       {(histShown.length > 0 || sugShown.length > 0) && (
         <ul
           className="podic-card absolute z-10 mt-1.5 w-full overflow-hidden rounded-2xl bg-white/95 backdrop-blur-md
