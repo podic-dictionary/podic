@@ -117,6 +117,10 @@ def main():
                     continue
                 leftovers.append(s)
             e["senses"] = new_senses + leftovers
+            # 覆盖后 senses 可能变短，zh_terms 的 sense_idx 要同步裁剪，否则反查索引越界
+            if e.get("zh_terms"):
+                n_senses = len(e["senses"])
+                e["zh_terms"] = [t for t in e["zh_terms"] if len(t) > 1 and t[1] < n_senses]
             e.setdefault("extra", {})["refined"] = True
             changed = True
             stats["merged"] += 1

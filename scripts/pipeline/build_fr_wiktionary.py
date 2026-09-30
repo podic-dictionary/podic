@@ -13,6 +13,7 @@ Gloss 取 senses[*]（form-of/alt-of 等屈折说明跳过）；中文从 transl
 
 import gzip
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -32,7 +33,7 @@ _SKIP_TAGS = {"form-of", "alt-of", "plural-of", "contraction"}
 # fr.wiktionary 大量短语变形页没有 form-of 标签，只有「Forme pronominale de X」式 gloss，按文本兜一道
 _FORM_GLOSS = re.compile(
     r"^(Forme|Pluriel|Masculin|Féminin|Singulier|Participe|Présent|Imparfait|Passé|Futur|"
-    r"Infinitif|Impératif|Subjonctif|Conditionnel|Variantes|Orthographe)\b",
+    r"Infinitif|Impératif|Subjonctif|Conditionnel|Variantes?|Orthographe)\b",
     re.IGNORECASE,
 )
 _ZH_CODES = {"zh", "cmn"}
@@ -99,7 +100,7 @@ def main():
                 g = clean_gloss(s)
                 if not g or _FORM_GLOSS.match(g):
                     continue
-                senses.append({"s": s, "gloss": g})
+                senses.append(g)  # 只留 gloss，原始 sense dict 不驻留（内存大头）
                 if len(senses) >= 4:
                     break
             if not senses:
@@ -109,7 +110,7 @@ def main():
             ipa = clean_ipa(d.get("sounds") or [])
             gender = next(iter(d.get("genders") or []), None)
 
-            # 中文：{zh, cmn} 翻译，带 sense 说明且能对上 gloss 的挂对应条，否则挂第一条
+            # 中文：{zh, cmn} 翻译，(词, 义项说明|None)
             zh_all: list[tuple[str, str | None]] = []
             for t in d.get("translations") or []:
                 if t.get("lang_code") not in _ZH_CODES:
@@ -121,7 +122,7 @@ def main():
                     break
 
             key = word.casefold()
-            if key in cand:  # 同词多页（多词源）合并：senses 拼接
+            if key in cand:  # 同词多页（多词源）合并：glosses 拼接（总条数在出口处截断）
                 cand[key]["senses"].extend(senses)
                 cand[key]["zh_all"].extend(zh_all)
                 cand[key]["ipa"] = cand[key]["ipa"] or ipa
@@ -133,18 +134,31 @@ def main():
                 "senses": senses, "zh_all": zh_all,
                 "kind": "abbr" if is_acronym else "phrase",
             }
-            if len(cand) >= 200_000:  # 防御上限，正常远达不到
-                break
+            if len(cand) >= 200_000:  # 防御上限：截断就是包不完整，必须显式失败而非静默少词
+                common.log("[FAIL] 候选数触及 200_000 防御上限，输出将不完整，终止")
+                sys.exit(1)
 
-    def zh_for(gloss: str, zh_all: list[tuple[str, str | None]]) -> str | None:
-        g = gloss.casefold()
-        for w, sense in zh_all:
-            if sense and sense.casefold() in g:
-                return w
-        return zh_all[0][0] if zh_all else None
+    def attach_zh(glosses: list[str], zh_all: list[tuple[str, str | None]]) -> list[str | None]:
+        """中文只挂到有明确对应关系的义项；带义项说明的翻译按说明匹配 gloss，
+        无说明的至多挂首义（首义是主义项），其余保留法文。"""
+        zhs: list[str | None] = [None] * len(glosses)
+        for w, desc in zh_all:
+            if not desc:
+                continue
+            d = desc.casefold()
+            for i, g in enumerate(glosses):
+                if zhs[i] is None and d in g.casefold():
+                    zhs[i] = w
+                    break
+        if zh_all and zhs[0] is None:
+            zhs[0] = zh_all[0][0]
+        return zhs
 
+    filled: list[dict] = []  # 补过释义的旧词条（需写回磁盘）
     out = []
     for key, c in cand.items():
+        if len(c["senses"]) > 6:  # 多页合并后的词条级上限
+            c["senses"] = c["senses"][:6]
         old = by_head.get(key)
         if old is not None:
             # 同 headword：只给无释义的补（Lexique 词条常 senses:[]），有释义的不动
@@ -153,33 +167,42 @@ def main():
         elif c["norm"] in existing_norms or key in seen:
             # 异形同 norm（é/e 变体等）被占、或本轮已新增过：跳过防串
             continue
+        zhs = attach_zh(c["senses"], c["zh_all"])
         senses = [
-            {"zh": zh_for(x["gloss"], c["zh_all"]), "fr": x["gloss"], "tags": ["Wiktionary"]}
-            for x in c["senses"]
+            {"zh": z, "fr": g, "tags": ["Wiktionary"]} for g, z in zip(c["senses"], zhs)
         ]
         if old is not None:
             old["senses"] = senses
+            old["zh_terms"] = [
+                [s["zh"], i, "wiktionary"] for i, s in enumerate(senses) if s["zh"]
+            ]
             old.setdefault("extra", {}).setdefault("source", "lexique")
             old["extra"]["source"] += "+wiktionary"
+            filled.append(old)
             n_fill += 1
             continue
         seen.add(key)
+        existing_norms.add(c["norm"])  # 本轮已用掉的 norm 也要占住，防同轮异形穿透
         row = {
             "headword": c["headword"], "norm": c["norm"],
             "ipa": json.dumps(c["ipa"], ensure_ascii=False) if c["ipa"] else None,
             "pos": c["pos"], "gender": c["gender"], "freq": 0.0,
             "senses": senses,
-            "zh_terms": [], "extra": {"source": "wiktionary", "kind": c["kind"]},
+            "zh_terms": [
+                [s["zh"], i, "wiktionary"] for i, s in enumerate(senses) if s["zh"]
+            ],
+            "extra": {"source": "wiktionary", "kind": c["kind"]},
         }
-        for i, s in enumerate(senses):
-            if s["zh"]:
-                row["zh_terms"].append([s["zh"], i, "wiktionary"])
         out.append(row)
         n_new += 1
 
-    with open(entries_path, "a", encoding="utf-8") as f:
-        for row in out:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    # 统一原子写回：既落盘新增，也落盘就地补过释义的旧词条（此前只 append 新词，补释义从未持久化）
+    entries.extend(out)
+    tmp = entries_path.with_suffix(".jsonl.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    os.replace(tmp, entries_path)
 
     n_abbr = sum(1 for r in out if r["extra"]["kind"] == "abbr")
     common.log(f"扫描 {n} 行，新增 {n_new}（缩写 {n_abbr}、短语 {n_new - n_abbr}），补释义 {n_fill}")

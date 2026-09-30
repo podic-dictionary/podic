@@ -54,6 +54,11 @@ SOURCES = {
         "extract": "tatoeba_links.csv",
         "cc": {"name": "Tatoeba", "url": "https://tatoeba.org", "license": "CC BY 2.0 FR"},
     },
+    "fr_wiktionary": {
+        "url": "https://kaikki.org/dictionary/downloads/fr/fr-extract.jsonl.gz",
+        "file": "fr-extract.jsonl.gz",
+        "cc": {"name": "French Wiktionary (wiktextract)", "url": "https://kaikki.org/dictionary/French", "license": "CC BY-SA 3.0"},
+    },
     "deinflect": {
         "url": "https://raw.githubusercontent.com/FooSoft/yomichan/master/ext/data/deinflect.json",
         "file": "deinflect.json",

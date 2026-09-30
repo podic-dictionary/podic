@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 VERSION="${1:-0.1.0}"
+if [ $# -gt 0 ]; then shift; fi  # 版本位置参数已被消费，避免转发给 make_manifest 重复报错
 
 python3 scripts/pipeline/download_all.py
 python3 scripts/pipeline/build_en.py

@@ -165,10 +165,16 @@ def main():
 
     zh_batch = []
     for e in common.read_jsonl(work / "entries.jsonl"):
-        for eid in norm_to_id.get(e["norm"]) or []:
-            for row in e.get("zh_terms") or []:
-                term, sense_idx = row[0], row[1]
-                origin = row[2] if len(row) > 2 else "pipeline"
+        # zh_terms 属于产生它的那个词条：按 casefold(headword) 精确关联。
+        # 按 norm 会串到同 norm 的异形词条（élève/élevé），且对方义项数更少时 sense_idx 越界
+        eid_list = head_to_id.get(e["headword"].casefold()) or []
+        max_idx = len(e.get("senses") or []) - 1
+        if not eid_list or max_idx < 0:
+            continue
+        for row in e.get("zh_terms") or []:
+            term, sense_idx = row[0], min(int(row[1]), max_idx)  # 精修/补齐覆盖 senses 后可能变短，钳到有效范围
+            origin = row[2] if len(row) > 2 else "pipeline"
+            for eid in eid_list:
                 zh_batch.append((common.zh_term_norm(term), eid, sense_idx, origin))
     db.executemany("INSERT OR IGNORE INTO zh_index(term_norm, entry_id, sense_idx, origin) VALUES (?,?,?,?)",
                    zh_batch)
