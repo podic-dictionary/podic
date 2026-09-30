@@ -210,7 +210,7 @@ function UserDictPage({ onBack }: { onBack: () => void }) {
       <ConfirmDialog
         open={confirmDel !== null}
         title="删除这个词条？"
-        message={`「${confirmDel?.headword ?? ""}」将从 AI 词典移除，下次在阅读中点词会重新补录。`}
+        message={`「${confirmDel?.headword ?? ""}」将从 AI 词典移除，下次查词或阅读点词时会重新补录。`}
         confirmText="删除"
         onConfirm={() => {
           if (confirmDel) {

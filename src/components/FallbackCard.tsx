@@ -1,113 +1,100 @@
-import { useEffect, useState } from "react";
-import { getOverlay, saveOverlay } from "../api";
+import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../SettingsContext";
-import { useAiStream } from "../hooks/useAiStream";
-import ConfirmDialog from "./ConfirmDialog";
+import { completeAndSave, isFailedWord } from "../lib/aiComplete";
 import ModelPicker from "./ModelPicker";
-import Markdown from "./Markdown";
 
-/// 查词无结果（或结果过稀）时的 AI 兜底卡片；生成结果持久化，再次查看直接加载
-export default function FallbackCard({ query, lang }: { query: string; lang: string }) {
+/** 词形查询（字母/变音字母/撇号/连字符，可含空格的短语）；CJK/数字/URL 不自动走 AI 补词 */
+const WORDISH = /^[A-Za-zÀ-ÿ'’-]+( [A-Za-zÀ-ÿ'’-]+)*$/;
+
+/// 查词完全无结果时的 AI 兜底：自动生成结构化词条并存入用户词典（AI 词典），
+/// 父级重查后由带「✦ AI 词典」徽标的 EntryCard 接管；删除/覆盖走设置页 AI 词典
+export default function FallbackCard({
+  query,
+  lang,
+  onSaved,
+}: {
+  query: string;
+  lang: string;
+  /** 入库成功后通知父级重查（EntryCard 替换本卡） */
+  onSaved: () => void;
+}) {
   const { aiChoice, setAiChoice } = useSettings();
-  const { text, running, error, run, cancel, setText } = useAiStream();
-  const [hasSaved, setHasSaved] = useState(false);
-  const [confirmRegen, setConfirmRegen] = useState(false);
+  // idle=未触发 | running=AI 生成中 | failed=坏输出（可手动重试）
+  const [phase, setPhase] = useState<"idle" | "running" | "failed">("idle");
+  const started = useRef(false); // 防 StrictMode/重渲染双触发
 
-  // 词条变化：有历史产出直接展示
-  useEffect(() => {
-    let alive = true;
-    setHasSaved(false);
-    getOverlay(lang, query)
+  const q = query.trim();
+  const auto = Boolean(aiChoice.providerId) && WORDISH.test(q) && !isFailedWord(lang, q);
+
+  const run = (fresh: boolean) => {
+    if (!aiChoice.providerId) return;
+    setPhase("running");
+    completeAndSave({
+      lang,
+      text: q,
+      altNorm: q, // 服务端会做 norm 归一化再入屈折镜像
+      context: { lang, sentence: "" }, // 缓存键参与字段：保持确定性最小
+      providerId: aiChoice.providerId,
+      model: aiChoice.model,
+      fresh,
+    })
       .then((r) => {
-        if (alive && r.overlays?.fallback) {
-          setText(r.overlays.fallback.content);
-          setHasSaved(true);
+        if (!r) {
+          setPhase("failed");
+          return;
         }
+        onSaved();
       })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
+      .catch(() => setPhase("idle"));
+  };
+
+  useEffect(() => {
+    if (!auto || started.current) return;
+    started.current = true;
+    run(false); // fresh:false 吃缓存；解析失败的重试才 fresh:true 绕开坏缓存
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, query]);
-
-  const go = () => {
-    if (running) {
-      cancel();
-      return;
-    }
-    // 已有生成结果：确认后覆盖重生成
-    if (hasSaved) {
-      setConfirmRegen(true);
-      return;
-    }
-    start();
-  };
-
-  const start = () => {
-    setHasSaved(false);
-    run(
-      "fallback",
-      query,
-      {
-        context: { lang, headword: query },
-        provider_id: aiChoice.providerId,
-        model: aiChoice.model,
-        fresh: true,
-      },
-      (full) => {
-        if (!full.trim()) return;
-        saveOverlay({
-          lang,
-          headword: query,
-          kind: "fallback",
-          content: full,
-          model: aiChoice.model,
-        })
-          .then(() => setHasSaved(true))
-          .catch(() => {});
-      },
-    );
-  };
+  }, [lang, q]);
 
   return (
     <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50/40 p-4 dark:border-violet-800 dark:bg-violet-950/20">
-      <p className="text-sm text-zinc-500">
-        词典里没有「{query}」，可以让 AI 补一个释义（标注为 AI 生成，不入库）
-      </p>
-      <div className="action-row mt-2">
-        <button
-          onClick={go}
-          disabled={!aiChoice.providerId}
-          className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700 disabled:opacity-50"
-        >
-          {running ? "停止" : "AI 生成释义"}
-        </button>
-        <ModelPicker
-          providerId={aiChoice.providerId}
-          model={aiChoice.model}
-          onChange={setAiChoice}
-        />
-        {running && <span className="text-xs text-zinc-400">生成中…</span>}
-      </div>
-      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
-      {text && (
-        <div className="mt-2">
-          <Markdown text={text} />
+      {phase === "running" && (
+        <p className="text-sm text-violet-500">词典里没有「{q}」，AI 补全中…</p>
+      )}
+      {phase === "failed" && (
+        <div>
+          <p className="text-sm text-zinc-400">AI 返回的结果解析失败</p>
+          <div className="action-row mt-2">
+            <button
+              onClick={() => run(true)}
+              className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"
+            >
+              重试
+            </button>
+            <ModelPicker
+              providerId={aiChoice.providerId}
+              model={aiChoice.model}
+              onChange={setAiChoice}
+            />
+          </div>
         </div>
       )}
-
-      <ConfirmDialog
-        open={confirmRegen}
-        title="重新生成？"
-        message={`「${query}」已有 AI 生成结果，重新生成将覆盖旧内容。`}
-        confirmText="重新生成"
-        onConfirm={() => {
-          setConfirmRegen(false);
-          start();
-        }}
-        onCancel={() => setConfirmRegen(false)}
-      />
+      {phase === "idle" && (
+        <>
+          <p className="text-sm text-zinc-500">
+            词典里没有「{q}」
+            {!aiChoice.providerId && "（配置 AI Provider 后可自动补全，记入 AI 词典）"}
+          </p>
+          {!aiChoice.providerId && (
+            <div className="action-row mt-2">
+              <ModelPicker
+                providerId={aiChoice.providerId}
+                model={aiChoice.model}
+                onChange={setAiChoice}
+              />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

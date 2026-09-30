@@ -293,6 +293,14 @@ pub async fn list_user_dict(
     Ok(Json(json!({ "entries": entries })))
 }
 
+/// alt_norm 归一化：屈折镜像键必须与查询时的 norm 同构，前端无 norm 实现时传的是原文
+/// （如「Élevé」「au fil」），这里统一走 norm()（幂等，阅读器传已归一化串不受影响）
+fn normalize_alt_norm(lang: &str, alt: Option<&str>) -> Option<String> {
+    alt.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| podic_core::norm::norm(s, lang))
+}
+
 /// POST /api/user-dict：upsert 幂等
 pub async fn save_user_dict(
     State(state): State<AppState>,
@@ -313,6 +321,7 @@ pub async fn save_user_dict(
     if req.headword.trim().is_empty() {
         return Err(bad("headword 不能为空"));
     }
+    let alt_norm = normalize_alt_norm(&req.lang, req.alt_norm.as_deref());
     let mut core = lock(&state);
     let (id, created) = store::user_dict_upsert(
         &core.conn,
@@ -323,7 +332,7 @@ pub async fn save_user_dict(
         &senses_str,
         req.source.as_deref().unwrap_or("ai"),
         req.model.as_deref(),
-        req.alt_norm.as_deref(),
+        alt_norm.as_deref(),
         req.cache_key.as_deref(),
     )?;
     core.invalidate_vocab(&req.lang);
@@ -388,4 +397,21 @@ pub async fn set_word_status(
     let core = lock(&state);
     store::word_status_set(&core.conn, &req.lang, &req.norm, status)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_alt_norm;
+
+    #[test]
+    fn alt_norm_归一化() {
+        // fr 去变音 + 小写：主查词框传原文也能命中 norm 镜像
+        assert_eq!(normalize_alt_norm("fr", Some("Élevé")).as_deref(), Some("eleve"));
+        assert_eq!(normalize_alt_norm("fr", Some("  au fil  ")).as_deref(), Some("au fil"));
+        // 已归一化串幂等（阅读器路径不受影响）
+        assert_eq!(normalize_alt_norm("en", Some("well-known")).as_deref(), Some("well-known"));
+        // 空/空白视为无镜像
+        assert_eq!(normalize_alt_norm("fr", Some("  ")), None);
+        assert_eq!(normalize_alt_norm("fr", None), None);
+    }
 }

@@ -99,7 +99,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         {loading && <p className="text-sm text-zinc-400">查询中…</p>}
         {error && <p className="text-sm text-red-500">{error}</p>}
         {results !== null && results.length === 0 && !loading && (
-          <FallbackCard query={query} lang={lang} />
+          <FallbackCard query={query} lang={lang} onSaved={() => onSearch(query)} />
         )}
         {results?.map((e, i) => (
           <div key={`${e.lang}-${e.entry_id}-${i}`} className="podic-enter" style={{ animationDelay: `${Math.min(i, 8) * 55}ms` }}>

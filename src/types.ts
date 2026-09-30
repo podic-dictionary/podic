@@ -84,5 +84,7 @@ export interface UserDictEntry {
   senses: string;
   source: string;
   model: string | null;
+  /** 生成该词条的 ai_cache key（删词条时服务端连带清缓存） */
+  cache_key?: string | null;
   created_at: string;
 }
