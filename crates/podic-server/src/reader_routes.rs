@@ -294,11 +294,13 @@ pub async fn list_user_dict(
 }
 
 /// alt_norm 归一化：屈折镜像键必须与查询时的 norm 同构，前端无 norm 实现时传的是原文
-/// （如「Élevé」「au fil」），这里统一走 norm()（幂等，阅读器传已归一化串不受影响）
+/// （如「Élevé」「au fil」），这里统一走 norm()（幂等，阅读器传已归一化串不受影响）；
+/// norm() 不折叠内部空白，多词短语这里先折（查询侧 norm("a  b") 也会带双空格，但
+/// 用户输入几乎总是单空格，镜像键以单空格形态存才有意义）
 fn normalize_alt_norm(lang: &str, alt: Option<&str>) -> Option<String> {
     alt.map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| podic_core::norm::norm(s, lang))
+        .map(|s| podic_core::norm::norm(&s.split_whitespace().collect::<Vec<_>>().join(" "), lang))
 }
 
 /// POST /api/user-dict：upsert 幂等
@@ -408,6 +410,11 @@ mod tests {
         // fr 去变音 + 小写：主查词框传原文也能命中 norm 镜像
         assert_eq!(normalize_alt_norm("fr", Some("Élevé")).as_deref(), Some("eleve"));
         assert_eq!(normalize_alt_norm("fr", Some("  au fil  ")).as_deref(), Some("au fil"));
+        // 多词：大小写 + 内部多余空白折叠
+        assert_eq!(
+            normalize_alt_norm("fr", Some("  Prendre  son  TEMPS ")).as_deref(),
+            Some("prendre son temps")
+        );
         // 已归一化串幂等（阅读器路径不受影响）
         assert_eq!(normalize_alt_norm("en", Some("well-known")).as_deref(), Some("well-known"));
         // 空/空白视为无镜像
