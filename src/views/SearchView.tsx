@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { lookup, reverse } from "../api";
 import { addHistory } from "../history";
 import EntryCard from "../components/EntryCard";
@@ -11,6 +11,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const reqSeq = useRef(0); // 主查询竞态防护：慢响应/清空/切语言后旧请求不得写状态
 
   // 切语言：输入框有内容就用新语言重查，否则清空结果
   useEffect(() => {
@@ -32,6 +33,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         onLangChange(l);
         return;
       }
+      const mine = ++reqSeq.current;
       setLoading(true);
       setQuery(q);
       setError("");
@@ -46,6 +48,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         } else {
           items = hasKanji ? await reverse(q, lang) : await lookup(q, lang);
         }
+        if (mine !== reqSeq.current) return; // 期间已切查询/清空/切语言：丢弃
         setResults(items);
         // 有结果的查询记入历史（词头 + 首条释义摘要）
         if (items.length > 0) {
@@ -54,10 +57,11 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
           addHistory({ lang, q, headword: first.headword, gloss, ts: Date.now() });
         }
       } catch (e) {
+        if (mine !== reqSeq.current) return;
         setError(e instanceof Error ? e.message : String(e));
         setResults(null);
       } finally {
-        setLoading(false);
+        if (mine === reqSeq.current) setLoading(false);
       }
     },
     [lang, onLangChange],
@@ -79,6 +83,8 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         langs={lang}
         onSearch={onSearch}
         onClear={() => {
+          ++reqSeq.current; // 作废在途主查询，旧结果不得在清空后回填
+          setLoading(false);
           setResults(null);
           setError("");
           setQuery("");

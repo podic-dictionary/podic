@@ -53,8 +53,9 @@ export default function WordDrawer({
   const { aiChoice, hand } = useSettings();
   const [status, setStatus] = useState<WordStatus | undefined>(initialStatus);
   const [entries, setEntries] = useState<Entry[] | null>(null);
-  // idle=未触发 | running=AI 生成中 | failed=坏输出（可手动重试）
+  // idle=未触发 | running=AI 生成中 | failed=失败（可手动重试）
   const [phase, setPhase] = useState<"idle" | "running" | "failed">("idle");
+  const [failMsg, setFailMsg] = useState("");
   const [aiNote, setAiNote] = useState("");
 
   const lookupChain = useCallback(async (): Promise<Entry[]> => {
@@ -73,6 +74,7 @@ export default function WordDrawer({
     (fresh: boolean) => {
       if (!aiChoice.providerId || !ctx) return;
       setPhase("running");
+      setFailMsg("");
       setAiNote("");
       completeAndSave({
         lang,
@@ -85,6 +87,7 @@ export default function WordDrawer({
       })
         .then(async (r) => {
           if (!r) {
+            setFailMsg("AI 返回的结果解析失败");
             setPhase("failed");
             return;
           }
@@ -93,7 +96,11 @@ export default function WordDrawer({
           setPhase("idle");
           setAiNote(`AI 补录「${r.out.headword}」已存入用户词典`);
         })
-        .catch(() => setPhase("idle"));
+        .catch((e) => {
+          // 网络/服务错误同样进入可重试态，不再静默回 idle 掩盖失败原因
+          setFailMsg(e instanceof Error ? e.message : String(e));
+          setPhase("failed");
+        });
     },
     [aiChoice.providerId, aiChoice.model, surface, norm, lang, ctx, lookupChain],
   );
@@ -103,6 +110,7 @@ export default function WordDrawer({
     let alive = true;
     setEntries(null);
     setAiNote("");
+    setFailMsg("");
     lookupChain().then((es) => {
       if (!alive) return;
       setEntries(es);
@@ -185,7 +193,7 @@ export default function WordDrawer({
           )}
           {phase === "failed" && (
             <div className="py-4 text-center">
-              <p className="text-sm text-zinc-400">AI 返回的结果解析失败</p>
+              <p className="text-sm text-zinc-400">{failMsg || "AI 补全失败"}</p>
               <button
                 onClick={() => runComplete(true)}
                 className="mt-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"

@@ -35,9 +35,15 @@ export function parseComplete(text: string): CompleteOut | null {
   }
 }
 
-/** 解析失败词的会话级集合：防同一个坏输出反复触发 AI（重试手动触发且 fresh） */
+/** 解析失败词的会话级集合：防同一个坏输出反复触发 AI（重试手动触发且 fresh）。
+ * 键做轻量归一化（去变音 + 小写）：阅读器传 token norm、主查词框传原文，两端要能互相抑制 */
 const failedWords = new Set<string>();
-const failKey = (lang: string, word: string) => `${lang}:${word.trim().toLowerCase()}`;
+const failKey = (lang: string, word: string) =>
+  `${lang}:${word
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .trim()
+    .toLowerCase()}`;
 export const isFailedWord = (lang: string, word: string) => failedWords.has(failKey(lang, word));
 
 export interface CompleteAndSaveOpts {
@@ -88,6 +94,7 @@ export function completeAndSave(
       alt_norm: o.altNorm,
       cache_key: cacheKey ?? undefined,
     });
+    failedWords.delete(failKey(o.lang, o.altNorm)); // 成功即解除抑制（删词条后重查应能重新补录）
     return { out, cacheKey };
   });
 }
