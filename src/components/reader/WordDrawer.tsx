@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { lookup, saveUserDict } from "../../api";
+import { lookup } from "../../api";
 import type { AiContext } from "./ArticleReader";
-import type { Entry, Sense, WordStatus } from "../../types";
+import type { Entry, WordStatus } from "../../types";
 import { useSettings } from "../../SettingsContext";
-import { aiRun } from "../../api";
+import { completeAndSave, isFailedWord } from "../../lib/aiComplete";
 import BottomSheet from "./BottomSheet";
 import EntryCard from "../EntryCard";
 
@@ -27,43 +27,6 @@ const dedupe = (items: Entry[]) => {
   const seen = new Set<number>();
   return items.filter((e) => !seen.has(e.entry_id) && seen.add(e.entry_id));
 };
-
-/** complete 任务输出（严格校验后才入库） */
-interface CompleteOut {
-  headword: string;
-  reading?: string;
-  pos?: string[];
-  senses: Sense[];
-}
-
-function parseComplete(text: string): CompleteOut | null {
-  let t = text.trim();
-  if (t.startsWith("```")) {
-    const m = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-    t = (m ? m[1] : t.replace(/```/g, "")).trim();
-  }
-  try {
-    const d = JSON.parse(t) as Record<string, unknown>;
-    if (typeof d.headword !== "string" || !d.headword.trim()) return null;
-    const senses = d.senses;
-    if (!Array.isArray(senses) || senses.length === 0) return null;
-    const ok = senses.every(
-      (s) => s && typeof s === "object" && typeof (s as Sense).zh === "string" && (s as Sense).zh!.trim(),
-    );
-    if (!ok) return null;
-    return {
-      headword: d.headword.trim(),
-      reading: typeof d.reading === "string" && d.reading.trim() ? d.reading.trim() : undefined,
-      pos: Array.isArray(d.pos) ? d.pos.filter((p): p is string => typeof p === "string") : undefined,
-      senses: (senses as Sense[]).map((s) => ({ pos: s.pos, zh: s.zh })),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** 解析失败词的会话级集合：防同一个坏输出反复触发 AI（重试手动触发且 fresh） */
-const failedWords = new Set<string>();
 
 export default function WordDrawer({
   open,
@@ -111,45 +74,24 @@ export default function WordDrawer({
       if (!aiChoice.providerId || !ctx) return;
       setPhase("running");
       setAiNote("");
-      // JSON 任务不需要逐字上屏，这里只累积全文
-      let full = "";
-      let cacheKey: string | null = null;
-      aiRun(
-        {
-          task: "complete",
-          text: surface || norm,
-          context: ctx,
-          provider_id: aiChoice.providerId,
-          model: aiChoice.model,
-          fresh,
-        },
-        (delta) => {
-          full += delta;
-        },
-      ).done
-        .then(async (key) => {
-          cacheKey = key;
-          const out = parseComplete(full);
-          if (!out) {
-            failedWords.add(`${lang}:${norm}`);
+      completeAndSave({
+        lang,
+        text: surface || norm,
+        altNorm: norm,
+        context: ctx,
+        providerId: aiChoice.providerId,
+        model: aiChoice.model,
+        fresh,
+      })
+        .then(async (r) => {
+          if (!r) {
             setPhase("failed");
             return;
           }
-          await saveUserDict({
-            lang,
-            headword: out.headword,
-            reading: out.reading,
-            pos: out.pos,
-            senses: out.senses,
-            source: "ai",
-            model: aiChoice.model,
-            alt_norm: norm,
-            cache_key: cacheKey ?? undefined,
-          });
           const es = await lookupChain();
           setEntries(es);
           setPhase("idle");
-          setAiNote(`AI 补录「${out.headword}」已存入用户词典`);
+          setAiNote(`AI 补录「${r.out.headword}」已存入用户词典`);
         })
         .catch(() => setPhase("idle"));
     },
@@ -165,7 +107,7 @@ export default function WordDrawer({
       if (!alive) return;
       setEntries(es);
       // 词典全 miss + 已配 AI + 不在失败集合 → 自动补全
-      if (es.length === 0 && aiReady && ctx && !failedWords.has(`${lang}:${norm}`)) {
+      if (es.length === 0 && aiReady && ctx && !isFailedWord(lang, norm)) {
         runComplete(false);
       }
     });
