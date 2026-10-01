@@ -32,8 +32,8 @@ TRACK = "alpha"  # 老版 API 轨道名，Console 里显示为「封闭测试」
 VERSION = json.load(open("package.json"))["version"]
 VC = int(re.search(r"versionCode\s*=\s*(\d+)", open("android/app/build.gradle.kts").read()).group(1))
 RELEASE_NOTES = [
-    {"language": "zh-CN", "text": "新增「阅读」视图：粘贴文章逐词点读，缺词 AI 补录进用户词典，划选 AI 解析，生词/认识标记。"},
-    {"language": "en-US", "text": "New Reading view: paste an article for tap-to-lookup reading, AI fills missing words into your dictionary, selection AI analysis, and known/new word marking."},
+    {"language": "zh-CN", "text": "查词无结果时 AI 自动补录结构化词条进用户词典（下次直接命中，可在设置管理）；查词框一键清空；法语词典补齐 10 万短语与缩写（RTT、au fil du temps 等）。"},
+    {"language": "en-US", "text": "Lookup miss now auto-fills a structured entry into your dictionary via AI (manageable in Settings); one-tap search clear; French dictionary expanded with 100k phrases and abbreviations (RTT, au fil du temps, ...)."},
 ]
 
 sa = json.load(open(SA_PATH))
