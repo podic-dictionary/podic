@@ -7,7 +7,7 @@
   2. 设置 -> API 访问权限：把服务账号关联到 Play 账号并授予
      「查看应用信息 + 发布到测试轨道」权限
 填报内容：
-  - 上传 AAB 到指定轨道（release status=draft，不会自动放量）
+  - 上传 AAB 到指定轨道（closed 测试轨道 status=completed，对测试员自动生效，无需 Console 放量）
   - zh-CN / en-US 商店文案（标题/简短/完整描述）
   - 手机截图（最多 4 张）+ 512 图标 + 1024x500 特色图片
 不含（只能网页填）：内容分级问卷、数据安全表单、目标受众、测试人员名单。
@@ -131,7 +131,7 @@ edit = api("POST", "edits", {})
 edit_id = edit["id"]
 print(f"[1] edit={edit_id}")
 
-# ---------- 2. 上传 AAB 并挂到轨道（draft，不自动放量）----------
+# ---------- 2. 上传 AAB 并挂到轨道（completed，封闭测试轨道自动生效）----------
 if "--aab" in sys.argv:
     AAB = sys.argv[sys.argv.index("--aab") + 1]
 size = os.path.getsize(AAB)
@@ -148,9 +148,9 @@ else:
     vc = bundle["versionCode"]
     assert vc == VC, f"上传的 versionCode={vc} 与预期 {VC} 不符"
     print(f"[2] AAB 上传 ✓ versionCode={vc} ({size // 1048576}MB)")
-track_body = {"track": TRACK, "releases": [{"name": f"{VERSION} ({vc})", "versionCodes": [vc], "status": "draft", "releaseNotes": RELEASE_NOTES}]}
+track_body = {"track": TRACK, "releases": [{"name": f"{VERSION} ({vc})", "versionCodes": [vc], "status": "completed", "releaseNotes": RELEASE_NOTES}]}
 api("PUT", f"edits/{edit_id}/tracks/{TRACK}", track_body)
-print(f"[2] 轨道 {TRACK} 挂 versionCode={vc}（draft）✓")
+print(f"[2] 轨道 {TRACK} 挂 versionCode={vc}（completed，对测试员自动生效）✓")
 
 # ---------- 3. 商店文案 ----------
 # 踩坑：v3 没有 listings.create；update(PUT) 是 upsert，不存在的语言会直接建
@@ -186,4 +186,4 @@ for lang in L10N:
 
 # ---------- 5. 提交 edit（仅草稿变更，不发布）----------
 api("POST", f"edits/{edit_id}:commit")
-print("[5] commit ✓（AAB 与素材均在草稿态，Console 里人工复核后手动放量）")
+print("[5] commit ✓（closed 轨道 completed，对测试员自动生效；仅生产轨道需 Console 评审放量）")
