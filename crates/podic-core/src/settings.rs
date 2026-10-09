@@ -27,13 +27,51 @@ pub enum Protocol {
     Anthropic,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LanguageConfig {
+    /// 2-4 位 ASCII 小写语言码（兼作 SQL schema 名，禁 main/temp/auto 等）
+    pub code: String,
+    /// 展示名（如「德语」）
+    pub name: String,
+}
+
+/// 语言码合法性（与 packs.rs validate 的包语言约束一致）：2-4 位 ASCII 小写字母。
+/// `is` 这类 SQL 关键字码是合法语言码，靠 schema 名加引号支持（见 lookup/packs）。
+pub fn valid_lang_code(code: &str) -> bool {
+    let n = code.chars().count();
+    (2..=4).contains(&n) && code.chars().all(|c| c.is_ascii_lowercase())
+}
+
+/// 注册语言默认值（serde 缺字段 + impl Default 共用；derive Default 会给空 Vec，必须手写）
+pub fn default_languages() -> Vec<LanguageConfig> {
+    vec![
+        LanguageConfig { code: "en".into(), name: "英语".into() },
+        LanguageConfig { code: "fr".into(), name: "法语".into() },
+        LanguageConfig { code: "ja".into(), name: "日语".into() },
+    ]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
     /// 词典包更新 manifest 地址（GitHub release 直链或自定义；空 = 用 DEFAULT_MANIFEST_URL）
     #[serde(default)]
     pub manifest_url: String,
+    /// 注册语言列表（切换器/查询默认范围/分词语种校验的单一来源）。
+    /// 无包语言靠 LLM 查询时补全进 user_dict。
+    #[serde(default = "default_languages")]
+    pub languages: Vec<LanguageConfig>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            providers: Vec::new(),
+            manifest_url: String::new(),
+            languages: default_languages(),
+        }
+    }
 }
 
 /// 词典包更新源默认地址（podic-dictionary/dict 的 latest release manifest）。

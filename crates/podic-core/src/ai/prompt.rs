@@ -4,7 +4,18 @@
 use crate::lookup::Entry;
 use serde_json::Value;
 
-pub const LANG_NAMES: &[(&str, &str)] = &[("en", "英语"), ("fr", "法语"), ("ja", "日语"), ("zh", "中文")];
+/// 语言码 → 中文名（AI 提示词与前端展示共用语义；未命中回退原码）。
+/// 多语言化后用户可注册任意语言，这里只覆盖常见语言，其余由 LLM 直接理解语言码
+pub const LANG_NAMES: &[(&str, &str)] = &[
+    ("en", "英语"), ("fr", "法语"), ("ja", "日语"), ("zh", "中文"),
+    ("de", "德语"), ("es", "西班牙语"), ("pt", "葡萄牙语"), ("it", "意大利语"),
+    ("ru", "俄语"), ("ko", "韩语"), ("ar", "阿拉伯语"), ("hi", "印地语"),
+    ("th", "泰语"), ("vi", "越南语"), ("nl", "荷兰语"), ("pl", "波兰语"),
+    ("tr", "土耳其语"), ("sv", "瑞典语"), ("uk", "乌克兰语"), ("el", "希腊语"),
+    ("he", "希伯来语"), ("id", "印尼语"), ("ms", "马来语"), ("la", "拉丁语"),
+    ("fa", "波斯语"), ("hu", "匈牙利语"), ("cs", "捷克语"), ("da", "丹麦语"),
+    ("fi", "芬兰语"), ("no", "挪威语"),
+];
 
 pub fn lang_name(code: &str) -> &str {
     LANG_NAMES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n).unwrap_or(code)
@@ -32,7 +43,7 @@ pub struct Prompt {
 pub fn build(task: &str, text: &str, context: Option<&Value>) -> Prompt {
     match task {
         "explain" => Prompt {
-            system: "你是一位精通英法日三语的语言老师，面向中文母语者。用简体中文回答，用 Markdown，简明准确，不堆砌套话。".into(),
+            system: "你是一位精通多语种的语言老师，面向中文母语者。用简体中文回答，用 Markdown，简明准确，不堆砌套话。".into(),
             user: match context {
                 Some(ctx) => format!(
                     "请深度讲解词条：\n```json\n{}\n```\n用户补充：{text}\n\n按以下四部分输出，用 ## 小标题：\n## 核心词义（各义项一句话概括，标注词性）\n## 词源与构词\n## 近义辨析（列出 2-4 个易混词，说明区别，给出对应中文）\n## 常见搭配与例句（3-5 个，例句后附中文翻译）",
@@ -85,7 +96,7 @@ pub fn build(task: &str, text: &str, context: Option<&Value>) -> Prompt {
             let ctx = context.cloned().unwrap_or(Value::Null);
             let pretty = serde_json::to_string(&ctx).unwrap_or_default();
             Prompt {
-                system: "你是一位精通英法日三语的语言老师，面向中文母语者。用简体中文回答，Markdown，控制在 300 字内，不堆砌套话。".into(),
+                system: "你是一位精通多语种的语言老师，面向中文母语者。用简体中文回答，Markdown，控制在 300 字内，不堆砌套话。".into(),
                 user: format!(
                     "解析选中的内容：{text}\n上下文：\n```json\n{pretty}\n```\n\
                      按以下三部分输出，用 ## 小标题：\n\

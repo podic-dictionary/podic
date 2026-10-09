@@ -109,14 +109,15 @@ impl PackManager {
         if self.installed.contains_key(&lang) {
             self.detach(conn, &lang)?;
         }
-        conn.execute_batch(&format!("ATTACH DATABASE '{}' AS {lang}", path.to_string_lossy().replace('\'', "''")))?;
+        // schema 名加引号：支持 `is` 等 SQL 关键字语言码（裸拼会语法错误）
+        conn.execute_batch(&format!("ATTACH DATABASE '{}' AS \"{lang}\"", path.to_string_lossy().replace('\'', "''")))?;
         self.installed.insert(lang, info.clone());
         Ok(info)
     }
 
     pub fn detach(&mut self, conn: &Connection, lang: &str) -> Result<()> {
         if self.installed.remove(lang).is_some() {
-            conn.execute_batch(&format!("DETACH DATABASE {lang}"))?;
+            conn.execute_batch(&format!("DETACH DATABASE \"{lang}\""))?;
         }
         Ok(())
     }

@@ -104,7 +104,13 @@ fn user_entry(ud: &crate::store::UserDictEntry) -> Entry {
     }
 }
 
-pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) -> Result<Vec<Entry>> {
+pub fn lookup(
+    conn: &Connection,
+    installed: &[String],
+    langs: &[String],
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Entry>> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(vec![]);
@@ -121,6 +127,9 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
 
     for lang in langs {
         check_lang(lang)?;
+        // 无包语言（自定义语言）：跳过全部包 SQL，只走 user_dict 命中——
+        // 搭配前端 miss → AI complete → 入库 → 重查命中 matched_by:"user" 的补全闭环
+        let has_pack = installed.iter().any(|l| l == lang);
         let norm_q = crate::norm::norm(q, lang);
         // 日语促音容错：にっほん 也应命中 にほん（构建时已为含 っ 的读音生成脱落变体）
         let candidates: Vec<String> = if lang == "ja" && norm_q.contains('っ') {
@@ -129,41 +138,47 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
             vec![norm_q.clone()]
         };
 
-        // ① norm 精确 + ② form 屈折精确 + ②' user_dict（AI 补录）
+        // ① norm 精确 + ② form 屈折精确 + ②' user_dict（AI 补录）。
+        // schema 名统一双引号：支持 `is` 这类 SQL 关键字语言码（ATTACH 处同）
         for cand in &candidates {
-            let sql = format!("SELECT {SELECT_ENTRY} FROM {lang}.entry e WHERE e.norm = ?1");
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params![cand], |r| row_to_entry(lang, "exact", None, r))?;
-            for r in rows {
-                let e = r?;
-                if seen.insert((lang.clone(), e.entry_id)) {
-                    out.push(e);
+            if has_pack {
+                let sql = format!("SELECT {SELECT_ENTRY} FROM \"{lang}\".entry e WHERE e.norm = ?1");
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params![cand], |r| row_to_entry(lang, "exact", None, r))?;
+                for r in rows {
+                    let e = r?;
+                    if seen.insert((lang.clone(), e.entry_id)) {
+                        out.push(e);
+                    }
                 }
-            }
 
-            let sql = format!(
-                "SELECT {SELECT_ENTRY}, f.rule FROM {lang}.form f JOIN {lang}.entry e ON e.id = f.entry_id \
-                 WHERE f.form_norm = ?1 ORDER BY e.freq DESC"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params![cand], |r| {
-                let rule: Option<String> = r.get(9)?;
-                row_to_entry(lang, "form", rule, r)
-            })?;
-            for r in rows {
-                let e = r?;
-                if seen.insert((lang.clone(), e.entry_id)) {
-                    out.push(e);
+                let sql = format!(
+                    "SELECT {SELECT_ENTRY}, f.rule FROM \"{lang}\".form f JOIN \"{lang}\".entry e ON e.id = f.entry_id \
+                     WHERE f.form_norm = ?1 ORDER BY e.freq DESC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params![cand], |r| {
+                    let rule: Option<String> = r.get(9)?;
+                    row_to_entry(lang, "form", rule, r)
+                })?;
+                for r in rows {
+                    let e = r?;
+                    if seen.insert((lang.clone(), e.entry_id)) {
+                        out.push(e);
+                    }
                 }
             }
 
             // 用户词典命中（norm 精确 + form 镜像）。包优先去重：仅当包里已有该 headword
             // 且本次查询确实能经包解析到它（surface 就是它，或包 form 把 surface 指到它）时跳过；
-            // 包缺该屈折形时保留 user 词条——这正是 AI 补全的价值所在
+            // 包缺该屈折形时保留 user 词条——这正是 AI 补全的价值所在（无包语言恒保留）
             let pack_covers = |ud_norm: &str| -> Result<bool> {
+                if !has_pack {
+                    return Ok(false);
+                }
                 let sql = format!(
-                    "SELECT EXISTS(SELECT 1 FROM {lang}.entry e WHERE e.norm = ?1 \
-                     AND (e.norm = ?2 OR EXISTS(SELECT 1 FROM {lang}.form f WHERE f.form_norm = ?2 AND f.entry_id = e.id)))"
+                    "SELECT EXISTS(SELECT 1 FROM \"{lang}\".entry e WHERE e.norm = ?1 \
+                     AND (e.norm = ?2 OR EXISTS(SELECT 1 FROM \"{lang}\".form f WHERE f.form_norm = ?2 AND f.entry_id = e.id)))"
                 );
                 Ok(conn.query_row(&sql, rusqlite::params![ud_norm, cand], |r| r.get::<_, i64>(0))? == 1)
             };
@@ -180,10 +195,14 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
             }
         }
 
+        if !has_pack {
+            continue; // ③④⑤ 全是包 SQL，无包语言到此为止
+        }
+
         // ③ FTS 模糊（多词查询主要命中 zh_text / headword）
         if q.chars().count() >= 2 {
             let sql = format!(
-                "SELECT {SELECT_ENTRY} FROM {lang}.entry_fts fts JOIN {lang}.entry e ON e.id = fts.rowid \
+                "SELECT {SELECT_ENTRY} FROM \"{lang}\".entry_fts fts JOIN \"{lang}\".entry e ON e.id = fts.rowid \
                  WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2"
             );
             if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -202,7 +221,7 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
         // ④ 前缀（利用 idx_entry_norm 的索引范围扫描）
         let upper = format!("{}\u{10FFFF}", crate::norm::norm(q, lang));
         let sql = format!(
-            "SELECT {SELECT_ENTRY} FROM {lang}.entry e WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
+            "SELECT {SELECT_ENTRY} FROM \"{lang}\".entry e WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(
@@ -220,7 +239,7 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
         if has_cjk {
             let term = crate::norm::zh_term_norm(q);
             let sql = format!(
-                "SELECT {SELECT_ENTRY} FROM {lang}.zh_index z JOIN {lang}.entry e ON e.id = z.entry_id \
+                "SELECT {SELECT_ENTRY} FROM \"{lang}\".zh_index z JOIN \"{lang}\".entry e ON e.id = z.entry_id \
                  WHERE z.term_norm = ?1 ORDER BY e.freq DESC"
             );
             let mut stmt = conn.prepare(&sql)?;
@@ -244,7 +263,13 @@ pub fn lookup(conn: &Connection, langs: &[String], query: &str, limit: usize) ->
     Ok(out)
 }
 
-pub fn suggest(conn: &Connection, langs: &[String], prefix: &str, limit: usize) -> Result<Vec<SuggestItem>> {
+pub fn suggest(
+    conn: &Connection,
+    installed: &[String],
+    langs: &[String],
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<SuggestItem>> {
     let p = prefix.trim();
     if p.is_empty() {
         return Ok(vec![]);
@@ -255,16 +280,18 @@ pub fn suggest(conn: &Connection, langs: &[String], prefix: &str, limit: usize) 
         check_lang(lang)?;
         let lower = crate::norm::norm(p, lang);
         let upper = format!("{lower}\u{10FFFF}");
-        let sql = format!(
-            "SELECT e.headword, e.reading FROM {lang}.entry e \
-             WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params![lower, upper, limit as i64], |r| {
-            Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
-        })?;
-        out.extend(rows.flatten());
-        // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描）
+        if installed.iter().any(|l| l == lang) {
+            let sql = format!(
+                "SELECT e.headword, e.reading FROM \"{lang}\".entry e \
+                 WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params![lower, upper, limit as i64], |r| {
+                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
+            })?;
+            out.extend(rows.flatten());
+        }
+        // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描；无包语言唯一来源）
         let sql = "SELECT headword, reading FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
         if let Ok(mut stmt) = conn.prepare(sql) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![lang, lower, upper], |r| {
@@ -277,8 +304,14 @@ pub fn suggest(conn: &Connection, langs: &[String], prefix: &str, limit: usize) 
     Ok(out)
 }
 
-/// 中文反查：zh_index 精确 + FTS zh_text 模糊
-pub fn reverse(conn: &Connection, langs: &[String], term: &str, limit: usize) -> Result<Vec<Entry>> {
+/// 中文反查：zh_index 精确 + FTS zh_text 模糊（纯包索引，无包语言无结果）
+pub fn reverse(
+    conn: &Connection,
+    installed: &[String],
+    langs: &[String],
+    term: &str,
+    limit: usize,
+) -> Result<Vec<Entry>> {
     let q = term.trim();
     if q.is_empty() {
         return Ok(vec![]);
@@ -288,9 +321,12 @@ pub fn reverse(conn: &Connection, langs: &[String], term: &str, limit: usize) ->
     let mut seen = std::collections::HashSet::new();
     for lang in langs {
         check_lang(lang)?;
+        if !installed.iter().any(|l| l == lang) {
+            continue; // 无包语言没有反查索引
+        }
         let t = crate::norm::zh_term_norm(q);
         let sql = format!(
-            "SELECT {SELECT_ENTRY} FROM {lang}.zh_index z JOIN {lang}.entry e ON e.id = z.entry_id \
+            "SELECT {SELECT_ENTRY} FROM \"{lang}\".zh_index z JOIN \"{lang}\".entry e ON e.id = z.entry_id \
              WHERE z.term_norm = ?1 ORDER BY e.freq DESC LIMIT ?2"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -302,7 +338,7 @@ pub fn reverse(conn: &Connection, langs: &[String], term: &str, limit: usize) ->
         }
         // FTS 兜底（连续汉字整 token 命中）
         let sql = format!(
-            "SELECT {SELECT_ENTRY} FROM {lang}.entry_fts fts JOIN {lang}.entry e ON e.id = fts.rowid \
+            "SELECT {SELECT_ENTRY} FROM \"{lang}\".entry_fts fts JOIN \"{lang}\".entry e ON e.id = fts.rowid \
              WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2"
         );
         if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -326,12 +362,15 @@ pub fn reverse(conn: &Connection, langs: &[String], term: &str, limit: usize) ->
     Ok(out)
 }
 
-pub fn examples(conn: &Connection, lang: &str, entry_id: i64, limit: usize) -> Result<Vec<Sentence>> {
+pub fn examples(conn: &Connection, installed: &[String], lang: &str, entry_id: i64, limit: usize) -> Result<Vec<Sentence>> {
     check_lang(lang)?;
+    if !installed.iter().any(|l| l == lang) {
+        return Ok(vec![]); // 无包语言没有例句表
+    }
     let limit = limit.clamp(1, 20);
     let sql = format!(
-        "SELECT s.id, s.text, s.translation FROM {lang}.entry_sentence es \
-         JOIN {lang}.sentence s ON s.id = es.sentence_id \
+        "SELECT s.id, s.text, s.translation FROM \"{lang}\".entry_sentence es \
+         JOIN \"{lang}\".sentence s ON s.id = es.sentence_id \
          WHERE es.entry_id = ?1 ORDER BY es.score DESC LIMIT ?2"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -384,14 +423,14 @@ mod tests {
         insert_entry(&conn, "blorpish", "blorpish", 50.0);
         let langs = vec!["en".to_string()];
 
-        let items = lookup(&conn, &langs, "blorp", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "blorp", 20).unwrap();
         assert_eq!(items[0].matched_by, "user");
         assert!(items[0].entry_id < 0);
         assert_eq!(items[0].senses.as_ref().unwrap()[0]["zh"], "测试词");
         assert_eq!(items[1].matched_by, "prefix");
 
         // suggest 联想并入用户词典
-        let s = suggest(&conn, &langs, "blor", 10).unwrap();
+        let s = suggest(&conn, &["en".to_string()], &langs, "blor", 10).unwrap();
         assert!(s.iter().any(|x| x.headword == "blorp"));
     }
 
@@ -404,12 +443,12 @@ mod tests {
         let langs = vec!["en".to_string()];
 
         // surface 原形：包 exact 命中，user 平行弱词条被去重
-        let items = lookup(&conn, &langs, "manger", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "manger", 20).unwrap();
         assert_eq!(items.len(), 1);
         assert!(items[0].entry_id > 0);
 
         // 包缺 mangeait 这条屈折形：user 词条（form 镜像）应保留——AI 补全的价值所在
-        let items = lookup(&conn, &langs, "mangeait", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "user");
         assert_eq!(items[0].headword, "manger");
@@ -417,8 +456,57 @@ mod tests {
         // 包补上该屈折形后：user 被去重，只剩包词条
         conn.execute("INSERT INTO en.form(form_norm, entry_id, rule) VALUES ('mangeait', 1, 'impf')", [])
             .unwrap();
-        let items = lookup(&conn, &langs, "mangeait", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "form");
     }
 }
+
+    #[test]
+    fn 无包语言只走_user_dict() {
+        // 注册了 de 但没有包：user_dict 命中正常，包级查询不炸
+        let conn = Connection::open_in_memory().unwrap();
+        crate::store::init_app_db(&conn).unwrap();
+        crate::store::user_dict_upsert(
+            &conn, "de", "Haus", None, None, r#"[{"pos":["n."],"zh":"房屋"}]"#, "ai", None, None, None,
+        )
+        .unwrap();
+        let installed: Vec<String> = vec![];
+        let langs = vec!["de".to_string()];
+
+        let items = lookup(&conn, &installed, &langs, "Haus", 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].matched_by, "user");
+        assert_eq!(items[0].headword, "Haus");
+
+        // 联想：user_dict 联想照常，entry 联想跳过不报错
+        let s = suggest(&conn, &installed, &langs, "ha", 10).unwrap();
+        assert!(s.iter().any(|i| i.headword == "Haus"));
+
+        // 反查/例句：无包返回空
+        assert!(reverse(&conn, &installed, &langs, "房屋", 10).unwrap().is_empty());
+        assert!(examples(&conn, &installed, "de", -1, 5).unwrap().is_empty());
+
+        // 完全 miss 不报错（前端 FallbackCard 依赖空结果触发 AI 补全）
+        assert!(lookup(&conn, &installed, &langs, "nichtda", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sql_关键字语言码可挂载查询() {
+        // `is`（冰岛语）是 SQL 关键字：schema 名双引号后 ATTACH/查询都正常
+        let conn = Connection::open_in_memory().unwrap();
+        crate::store::init_app_db(&conn).unwrap();
+        conn.execute_batch("ATTACH ':memory:' AS \"is\"").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE \"is\".entry(id INTEGER PRIMARY KEY, norm TEXT NOT NULL, headword TEXT NOT NULL,
+                reading TEXT, ipa TEXT, pos TEXT, gender TEXT, freq REAL NOT NULL DEFAULT 0, senses TEXT, extra TEXT);
+             CREATE TABLE \"is\".form(form_norm TEXT NOT NULL, entry_id INTEGER NOT NULL, rule TEXT);",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO \"is\".entry(norm, headword, freq) VALUES ('hús', 'hús', 1.0)", [])
+            .unwrap();
+        let installed = vec!["is".to_string()];
+        let items = lookup(&conn, &installed, &installed, "hús", 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].matched_by, "exact");
+    }

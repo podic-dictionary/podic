@@ -115,15 +115,31 @@ pub fn tokenize(lang: &str, text: &str, vocab: Option<&HashSet<String>>) -> Vec<
                     }
                     continue;
                 }
-                // en/fr：CJK 段整段判非词（中英混排时不给 en 词典喂中文 run）
+                // en/fr：CJK 段整段判非词（中英混排时不给 en 词典喂中文 run）。
+                // zh（注册为阅读语言时）：逐字 token，norm 照记，点击可触发 AI 补全——
+                // 与 ja 无词表的退化行为一致；ko 走下方字母串路径不需要特判
                 if is_cjk(c) {
+                    let zh_mode = lang == "zh";
                     let j = i + 1 + cs[i + 1..].iter().take_while(|&&x| is_cjk(x)).count();
-                    toks.push(Token {
-                        t: cs[i..j].iter().collect(),
-                        is_word: false,
-                        norm: String::new(),
-                        space_after: false,
-                    });
+                    if zh_mode {
+                        for k in i..j {
+                            let t: String = cs[k..k + 1].iter().collect();
+                            let norm = word_norm(&t, lang).unwrap_or_default();
+                            toks.push(Token {
+                                t,
+                                is_word: cs[k].is_alphabetic(),
+                                norm,
+                                space_after: false,
+                            });
+                        }
+                    } else {
+                        toks.push(Token {
+                            t: cs[i..j].iter().collect(),
+                            is_word: false,
+                            norm: String::new(),
+                            space_after: false,
+                        });
+                    }
                     i = j;
                     continue;
                 }
@@ -179,8 +195,8 @@ pub fn build_vocab(conn: &Connection, lang: &str) -> Result<HashSet<String>, rus
     let mut set = HashSet::new();
     // schema 名（{lang}）不能参数化——小写字母校验由 check_lang / 调用方保证；lang 的值走绑定
     let mut stmt = conn.prepare(&format!(
-        "SELECT norm FROM {lang}.entry WHERE norm <> ''
-         UNION SELECT form_norm FROM {lang}.form WHERE form_norm <> ''
+        "SELECT norm FROM \"{lang}\".entry WHERE norm <> ''
+         UNION SELECT form_norm FROM \"{lang}\".form WHERE form_norm <> ''
          UNION SELECT norm FROM main.user_dict WHERE lang = ?1 AND norm <> ''"
     ))?;
     let rows = stmt.query_map([lang], |r| r.get::<_, String>(0))?;

@@ -17,7 +17,8 @@ use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 fn langs_of(core: &Core, langs: Option<String>) -> Vec<String> {
     match langs {
         Some(s) if !s.is_empty() => s.split(',').map(|x| x.trim().to_string()).collect(),
-        _ => core.packs.langs(),
+        // 默认查注册语言（含无包语言——它们靠 user_dict/LLM 补全），不再只看已装包
+        _ => core.settings.languages.iter().map(|l| l.code.clone()).collect(),
     }
 }
 
@@ -190,7 +191,8 @@ pub async fn lookup(
 ) -> ApiResult<Json<Value>> {
     let core = lock(&state);
     let langs = langs_of(&core, p.langs);
-    let items = podic_core::lookup::lookup(&core.conn, &langs, &p.q, p.limit.unwrap_or(20))?;
+    let installed = core.packs.langs();
+    let items = podic_core::lookup::lookup(&core.conn, &installed, &langs, &p.q, p.limit.unwrap_or(20))?;
     Ok(Json(json!({ "items": items })))
 }
 
@@ -200,7 +202,8 @@ pub async fn suggest(
 ) -> ApiResult<Json<Value>> {
     let core = lock(&state);
     let langs = langs_of(&core, p.langs);
-    let items = podic_core::lookup::suggest(&core.conn, &langs, &p.q, p.limit.unwrap_or(8))?;
+    let installed = core.packs.langs();
+    let items = podic_core::lookup::suggest(&core.conn, &installed, &langs, &p.q, p.limit.unwrap_or(8))?;
     Ok(Json(json!({ "items": items })))
 }
 
@@ -210,7 +213,8 @@ pub async fn reverse(
 ) -> ApiResult<Json<Value>> {
     let core = lock(&state);
     let langs = langs_of(&core, p.langs);
-    let items = podic_core::lookup::reverse(&core.conn, &langs, &p.q, p.limit.unwrap_or(20))?;
+    let installed = core.packs.langs();
+    let items = podic_core::lookup::reverse(&core.conn, &installed, &langs, &p.q, p.limit.unwrap_or(20))?;
     Ok(Json(json!({ "items": items })))
 }
 
@@ -227,7 +231,8 @@ pub async fn examples(
     Query(p): Query<ExampleParams>,
 ) -> ApiResult<Json<Value>> {
     let core = lock(&state);
-    let items = podic_core::lookup::examples(&core.conn, &p.lang, p.id, p.limit.unwrap_or(5))?;
+    let installed = core.packs.langs();
+    let items = podic_core::lookup::examples(&core.conn, &installed, &p.lang, p.id, p.limit.unwrap_or(5))?;
     Ok(Json(json!({ "items": items })))
 }
 
@@ -295,6 +300,7 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
     Ok(Json(json!({
         "providers": providers,
         "manifest_url": core.settings.manifest_url,
+        "languages": core.settings.languages,
     })))
 }
 
@@ -316,10 +322,51 @@ pub struct ProviderIn {
 }
 
 #[derive(Deserialize)]
+pub struct LanguageIn {
+    code: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
 pub struct SettingsIn {
     providers: Vec<ProviderIn>,
     #[serde(default)]
     manifest_url: String,
+    /// None = 保留现值（旧客户端只保存 Provider 时不会抹掉语言列表）；Some 才全量替换
+    #[serde(default)]
+    languages: Option<Vec<LanguageIn>>,
+}
+
+fn bad_req(msg: &str) -> ApiError {
+    ApiError(axum::http::StatusCode::BAD_REQUEST, msg.to_string())
+}
+
+/// languages 替换校验：非空（至少一种语言）、码合法唯一、禁 SQL 保留名与 UI 特殊值、名称非空
+fn validate_languages(langs: &[LanguageIn]) -> Result<Vec<podic_core::settings::LanguageConfig>, ApiError> {
+    if langs.is_empty() {
+        return Err(bad_req("至少保留一种语言"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(langs.len());
+    for l in langs {
+        let code = l.code.trim().to_string();
+        let name = l.name.trim().to_string();
+        if !podic_core::settings::valid_lang_code(&code) {
+            return Err(bad_req(&format!("语言码 {code:?} 不合法（2-4 位小写字母）")));
+        }
+        // schema 名加引号可支持 SQL 关键字码（如 is），但 main/temp 是 SQLite 保留库名，auto 与翻译视图冲突
+        if matches!(code.as_str(), "main" | "temp" | "auto") {
+            return Err(bad_req(&format!("语言码 {code:?} 是保留名")));
+        }
+        if name.is_empty() {
+            return Err(bad_req(&format!("语言 {code:?} 缺少显示名")));
+        }
+        if !seen.insert(code.clone()) {
+            return Err(bad_req(&format!("语言码 {code:?} 重复")));
+        }
+        out.push(podic_core::settings::LanguageConfig { code, name });
+    }
+    Ok(out)
 }
 
 pub async fn save_settings(
@@ -359,6 +406,9 @@ pub async fn save_settings(
     }
     core.settings.providers = providers;
     core.settings.manifest_url = input.manifest_url;
+    if let Some(langs) = &input.languages {
+        core.settings.languages = validate_languages(langs)?;
+    }
     core.save_settings()?;
     Ok(Json(json!({ "ok": true })))
 }

@@ -18,10 +18,11 @@ fn bad(msg: &str) -> ApiError {
 }
 
 fn ensure_lang(core: &Core, lang: &str) -> Result<(), ApiError> {
-    if core.packs.langs().iter().any(|l| l == lang) {
+    // 多语言化：注册语言即可用（无包语言靠 user_dict/LLM 补全），不再要求已装包
+    if core.settings.languages.iter().any(|l| l.code == lang) {
         Ok(())
     } else {
-        Err(bad(&format!("语种 {lang} 未安装词典包")))
+        Err(bad(&format!("语种 {lang} 未在语言列表中（设置 → 语言 添加）")))
     }
 }
 
