@@ -20,7 +20,9 @@ pub fn norm(s: &str, lang: &str) -> String {
     // NFKC -> casefold（Rust 无 casefold，to_lowercase + 少量特例与 Python 对齐）
     let s: String = s.nfkc().flat_map(|c| c.to_lowercase()).collect();
     let s = s.replace('ß', "ss");
-    let s = s.trim().to_string();
+    // 内部连续空白折叠成单空格：词典 headword 从不含连续空白，用户查询里的多空格
+    // /换行/制表符折叠后才能命中（幂等，单空格串不受影响）
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     match lang {
         "fr" => s.nfkd().filter(|c| !unicode_normalization::char::is_combining_mark(*c)).collect(),
         "ja" => kata_to_hira(&s),
@@ -52,6 +54,13 @@ mod tests {
     #[test]
     fn en_casefold() {
         assert_eq!(norm("Bank", "en"), "bank");
+    }
+
+    #[test]
+    fn internal_whitespace_collapsed() {
+        assert_eq!(norm("prendre  son \t temps", "fr"), "prendre son temps");
+        assert_eq!(norm("well  known", "en"), "well known"); // 单空格幂等
+        assert_eq!(norm("  ", "fr"), "");
     }
 
     #[test]

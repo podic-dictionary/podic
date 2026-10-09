@@ -294,13 +294,11 @@ pub async fn list_user_dict(
 }
 
 /// alt_norm 归一化：屈折镜像键必须与查询时的 norm 同构，前端无 norm 实现时传的是原文
-/// （如「Élevé」「au fil」），这里统一走 norm()（幂等，阅读器传已归一化串不受影响）；
-/// norm() 不折叠内部空白，多词短语这里先折（查询侧 norm("a  b") 也会带双空格，但
-/// 用户输入几乎总是单空格，镜像键以单空格形态存才有意义）
+/// （如「Élevé」「au fil」），统一走 norm()（幂等；内部空白折叠已并入 norm，两侧对称）
 fn normalize_alt_norm(lang: &str, alt: Option<&str>) -> Option<String> {
     alt.map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| podic_core::norm::norm(&s.split_whitespace().collect::<Vec<_>>().join(" "), lang))
+        .map(|s| podic_core::norm::norm(s, lang))
 }
 
 /// POST /api/user-dict：upsert 幂等

@@ -59,6 +59,17 @@ SOURCES = {
         "file": "fr-extract.jsonl.gz",
         "cc": {"name": "French Wiktionary (wiktextract)", "url": "https://kaikki.org/dictionary/French", "license": "CC BY-SA 3.0"},
     },
+    # jmdict 系：下载 URL 由 download_all.py 按最新 release 动态填充；
+    # 静态条目保证单独跑 build_pack 时 meta.sources 也有致谢（ja 包曾因此为空）
+    "jmdict_eng": {
+        "cc": {"name": "JMdict/EDRDG", "url": "https://www.edrdg.org/jmdict/j_jmdict.html", "license": "CC BY-SA 4.0"},
+    },
+    "jmdict_fre": {
+        "cc": {"name": "JMdict/EDRDG", "url": "https://www.edrdg.org/jmdict/j_jmdict.html", "license": "CC BY-SA 4.0"},
+    },
+    "kanjidic2": {
+        "cc": {"name": "KANJIDIC2", "url": "https://www.edrdg.org/kanjidic/kanjidic.html", "license": "CC BY-SA 4.0"},
+    },
     "deinflect": {
         "url": "https://raw.githubusercontent.com/FooSoft/yomichan/master/ext/data/deinflect.json",
         "file": "deinflect.json",
@@ -173,8 +184,10 @@ def kata_to_hira(s: str) -> str:
 
 
 def norm(s: str, lang: str) -> str:
-    """检索规范化：NFKC + 小写；fr 去变音符；ja 片假名转平假名。"""
+    """检索规范化：NFKC + 小写 + 内部空白折叠；fr 去变音符；ja 片假名转平假名。
+    与 crates/podic-core/src/norm.rs 保持一致。"""
     s = unicodedata.normalize("NFKC", s).casefold().strip()
+    s = " ".join(s.split())
     if lang == "fr":
         s = "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c))
     if lang == "ja":

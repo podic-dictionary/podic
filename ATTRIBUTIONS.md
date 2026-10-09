@@ -11,6 +11,7 @@ podic 的词典数据来自以下开源项目，本应用不包含任何专有�
 | CC-CEDICT | 中→英反向匹配，补英语中文释义 | CC BY-SA 4.0 (MDBG) | https://www.mdbg.net/chinese-dictionary/page/cedict |
 | Lexique 3.83 | 法语词条（音位转写→IPA、词性、阴阳性、词频、屈折映射） | CC BY 4.0 | http://www.lexique.org |
 | CFDICT | 中→法反向匹配，补法语中文释义 | CC BY-SA 3.0 | https://chine.in/cfdict.php |
+| French Wiktionary (wiktextract/kaikki) | 法语多词短语与缩写补齐 | CC BY-SA 3.0 | https://kaikki.org/dictionary/French |
 | JMdict / KANJIDIC2 | 日语词条（读音、词性、英文释义、汉字信息） | CC BY-SA 4.0 (EDRDG) | https://www.edrdg.org/jmdict/j_jmdict.html |
 | jmdict-simplified | JMdict 的 JSON 发行版 | CC BY-SA 4.0 | https://github.com/scriptin/jmdict-simplified |
 | Tatoeba | 多语种母语者例句及互译 | CC BY 2.0 FR | https://tatoeba.org |
