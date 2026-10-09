@@ -67,6 +67,7 @@ def main():
     ap.add_argument("--model", default=os.environ.get("PODIC_REFINE_MODEL", "glm-5.3"))
     ap.add_argument("--rank-file", help="headword<TAB>count 词频文件（覆盖默认 freq 排序）")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--concurrency", type=int, default=1, help="并发批次数（1=串行旧行为；4-8 推荐）")
     args = ap.parse_args()
 
     base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -101,62 +102,71 @@ def main():
     common.log(f"候选 {len(candidates)}，已精修 {len(refined_data)}，待精修 {len(todo)}")
 
     if not args.dry_run:
+        import concurrent.futures as cf
+
         n_batch = (len(todo) + args.batch - 1) // args.batch
         n_err = 0
-        with open(refined_path, "a", encoding="utf-8") as out:
-            for bi in range(n_batch):
-                chunk = todo[bi * args.batch : (bi + 1) * args.batch]
-                words_payload = []
-                for e in chunk:
-                    en_glosses = [
-                        s.get("en") or s.get("fr") for s in (e.get("senses") or []) if isinstance(s, dict)
-                    ]
-                    words_payload.append({
-                        "headword": e["headword"],
-                        "reading": e.get("reading"),
-                        "pos": e.get("pos"),
-                        "gender": e.get("gender"),
-                        "existing_glosses": [g for g in en_glosses if g][:4] or None,
-                    })
-                user = (
-                    f"为以下 {len(chunk)} 个{LANG_NAME[args.lang]}词条给出中文释义和例句。"
-                    "要求：义项按常用度排序（1-3 个），每个义项以词性缩写开头（如 n. / v. / adj.）；"
-                    "每个词条给 2 个例句（覆盖不同义项）并附中文翻译。\n"
-                    f"输入：{json.dumps(words_payload, ensure_ascii=False)}\n"
-                    '输出格式：[{"headword": "...", "senses": [{"zh": "n. 中文释义"}], '
-                    '"examples": [{"text": "例句", "zh": "中文翻译"}]}]'
-                )
 
-                result = None
-                for attempt in range(2):
-                    try:
-                        raw = api_call(
-                            base_url, key, args.model, system_prompt(), user,
-                            use_bearer=bool(os.environ.get("ANTHROPIC_AUTH_TOKEN")),
-                        )
-                        raw = raw.strip()
-                        if raw.startswith("```"):
-                            raw = raw.split("```")[1].removeprefix("json")
-                        result = json.loads(raw)
-                        break
-                    except Exception as e:  # noqa: BLE001
-                        common.log(f"[warn] 批次 {bi + 1} 第 {attempt + 1} 次失败: {e}")
-                        time.sleep(3)
+        def do_batch(bi: int) -> tuple[int, list[dict] | None]:
+            """一次批调用：返回 (批号, 合法行列表)；None = 两次重试都失败（不落盘，下次续跑）"""
+            chunk = todo[bi * args.batch : (bi + 1) * args.batch]
+            words_payload = []
+            for e in chunk:
+                en_glosses = [
+                    s.get("en") or s.get("fr") for s in (e.get("senses") or []) if isinstance(s, dict)
+                ]
+                words_payload.append({
+                    "headword": e["headword"],
+                    "reading": e.get("reading"),
+                    "pos": e.get("pos"),
+                    "gender": e.get("gender"),
+                    "existing_glosses": [g for g in en_glosses if g][:4] or None,
+                })
+            user = (
+                f"为以下 {len(chunk)} 个{LANG_NAME[args.lang]}词条给出中文释义和例句。"
+                "要求：义项按常用度排序（1-3 个），每个义项以词性缩写开头（如 n. / v. / adj.）；"
+                "每个词条给 2 个例句（覆盖不同义项）并附中文翻译。\n"
+                f"输入：{json.dumps(words_payload, ensure_ascii=False)}\n"
+                '输出格式：[{"headword": "...", "senses": [{"zh": "n. 中文释义"}], '
+                '"examples": [{"text": "例句", "zh": "中文翻译"}]}]'
+            )
+            for attempt in range(2):
+                try:
+                    raw = api_call(
+                        base_url, key, args.model, system_prompt(), user,
+                        use_bearer=bool(os.environ.get("ANTHROPIC_AUTH_TOKEN")),
+                    )
+                    raw = raw.strip()
+                    if raw.startswith("```"):
+                        raw = raw.split("```")[1].removeprefix("json")
+                    result = json.loads(raw)
+                    return bi, [r for r in result if isinstance(r, dict) and r.get("headword") and r.get("senses")]
+                except Exception as e:  # noqa: BLE001
+                    common.log(f"[warn] 批次 {bi + 1} 第 {attempt + 1} 次失败: {e}")
+                    time.sleep(3)
+            return bi, None
 
-                if result is None:
+        n_done = 0
+        with open(refined_path, "a", encoding="utf-8") as out, \
+                cf.ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
+            futures = [pool.submit(do_batch, bi) for bi in range(n_batch)]
+            for fut in cf.as_completed(futures):
+                bi, rows = fut.result()
+                n_done += 1
+                if rows is None:
                     n_err += 1
                     continue  # 不落盘，下次运行自动重试
-
-                merged = 0
-                for r in result:
-                    if isinstance(r, dict) and r.get("headword") and r.get("senses"):
-                        out.write(json.dumps(r, ensure_ascii=False) + "\n")
-                        refined_data[r["headword"]] = r
-                        merged += 1
+                for r in rows:
+                    out.write(json.dumps(r, ensure_ascii=False) + "\n")
+                    refined_data[r["headword"]] = r
                 out.flush()
-                common.log(f"[{bi + 1}/{n_batch}] 批内合并 {merged}/{len(chunk)}")
+                common.log(f"[{n_done}/{n_batch}] 批 {bi + 1} 合并 {len(rows)}/{len(todo[bi * args.batch : (bi + 1) * args.batch])}")
         if n_err:
             common.log(f"错误批次 {n_err}（下次运行重试）")
+
+    if args.dry_run:
+        common.log("[dry] 到此为止（不联网、不合并写盘）")
+        return
 
     # ---- 合并回 entries.jsonl + 例句文件 ----
     neg_id = -1
