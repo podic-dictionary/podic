@@ -3,7 +3,7 @@ import WebKit
 
 /// WKWebView 指向设备内 podic 后端（127.0.0.1:{port}）。
 /// 首启把 Bundle 里的 web/ 与 packs/*.db 落到 Documents/data（packs 不覆盖已有文件）。
-class ViewController: UIViewController, WKNavigationDelegate, WKScriptMessageHandler {
+class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private(set) var webView: WKWebView!
     /// 待执行的深链接查询（podic:// URL / launch 参数 -search hi -lang en），页面加载完后执行
     var pendingSearch: (query: String, lang: String?)?
@@ -15,6 +15,7 @@ class ViewController: UIViewController, WKNavigationDelegate, WKScriptMessageHan
     override func loadView() {
         webView = WKWebView(frame: .zero)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.configuration.userContentController.add(self, name: "podicRender")
         view = webView
     }
@@ -77,6 +78,34 @@ class ViewController: UIViewController, WKNavigationDelegate, WKScriptMessageHan
             } else {
                 self.renderViewDidFinish(webView)
             }
+        }
+    }
+
+    /// 只拦主视图的外链导航（教程等 http(s) 非本机地址 → 系统浏览器）；
+    /// SPA 渲染的离屏 WebView 共用本 delegate，必须放行任意站点
+    nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        MainActor.assumeIsolated {
+            guard webView === self.webView,
+                  let url = navigationAction.request.url,
+                  ["http", "https"].contains(url.scheme ?? ""),
+                  url.host != "127.0.0.1", url.host != "localhost" else {
+                decisionHandler(.allow)
+                return
+            }
+            decisionHandler(.cancel)
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// window.open / target=_blank：不开内嵌新窗，外链交给系统浏览器
+    nonisolated func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                             for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        MainActor.assumeIsolated {
+            if let url = navigationAction.request.url {
+                UIApplication.shared.open(url)
+            }
+            return nil
         }
     }
 

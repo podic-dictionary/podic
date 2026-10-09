@@ -156,6 +156,7 @@ async function copyRawFile(
 @Component
 struct Index {
   private controller: webview.WebviewController = new webview.WebviewController();
+  private ctx: common.UIAbilityContext | null = null;
   @State url: string = '';
   @State tip: string = '正在准备词典数据…';
   // 「能否应用内返回」由前端经 PodicHarmony 桥同步（Web 的 canGoBack 不认 pushState）
@@ -167,6 +168,7 @@ struct Index {
 
   async boot(): Promise<void> {
     const ctx = getContext(this) as common.UIAbilityContext;
+    this.ctx = ctx;
     const dataDir = ctx.filesDir + '/data';
     try {
       await installAssets(ctx, dataDir);
@@ -198,6 +200,23 @@ struct Index {
             name: 'PodicHarmony',
             methodList: ['setCanGoBack'],
             controller: this.controller
+          })
+          // 本机后端页面留在 Web；http(s) 外链（词典包教程等）交系统浏览器打开
+          .onLoadIntercept((event) => {
+            const url = event?.data?.getRequestUrl() ?? '';
+            const isHttp = url.startsWith('http://') || url.startsWith('https://');
+            const isLocal = url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost');
+            if (isHttp && !isLocal) {
+              this.ctx?.startAbility({
+                action: 'ohos.want.action.viewData',
+                entities: ['entity.system.browsable'],
+                uri: url
+              }).catch(() => {
+                // 无可处理应用时静默，停留当前页
+              });
+              return true;
+            }
+            return false;
           })
       } else {
         Column() {

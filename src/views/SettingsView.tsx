@@ -13,8 +13,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
-import Markdown from "../components/Markdown";
-import { PACK_GUIDE_MD } from "../content/packGuide";
+import { PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
 interface ModelRow {
@@ -135,7 +134,7 @@ function SubHeader({
   );
 }
 
-export type SettingsSub = null | "ai" | "about" | "updates" | "packs" | "userdict" | "languages" | "pack-guide";
+export type SettingsSub = null | "ai" | "about" | "updates" | "packs" | "userdict" | "languages";
 
 /// 语言管理的一行（dnd-kit 可排序）：抓手拖动换序，顺序即切换器渲染顺序
 function SortableLangRow({
@@ -191,11 +190,9 @@ function SortableLangRow({
 /// 重新添加即恢复）；无词典包的语言靠 AI 补词（user_dict）积累词库
 function LanguagesPage({
   onBack,
-  onGuide,
   curLang,
 }: {
   onBack: () => void;
-  onGuide: () => void;
   curLang: string;
 }) {
   const { languages, setLanguages, languagesFailed } = useSettings();
@@ -466,7 +463,7 @@ function LanguagesPage({
 
       <div className="mt-5">
         <button
-          onClick={onGuide}
+          onClick={() => window.open(PACK_GUID_URL, "_blank", "noopener")}
           className="text-xs text-emerald-600 hover:underline dark:text-emerald-400"
         >
           想构建完整的离线词典包？看「创建词典包」教程 →
@@ -484,18 +481,6 @@ function LanguagesPage({
         }}
         onCancel={() => setConfirmRemove(null)}
       />
-    </div>
-  );
-}
-
-/// 创建词典包教程（长文档 Markdown 渲染）
-function PackGuidePage({ onBack }: { onBack: () => void }) {
-  return (
-    <div className="mx-auto max-w-2xl p-4">
-      <SubHeader title="创建词典包" onBack={onBack} />
-      <div className="mt-3 [&_pre]:overflow-x-auto">
-        <Markdown text={PACK_GUIDE_MD} />
-      </div>
     </div>
   );
 }
@@ -895,12 +880,7 @@ export default function SettingsView({
 
   // ---- 二级页：语言管理 ----
   if (sub === "languages") {
-    return <LanguagesPage onBack={() => setSub(null)} onGuide={() => setSub("pack-guide")} curLang={curLang} />;
-  }
-
-  // ---- 二级页：创建词典包教程 ----
-  if (sub === "pack-guide") {
-    return <PackGuidePage onBack={() => setSub(null)} />;
+    return <LanguagesPage onBack={() => setSub(null)} curLang={curLang} />;
   }
 
   // ---- 二级页：词典包管理 ----
@@ -1019,7 +999,7 @@ export default function SettingsView({
           onClick={() => setSub("languages")}
         />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
-        <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => setSub("pack-guide")} />
+        <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => window.open(PACK_GUID_URL, "_blank", "noopener")} />
         <Row label="词典包更新源" hint={manifest ? "已配置" : "未配置"} onClick={() => setSub("updates")} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />
       </section>

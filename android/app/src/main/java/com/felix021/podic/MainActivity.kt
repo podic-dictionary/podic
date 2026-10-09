@@ -2,11 +2,13 @@ package com.felix021.podic
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.io.File
@@ -93,7 +95,24 @@ class MainActivity : Activity() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            webViewClient = WebViewClient()
+            // 允许用户手势触发的 window.open（教程等外链走系统浏览器）
+            settings.javaScriptCanOpenWindowsAutomatically = true
+            webViewClient = object : WebViewClient() {
+                /// 本机后端页面留在 WebView；http(s) 外链转发系统浏览器打开
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val u = request.url
+                    val local = u.scheme == "http" && (u.host == "127.0.0.1" || u.host == "localhost")
+                    if (!local && (u.scheme == "http" || u.scheme == "https")) {
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, u))
+                        } catch (_: Exception) {
+                            // 无可处理的应用则忽略，停留当前页
+                        }
+                        return true
+                    }
+                    return false
+                }
+            }
             addJavascriptInterface(PodicBridge(), "PodicAndroid")
             setBackgroundColor(Color.rgb(0xf7, 0xf9, 0xf4)) // 纸底色，起动力避免白闪
         }
