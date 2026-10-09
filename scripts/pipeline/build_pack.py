@@ -212,7 +212,8 @@ def main():
         for s in common.read_jsonl(work / "sentences.jsonl"):
             sent_batch.append((s["id"], s["text"], json.dumps(s.get("translation") or [], ensure_ascii=False)))
         for r in common.read_jsonl(work / "entry_sentence.jsonl"):
-            key = r["entry"]
+            # 两种键：tatoeba 关联用 entry（headword）；refine 的 AI 例句用 entry_norm（norm）
+            key = r.get("entry") or r.get("entry_norm")
             # norm 优先（ja 关联键是 norm；fr 无变音词 key 即 norm），变音词 norm 未命中走 casefold(headword)
             for eid in norm_to_id.get(key) or head_to_id.get(key) or []:
                 link_batch.append((eid, r["sentence_id"], r.get("score") or 0.0))
