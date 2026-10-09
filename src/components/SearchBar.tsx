@@ -3,8 +3,8 @@ import { suggest } from "../api";
 import { getHistory, type HistoryItem } from "../history";
 import type { Lang, SuggestItem } from "../types";
 import { XIcon } from "./icons";
+import { useSettings } from "../SettingsContext";
 
-const LANG_LABEL: Record<string, string> = { en: "英", fr: "法", ja: "日" };
 
 export default function SearchBar({
   langs,
@@ -16,6 +16,8 @@ export default function SearchBar({
   /** 一键清空后通知父级重置结果区（回到空态） */
   onClear?: () => void;
 }) {
+  const { languages } = useSettings();
+  const langName = (code: string) => languages.find((l) => l.code === code)?.name.slice(0, 1) ?? code;
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SuggestItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -128,7 +130,7 @@ export default function SearchBar({
                 </span>
                 <span className="font-dict text-zinc-900 dark:text-zinc-100">{h.headword}</span>
                 <span className="rounded border border-zinc-200 px-1 text-xs leading-4 text-zinc-400 dark:border-zinc-700">
-                  {LANG_LABEL[h.lang] ?? h.lang}
+                  {langName(h.lang)}
                 </span>
                 <span className="ml-auto max-w-[45%] truncate text-sm text-zinc-400">{h.gloss}</span>
               </button>

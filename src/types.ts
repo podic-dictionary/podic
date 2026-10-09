@@ -1,4 +1,11 @@
-export type Lang = "en" | "fr" | "ja";
+/** 语言码（多语言化后为开放集合：内置 en/fr/ja + 用户注册的任意语言码） */
+export type Lang = string;
+
+/** 注册语言（设置 → 语言 管理；source of truth 是后端 settings.languages） */
+export interface LanguageConfig {
+  code: string;
+  name: string;
+}
 export type View = "search" | "translate" | "reading" | "favorites" | "settings";
 
 export interface PackInfo {

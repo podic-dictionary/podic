@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listFavorites, removeFavorite, type Favorite } from "../api";
+import { useSettings } from "../SettingsContext";
 
-const LANG_NAMES: Record<string, string> = { en: "英", fr: "法", ja: "日" };
 
 export default function FavoritesView({
   active,
@@ -10,6 +10,9 @@ export default function FavoritesView({
   active: boolean;
   onOpenWord: (word: string, lang: string) => void;
 }) {
+  const { languages } = useSettings();
+  const langName = (code: string) =>
+    languages.find((x) => x.code === code)?.name.slice(0, 1) ?? code;
   const [items, setItems] = useState<Favorite[]>([]);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
@@ -70,7 +73,7 @@ export default function FavoritesView({
                       : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   }`}
                 >
-                  {l === "all" ? "全部" : (LANG_NAMES[l] ?? l)}
+                  {l === "all" ? "全部" : (langName(l))}
                 </button>
               ))}
             </div>
@@ -104,7 +107,7 @@ export default function FavoritesView({
               <div>
               <p className="font-medium">
                 <span className="mr-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">
-                  {LANG_NAMES[f.lang] ?? f.lang}
+                  {langName(f.lang)}
                 </span>
                 {f.headword}
               </p>

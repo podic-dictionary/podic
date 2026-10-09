@@ -39,11 +39,10 @@ export default function App() {
       return null;
     }
   });
-  // 语言选择持久化，恢复上次使用的语种（脏值回退英文）
+  // 语言选择持久化；初始值不校验枚举（多语言化后集合动态），注册表加载后统一校验
   const [lang, setLangState] = useState<Lang>(() => {
     try {
-      const v = localStorage.getItem("podic.lang") as Lang | null;
-      return v && ["en", "fr", "ja"].includes(v) ? v : "en";
+      return localStorage.getItem("podic.lang") || "en";
     } catch {
       return "en";
     }
@@ -55,7 +54,14 @@ export default function App() {
       localStorage.setItem("podic.lang", l);
     } catch { /* 静默 */ }
   }, []);
-  const { fontScale, hand } = useSettings();
+  const { fontScale, hand, languages } = useSettings();
+
+  // 注册表校验：当前语言被移出列表（多端同步/重置）后回退首项并持久化；每次列表变化重跑
+  useEffect(() => {
+    if (languages.length > 0 && !languages.some((l) => l.code === lang)) {
+      setLang(languages[0].code);
+    }
+  }, [languages, lang, setLang]);
   // 右手: 高频入口靠右（查词在最右、拇指热区）；左手: 原顺序
   const navViews = hand === "right" ? [...VIEWS].reverse() : VIEWS;
   // 各 tab 常驻（display 切换）保住内部状态；滚动位置按 tab 记忆恢复
@@ -170,7 +176,7 @@ export default function App() {
   useEffect(() => {
     (window as unknown as { __podicSearch?: (q: string, lang?: string) => void }).__podicSearch =
       (q, lang) => {
-        if (lang && ["en", "fr", "ja"].includes(lang)) setLang(lang as Lang);
+        if (lang && languages.some((l) => l.code === lang)) setLang(lang);
         openWord(q, lang ?? "en");
       };
   });
@@ -207,7 +213,9 @@ export default function App() {
         >
           {/* 印章 / 语言切换 / 返回 是独立子元素，justify-between 才能把控件推到拇指侧 */}
           <div className="seal" aria-label="Podic">典</div>
-          {view !== "reading" && <LanguageSwitcher value={lang} onChange={setLang} />}
+          {view !== "reading" && (
+            <LanguageSwitcher value={lang} onChange={setLang} languages={languages} />
+          )}
           {view === "reading" && articleId !== null && (
             <button
               onClick={() => setArticleId(null)}

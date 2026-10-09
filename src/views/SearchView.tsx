@@ -38,11 +38,13 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
       setQuery(q);
       setError("");
       try {
-        // 路由：日语查询走正向（假名/汉字表记都在 entry/form 里）；
-        // 英/法查询含汉字时走中文反查；日语无结果且含汉字再尝试反查（中文→日语）
+        // 路由：日语及新注册语言先走正向（假名/汉字/user_dict 表记都在正向路径里，
+        // 无包语言的 AI 补录词条只有正向能命中），空且含汉字再反查兜底；
+        // en/fr 保持旧行为：含汉字直接中文反查
         const hasKanji = /[一-鿿]/.test(q);
+        const forwardFirst = lang === "ja" || !["en", "fr"].includes(lang);
         let items: Entry[];
-        if (lang === "ja") {
+        if (forwardFirst) {
           items = await lookup(q, lang);
           if (items.length === 0 && hasKanji) items = await reverse(q, lang);
         } else {

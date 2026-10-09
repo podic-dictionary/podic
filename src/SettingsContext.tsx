@@ -1,5 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getSettings, type ProviderView } from "./api";
+import { getSettings, saveSettings, type ProviderView } from "./api";
+import type { LanguageConfig } from "./types";
+
+/** 后端不可用时的本地兜底（与后端 default_languages 一致） */
+export const DEFAULT_LANGUAGES: LanguageConfig[] = [
+  { code: "en", name: "英语" },
+  { code: "fr", name: "法语" },
+  { code: "ja", name: "日语" },
+];
 
 export type ThemeMode = "light" | "dark" | "system";
 export type FontScale = "small" | "default" | "large";
@@ -14,6 +22,11 @@ export const FONT_ZOOM: Record<FontScale, number> = {
 interface SettingsState {
   providers: ProviderView[];
   manifestUrl: string;
+  /** 注册语言（source of truth 在后端 settings；加载失败保持默认三语并禁编辑） */
+  languages: LanguageConfig[];
+  /** 替换语言列表（POST 持久化；失败回滚并抛错） */
+  setLanguages: (next: LanguageConfig[]) => Promise<void>;
+  languagesFailed: boolean;
   loaded: boolean;
   reload: () => Promise<void>;
   theme: ThemeMode;
@@ -31,6 +44,9 @@ interface SettingsState {
 const Ctx = createContext<SettingsState>({
   providers: [],
   manifestUrl: "",
+  languages: DEFAULT_LANGUAGES,
+  setLanguages: async () => {},
+  languagesFailed: false,
   loaded: false,
   reload: async () => {},
   theme: "system",
@@ -67,6 +83,8 @@ const readJSON = <T,>(key: string, fallback: T): T => {
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [manifestUrl, setManifestUrl] = useState("");
+  const [languages, setLanguagesState] = useState<LanguageConfig[]>(DEFAULT_LANGUAGES);
+  const [languagesFailed, setLanguagesFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [theme, setThemeState] = useState<ThemeMode>(() => readPref("podic.theme", "system", ["light", "dark", "system"]));
   const [fontScale, setFontScaleState] = useState<FontScale>(() => readPref("podic.font", "default", ["small", "default", "large"]));
@@ -80,6 +98,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const s = await getSettings();
       setProviders(s.providers);
       setManifestUrl(s.manifest_url);
+      if (Array.isArray(s.languages) && s.languages.length > 0) {
+        setLanguagesState(s.languages);
+        setLanguagesFailed(false);
+      } else {
+        setLanguagesFailed(true); // 语言列表异常：保持默认并禁止编辑（防误改坏状态）
+      }
       // 校验记忆的选择是否仍有效，失效则回退到第一个 provider 的默认模型
       setAiChoiceState((prev) => {
         const p = s.providers.find((x) => x.id === prev.providerId);
@@ -96,6 +120,26 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setLoaded(true);
     }
   }, []);
+
+  // 语言列表替换：本地先更（UI 即时反馈），POST 全量设置（providers/manifest 带现值，
+  // 后端 languages 字段才替换）；失败回滚并抛错由调用方提示
+  const setLanguages = useCallback(async (next: LanguageConfig[]) => {
+    const prev = languages;
+    setLanguagesState(next);
+    try {
+      await saveSettings({
+        providers: providers.map((p) => ({
+          id: p.id, name: p.name, protocol: p.protocol, base_url: p.base_url,
+          models: p.models, active_model: p.active_model, labels: p.labels, api_key: "",
+        })),
+        manifest_url: manifestUrl,
+        languages: next,
+      });
+    } catch (e) {
+      setLanguagesState(prev);
+      throw e;
+    }
+  }, [languages, providers, manifestUrl]);
 
   useEffect(() => {
     reload();
@@ -150,11 +194,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       providers, manifestUrl, loaded, reload,
+      languages, setLanguages, languagesFailed,
       theme, setTheme, fontScale, setFontScale,
       hand, setHand,
       aiChoice, setAiChoice,
     }),
-    [providers, manifestUrl, loaded, reload, theme, setTheme, fontScale, setFontScale, hand, setHand, aiChoice, setAiChoice],
+    [providers, manifestUrl, loaded, reload, languages, setLanguages, languagesFailed, theme, setTheme, fontScale, setFontScale, hand, setHand, aiChoice, setAiChoice],
   );
 
   return (

@@ -1,20 +1,29 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSettings } from "../SettingsContext";
 import { useAiStream } from "../hooks/useAiStream";
 import ModelPicker from "../components/ModelPicker";
 import Markdown from "../components/Markdown";
-import type { Lang } from "../types";
 
-const LANGS: { id: "auto" | Lang | "zh"; label: string }[] = [
-  { id: "auto", label: "自动" },
-  { id: "en", label: "英语" },
-  { id: "fr", label: "法语" },
-  { id: "ja", label: "日语" },
-  { id: "zh", label: "中文" },
-];
+
 
 export default function TranslateView() {
-  const { providers, aiChoice, setAiChoice } = useSettings();
+  const { providers, aiChoice, setAiChoice, languages } = useSettings();
+  // 翻译语言 = auto + 注册语言 ∪ zh（中文是默认目标语，即使未注册也保留）；源含 auto、目标不含
+  const langs = useMemo(() => {
+    const seen = new Set<string>();
+    const reg = languages.filter((l) => {
+      if (seen.has(l.code) || l.code === "zh") return false;
+      seen.add(l.code);
+      return true;
+    });
+    const zh = [{ id: "zh", label: "中文" }];
+    return [
+      { id: "auto", label: "自动" },
+      ...reg.map((l) => ({ id: l.code, label: l.name })),
+      ...zh,
+    ];
+  }, [languages]);
+  const langLabel = (code: string) => langs.find((l) => l.id === code)?.label ?? code;
   const [from, setFrom] = useState<string>("auto");
   const [to, setTo] = useState<string>("zh");
   const [input, setInput] = useState("");
@@ -30,8 +39,8 @@ export default function TranslateView() {
     if (!input.trim()) return;
     const hint =
       from === "auto"
-        ? `翻译成${LANGS.find((l) => l.id === to)?.label}（自动识别源语言）：\n\n`
-        : `把下面的${LANGS.find((l) => l.id === from)?.label}翻译成${LANGS.find((l) => l.id === to)?.label}：\n\n`;
+        ? `翻译成${langLabel(to)}（自动识别源语言）：\n\n`
+        : `把下面的${langLabel(from)}翻译成${langLabel(to)}：\n\n`;
     run("translate", hint + input, { provider_id: aiChoice.providerId, model: aiChoice.model });
   };
 
@@ -43,7 +52,7 @@ export default function TranslateView() {
           onChange={(e) => setFrom(e.target.value)}
           className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
-          {LANGS.map((l) => (
+          {langs.map((l) => (
             <option key={l.id} value={l.id}>
               {l.label}
             </option>
@@ -55,7 +64,7 @@ export default function TranslateView() {
           onChange={(e) => setTo(e.target.value)}
           className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
-          {LANGS.filter((l) => l.id !== "auto").map((l) => (
+          {langs.filter((l) => l.id !== "auto").map((l) => (
             <option key={l.id} value={l.id}>
               {l.label}
             </option>

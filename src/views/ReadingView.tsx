@@ -15,12 +15,6 @@ import ArticleReader, { type ArticleReaderHandle } from "../components/reader/Ar
 import ConfirmDialog from "../components/ConfirmDialog";
 import { PlusIcon, TrashIcon } from "../components/icons";
 
-const LANG_OPTS: { id: Lang; label: string }[] = [
-  { id: "en", label: "英语" },
-  { id: "fr", label: "法语" },
-  { id: "ja", label: "日语" },
-];
-
 const inputCls =
   "rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-emerald-600";
 
@@ -85,7 +79,9 @@ export default function ReadingView({
   articleId: number | "new" | null;
   setArticleId: (v: number | "new" | null) => void;
 }) {
-  const { aiChoice } = useSettings();
+  const { aiChoice, languages } = useSettings();
+  // 旧文章的语言可能已移出注册表：label 回退原码，仍可正常阅读（分词不校验注册）
+  const langLabel = (code: string) => languages.find((l) => l.code === code)?.name ?? code;
   const [articles, setArticles] = useState<ArticleMeta[] | null>(null);
   const [article, setArticle] = useState<ArticleFull | null>(null);
   // 生词标记不走 React 状态：标记时 DOM 直改 + ref 更新，长文不做全量重渲染
@@ -174,6 +170,7 @@ export default function ReadingView({
         const raw = sessionStorage.getItem(DRAFT_KEY);
         if (raw) {
           d = { ...d, ...(JSON.parse(raw) as typeof d) };
+          if (!languages.some((l) => l.code === d.lang)) d.lang = lang; // 语言已移出注册表
           setDraftRestored(Boolean(d.content.trim()));
         }
       } catch {
@@ -268,9 +265,9 @@ export default function ReadingView({
             onChange={(e) => patchForm({ ...form, lang: e.target.value as Lang })}
             className={`${inputCls} w-24 shrink-0`}
           >
-            {LANG_OPTS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
+            {languages.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
               </option>
             ))}
           </select>
@@ -330,7 +327,7 @@ export default function ReadingView({
           <>
             <h1 className="mb-1 text-lg font-medium leading-snug">{article.title || "未命名"}</h1>
             <p className="mb-1 text-xs text-zinc-400">
-              {LANG_OPTS.find((o) => o.id === article.lang)?.label} · {article.token_count} 词 · 点词查词典，划选 AI 解析
+              {langLabel(article.lang)} · {article.token_count} 词 · 点词查词典，划选 AI 解析
             </p>
             {/* 状态图例：底色=没读过的词，金虚线=生词，标「认识」清掉底色 */}
             <p className="mb-4 text-xs text-zinc-400">
@@ -382,7 +379,7 @@ export default function ReadingView({
               <button onClick={() => setArticleId(a.id)} className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm">{a.title || "未命名"}</p>
                 <p className="mt-0.5 text-xs text-zinc-400">
-                  {LANG_OPTS.find((o) => o.id === a.lang)?.label ?? a.lang} · {a.token_count} 词 · {fmtDate(a.created_at)}
+                  {langLabel(a.lang)} · {a.token_count} 词 · {fmtDate(a.created_at)}
                 </p>
               </button>
               <button

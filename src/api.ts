@@ -1,5 +1,5 @@
 // 唯一的 HTTP 出口：所有后端调用都从这里走
-import type { ArticleFull, ArticleMeta, Entry, PackInfo, Sentence, SuggestItem, UserDictEntry, WordStatus } from "./types";
+import type { ArticleFull, ArticleMeta, Entry, PackInfo, Sentence, SuggestItem, UserDictEntry, WordStatus, LanguageConfig } from "./types";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`/api${path}`, init);
@@ -164,6 +164,7 @@ export interface ProviderView {
 export interface SettingsView {
   providers: ProviderView[];
   manifest_url: string;
+  languages?: LanguageConfig[];
 }
 
 export const getSettings = () => api<SettingsView>("/settings");
@@ -171,6 +172,8 @@ export const getSettings = () => api<SettingsView>("/settings");
 export const saveSettings = (settings: {
   providers: (Partial<ProviderView> & { id: string; name: string; protocol: string })[];
   manifest_url: string;
+  /** 省略 = 后端保留现值（只保存 Provider/manifest 时不影响语言列表） */
+  languages?: LanguageConfig[];
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 
 export const testProvider = (provider_id: string, model?: string) =>

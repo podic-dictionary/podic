@@ -10,10 +10,12 @@ import {
   type PackUpdate,
 } from "../api";
 import type { PackInfo } from "../types";
+import { useSettings } from "../SettingsContext";
 
-const LANG_NAMES: Record<string, string> = { en: "英语", fr: "法语", ja: "日语" };
 
 export default function PacksView() {
+  const { languages } = useSettings();
+  const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
   const [packs, setPacks] = useState<PackInfo[]>([]);
   const [updates, setUpdates] = useState<PackUpdate[] | null>(null);
   const [error, setError] = useState("");
@@ -114,7 +116,7 @@ export default function PacksView() {
                 className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30"
               >
                 <p className="text-sm">
-                  {LANG_NAMES[u.lang] ?? u.lang} 词典包可更新：
+                  {langName(u.lang)} 词典包可更新：
                   <span className="text-zinc-400">
                     v{u.current_version} → v{u.latest_version}
                   </span>
@@ -167,7 +169,7 @@ export default function PacksView() {
           >
             <div className="min-w-0 flex-1">
               <p className="font-medium">
-                {LANG_NAMES[p.lang] ?? p.lang}
+                {langName(p.lang)}
                 <span className="ml-2 text-xs text-zinc-400">
                   {p.pack_id} v{p.version}
                 </span>
@@ -194,7 +196,7 @@ export default function PacksView() {
 
       <ConfirmDialog
         open={confirmRemove !== null}
-        title={`删除${LANG_NAMES[confirmRemove?.lang ?? ""] ?? ""}词典包？`}
+        title={`删除${langName(confirmRemove?.lang ?? "")}词典包？`}
         message="将移除本地词典文件，查词时该语言不可用。可稍后重新导入或在线更新恢复。"
         onConfirm={async () => {
           const lang = confirmRemove!.lang;

@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import type { Lang } from "../types";
 
-const LANG_TAGS: Record<Lang, string> = { en: "en-US", fr: "fr-FR", ja: "ja-JP" };
+// TTS locale 映射（常见语言）；未命中回退语言原码，交给合成引擎自行匹配
+const LANG_TAGS: Record<string, string> = {
+  en: "en-US", fr: "fr-FR", ja: "ja-JP", zh: "zh-CN",
+  de: "de-DE", es: "es-ES", pt: "pt-PT", it: "it-IT", ru: "ru-RU",
+  ko: "ko-KR", ar: "ar-SA", hi: "hi-IN", th: "th-TH", vi: "vi-VN",
+  nl: "nl-NL", pl: "pl-PL", tr: "tr-TR", sv: "sv-SE", uk: "uk-UA",
+  el: "el-GR", he: "he-IL", id: "id-ID", ms: "ms-MY", la: "la",
+  fa: "fa-IR", hu: "hu-HU", cs: "cs-CZ", da: "da-DK", fi: "fi-FI", no: "nb-NO",
+};
 
 /// 系统 TTS 朗读按钮（Web Speech API）：空闲显示喇叭，播放中显示声波跳动动画
 export default function SpeakButton({ text, lang }: { text: string; lang: Lang }) {
@@ -19,8 +27,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
         setHasVoice(null);
         return;
       }
-      const prefix = (LANG_TAGS[lang] ?? "en-US").slice(0, 2);
-      setHasVoice(voices.some((v) => v.lang.replace("_", "-").toLowerCase().startsWith(prefix)));
+      const tag = (LANG_TAGS[lang] ?? lang).toLowerCase(); // 回退原码，按完整语言子标签匹配（三字码不被截断）
+      setHasVoice(voices.some((v) => v.lang.replace("_", "-").toLowerCase().startsWith(tag)));
     };
     check();
     synth.addEventListener?.("voiceschanged", check);
@@ -41,7 +49,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     }
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = LANG_TAGS[lang] ?? "en-US";
+    u.lang = LANG_TAGS[lang] ?? lang;
     u.rate = 0.9;
     u.onstart = () => setSpeaking(true);
     u.onend = () => setSpeaking(false);

@@ -4,10 +4,9 @@ import { completeAndSave, isFailedWord } from "../lib/aiComplete";
 import ModelPicker from "./ModelPicker";
 
 /** 自动补全资格：按语种的词形判定（Unicode 字母，容忍撇号/连字符与空格短语）。
- * 英/法排除 CJK（含汉字的查询走中文反查，把中文串当英法词形入库是错误契约）；
- * 日语含汉字/假名。œ 等 Latin 扩展字母用 \p{L} 覆盖。 */
-const WORDISH_LATIN = /^[\p{L}]+(['’-][\p{L}]+)*( [\p{L}]+(['’-][\p{L}]+)*)*$/u;
-const WORDISH_JA = /^[\p{L}ー・]+$/u;
+ * \p{L}+\p{M} 覆盖拉丁扩展与组合标记（天城文等）；英/法的 CJK 查询走反查不自动补全。 */
+const WORDISH_LATIN = /^[\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*( [\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*)*$/u;
+const WORDISH_JA = /^[\p{L}\p{M}ー・]+$/u;
 const wordish = (q: string, lang: string) =>
   (lang === "ja" ? WORDISH_JA : WORDISH_LATIN).test(q);
 
