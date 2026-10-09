@@ -204,7 +204,7 @@ function LanguagesPage({
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   // 行内编辑态：null=浏览；编辑 name 与 short（code 不可改）
-  const [editing, setEditing] = useState<{ code: string; name: string; short: string } | null>(null);
+  const [editing, setEditing] = useState<{ code: string; short: string } | null>(null);
   // 添加表单：下拉预设（"custom"=自定义码）；自动填的 name/short 可改
   const [pick, setPick] = useState("");
   const [code, setCode] = useState("");
@@ -245,15 +245,10 @@ function LanguagesPage({
 
   const saveEdit = () => {
     if (!editing) return;
-    const n = editing.name.trim();
     const sh = editing.short.trim();
-    if (!n) {
-      setErr("显示名不能为空");
-      return;
-    }
     apply(
       languages.map((l) =>
-        l.code === editing.code ? { ...l, name: n, short: sh || null } : l,
+        l.code === editing.code ? { ...l, short: sh || null } : l,
       ),
       "保存",
     ).then(() => setEditing(null));
@@ -296,7 +291,7 @@ function LanguagesPage({
     <div className="mx-auto max-w-2xl p-4">
       <SubHeader title="语言" onBack={onBack} />
       <p className="mt-1 text-xs text-zinc-400">
-        点「编辑」可改显示名与简写（如「英语」→「En」）；移出只隐藏切换入口，词条、收藏、文章与生词标记全部保留，重新添加即恢复。
+        点「编辑」只能修改展示简写（如「英语」→「En」），完整名称与代码在下方「添加语言」录入；移出只隐藏切换入口，词条、收藏、文章与生词标记全部保留，重新添加即恢复。
         没有词典包的语言查询时由 AI 自动补录词条（需配置 AI Provider）。
       </p>
 
@@ -318,17 +313,14 @@ function LanguagesPage({
                 >
                   {editing?.code === l.code ? (
                     <div className="flex flex-1 flex-wrap items-center gap-2">
-                      <input
-                        value={editing.name}
-                        onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                        placeholder="语言名"
-                        className={`${inputCls} w-28`}
-                      />
+                      {/* 名称与代码不可编辑（编辑只改展示简写）；名称/代码在「添加语言」表单录入 */}
+                      <span className="text-sm text-zinc-600 dark:text-zinc-300">{l.name}</span>
+                      <span className="text-xs text-zinc-400">{l.code}</span>
                       <input
                         value={editing.short}
                         onChange={(e) => setEditing({ ...editing, short: e.target.value })}
-                        placeholder="简写"
-                        className={`${inputCls} w-16`}
+                        placeholder="简写（用于展示）"
+                        className={`${inputCls} w-28`}
                       />
                       <button
                         onClick={saveEdit}
@@ -367,10 +359,10 @@ function LanguagesPage({
                   )}
                   {editing?.code !== l.code && (
                     <button
-                      onClick={() => setEditing({ code: l.code, name: l.name, short: l.short ?? "" })}
+                      onClick={() => setEditing({ code: l.code, short: l.short ?? "" })}
                       disabled={disabled}
                       className="rounded-lg px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                      title="编辑显示名/简写"
+                      title="编辑展示简写"
                     >
                       编辑
                     </button>
@@ -407,6 +399,7 @@ function LanguagesPage({
       {!languagesFailed ? (
         <div className="podic-card mt-5 rounded-2xl p-4">
           <p className="text-sm text-zinc-700 dark:text-zinc-300">添加语言</p>
+          <p className="mt-0.5 text-xs text-zinc-400">语言的完整名称与代码在这里录入；已有语言仅可在列表中编辑展示简写。</p>
           <div className="mt-2 space-y-2">
             <select
               value={pick}
