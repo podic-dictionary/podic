@@ -118,3 +118,15 @@ export const ZapIcon = (p: IconProps) => (
     <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
   </Svg>
 );
+
+/** 抓手（拖拽排序 handle）：两列圆点，stroke-linecap round 渲染为点阵 */
+export const GripIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 5v.01" />
+    <path d="M9 12v.01" />
+    <path d="M9 19v.01" />
+    <path d="M15 5v.01" />
+    <path d="M15 12v.01" />
+    <path d="M15 19v.01" />
+  </Svg>
+);

@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import {
   attributions, deleteUserDict, listPacks, listUserDict, saveSettings, testProvider,
 } from "../api";
-import type { PackInfo, UserDictEntry } from "../types";
+import type { LanguageConfig, PackInfo, UserDictEntry } from "../types";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
-  ChevronLeftIcon, EyeIcon, EyeOffIcon, PlusIcon, TrashIcon, XIcon, ZapIcon,
+  ChevronLeftIcon, EyeIcon, EyeOffIcon, GripIcon, PlusIcon, TrashIcon, XIcon, ZapIcon,
 } from "../components/icons";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import Markdown from "../components/Markdown";
 import { PACK_GUIDE_MD } from "../content/packGuide";
@@ -132,7 +136,57 @@ function SubHeader({
 
 export type SettingsSub = null | "ai" | "about" | "updates" | "packs" | "userdict" | "languages" | "pack-guide";
 
-/// 语言管理：注册语言的增删（「移出」只隐藏入口，词条/收藏/文章/标记全部保留，
+/// 语言管理的一行（dnd-kit 可排序）：抓手拖动换序，顺序即切换器渲染顺序
+function SortableLangRow({
+  lang,
+  isCurrent,
+  disabled,
+  onRemove,
+  children,
+}: {
+  lang: LanguageConfig;
+  isCurrent: boolean;
+  disabled: boolean;
+  onRemove: (code: string) => void;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: lang.code,
+    disabled,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`podic-card flex items-center gap-2 rounded-2xl p-3 ${isDragging ? "z-10 opacity-80 shadow-lg" : ""}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab touch-none p-1 text-zinc-300 active:cursor-grabbing dark:text-zinc-600"
+        title="拖动排序"
+        aria-label={`拖动调整 ${lang.name} 顺序`}
+      >
+        <GripIcon size={16} />
+      </button>
+      {children}
+      {isCurrent ? (
+        <span className="text-xs text-zinc-300 dark:text-zinc-600">使用中</span>
+      ) : (
+        <button
+          onClick={() => onRemove(lang.code)}
+          disabled={disabled}
+          className="rounded-lg p-2 text-zinc-300 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:text-zinc-600 dark:hover:bg-red-950"
+          title={disabled ? "语言列表暂不可修改" : "移出语言列表"}
+        >
+          <TrashIcon size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/// 语言管理：注册语言的增删与拖拽排序（「移出」只隐藏入口，词条/收藏/文章/标记全部保留，
 /// 重新添加即恢复）；无词典包的语言靠 AI 补词（user_dict）积累词库
 function LanguagesPage({
   onBack,
@@ -203,6 +257,16 @@ function LanguagesPage({
     }
   };
 
+  // distance:6px 的激活阈值——列表滚动不误触发拖拽（触摸/鼠标统一 PointerSensor）
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = languages.findIndex((l) => l.code === active.id);
+    const to = languages.findIndex((l) => l.code === over.id);
+    if (from < 0 || to < 0) return;
+    setLanguages(arrayMove(languages, from, to)).catch(() => {}); // 顺序即切换器渲染顺序
+  };
+
   return (
     <div className="mx-auto max-w-2xl p-4">
       <SubHeader title="语言" onBack={onBack} />
@@ -211,42 +275,43 @@ function LanguagesPage({
         没有词典包的语言查询时由 AI 自动补录词条（需在「AI Provider」配置）。
       </p>
 
-      <div className="mt-4 space-y-2">
-        {languages.map((l) => (
-          <div
-            key={l.code}
-            className="podic-card flex items-center gap-3 rounded-2xl p-3"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-zinc-800 dark:text-zinc-200">
-                {l.name}
-                {l.code === curLang && (
-                  <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
-                    当前
-                  </span>
-                )}
-                {!hasPack(l.code) && (
-                  <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                    无词典包
-                  </span>
-                )}
-              </p>
-              <p className="mt-0.5 text-xs text-zinc-400">{l.code}</p>
+      <div className="mt-4">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext items={languages.map((l) => l.code)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {languages.map((l) => (
+                <SortableLangRow
+                  key={l.code}
+                  lang={l}
+                  isCurrent={l.code === curLang}
+                  disabled={busy || languagesFailed}
+                  onRemove={setConfirmRemove}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-zinc-800 dark:text-zinc-200">
+                      {l.name}
+                      {l.code === curLang && (
+                        <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                          当前
+                        </span>
+                      )}
+                      {!hasPack(l.code) && (
+                        <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          无词典包
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-xs text-zinc-400">{l.code}</p>
+                  </div>
+                </SortableLangRow>
+              ))}
             </div>
-            {l.code === curLang ? (
-              <span className="text-xs text-zinc-300 dark:text-zinc-600">使用中</span>
-            ) : (
-              <button
-                onClick={() => setConfirmRemove(l.code)}
-                disabled={busy || languagesFailed}
-                className="rounded-lg p-2 text-zinc-300 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:text-zinc-600 dark:hover:bg-red-950"
-                title={languagesFailed ? "语言列表加载失败，暂不可修改" : "移出语言列表"}
-              >
-                <TrashIcon size={15} />
-              </button>
-            )}
-          </div>
-        ))}
+          </SortableContext>
+        </DndContext>
       </div>
 
       {unregisteredPacks.length > 0 && (
