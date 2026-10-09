@@ -256,7 +256,9 @@ function LanguagesPage({
 
   const add = () => {
     const c = pick === "custom" ? code.trim().toLowerCase() : pick;
-    const n = name.trim();
+    // 语言完整名称：预设语言取标准名（不可编辑），自定义码时用手填名
+    const preset = LANG_PRESETS.find((x) => x.code === c);
+    const n = (pick === "custom" ? name.trim() : preset?.name ?? name.trim());
     if (!/^[a-z]{2,4}$/.test(c)) {
       setErr("语言码需 2-4 位小写字母（如 de、ko、es）");
       return;
@@ -433,11 +435,13 @@ function LanguagesPage({
               />
             )}
             <div className="flex gap-2">
+              {/* 语言完整名称来自预设标准名（下拉带出，不可编辑）；仅自定义语言码时才需要手动命名 */}
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                readOnly={pick !== "custom"}
                 placeholder="语言名"
-                className={`${inputCls} min-w-0 flex-1`}
+                className={`${inputCls} min-w-0 flex-1 ${pick !== "custom" ? "text-zinc-500" : ""}`}
               />
               <input
                 value={short}
