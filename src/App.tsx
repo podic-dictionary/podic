@@ -240,7 +240,7 @@ export default function App() {
                 <ReadingView lang={lang} articleId={articleId} setArticleId={setArticleId} />
               )}
               {v.id === "favorites" && <FavoritesView active={view === "favorites"} onOpenWord={openWord} />}
-              {v.id === "settings" && <SettingsView sub={settingsSub} setSub={setSettingsSub} />}
+              {v.id === "settings" && <SettingsView sub={settingsSub} setSub={setSettingsSub} curLang={lang} />}
             </div>
           ))}
         </main>
