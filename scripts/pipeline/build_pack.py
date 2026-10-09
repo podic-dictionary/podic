@@ -7,6 +7,7 @@
 """
 
 import argparse
+import re
 import datetime
 import json
 import sqlite3
@@ -99,20 +100,29 @@ def load_sources(names: str) -> str:
             out.append(src["cc"])
         elif src:  # jmdict 类动态源：URL 在 download 时确定，这里给项目页
             out.append(src["cc"])
+        else:
+            # 自定义来源名（community 包常见）：如实写进 meta，不静默丢致谢
+            out.append({"name": name, "url": "", "license": ""})
     return json.dumps(out, ensure_ascii=False)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lang", required=True, choices=["en", "fr", "ja"])
+    ap.add_argument("--lang", required=True, help="语言码（2-4 位小写字母，多语言化后支持任意语言）")
     ap.add_argument("--version", default="0.1.0")
-    ap.add_argument("--sources", default="", help="逗号分隔的 SOURCES 键，写进 meta")
+    ap.add_argument("--pack-id", default="", help="包标识（缺省 podic-<lang>；自定义包建议 community- 前缀）")
+    ap.add_argument("--sources", default="", help="逗号分隔的 SOURCES 键或自由文本名，写进 meta")
     ap.add_argument("--examples", action="store_true", help="合并 sentences.jsonl / entry_sentence.jsonl")
-    ap.add_argument("--out", help="输出 db 路径，缺省 packs/podic-<lang>-<version>.db")
+    ap.add_argument("--out", help="输出 db 路径，缺省 packs/<pack_id>-<version>.db")
     args = ap.parse_args()
+    if not re.fullmatch(r"[a-z]{2,4}", args.lang):
+        ap.error(f"--lang {args.lang!r} 不合法（2-4 位小写字母）")
 
     work = common.WORK / args.lang
-    out = Path(args.out) if args.out else common.ROOT / "packs" / f"podic-{args.lang}-{args.version}.db"
+    pack_id = args.pack_id or f"podic-{args.lang}"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", pack_id):
+        ap.error(f"--pack-id {pack_id!r} 不合法（文件名安全字符）")
+    out = Path(args.out) if args.out else common.ROOT / "packs" / f"{pack_id}-{args.version}.db"
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()
@@ -125,7 +135,9 @@ def main():
     db.executescript(DDL)
 
     # ---- meta ----
-    pack_id = f"podic-{args.lang}"
+    pack_id = args.pack_id or f"podic-{args.lang}"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", pack_id):
+        ap.error(f"--pack-id {pack_id!r} 不合法（文件名安全字符）")
     for k, v in [
         ("schema_version", SCHEMA_VERSION),
         ("lang", args.lang),
@@ -183,7 +195,9 @@ def main():
     # ---- form ----
     n_form = 0
     form_batch = []
-    for f in common.read_jsonl(work / "forms.jsonl"):
+    forms_path = work / "forms.jsonl"
+    forms_iter = common.read_jsonl(forms_path) if forms_path.exists() else iter([])
+    for f in forms_iter:
         if f["form_norm"] == f["entry_norm"]:
             continue
         for eid in norm_to_id.get(f["entry_norm"]) or []:
