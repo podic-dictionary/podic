@@ -3,6 +3,7 @@ import { useSettings } from "../SettingsContext";
 import { useAiStream } from "../hooks/useAiStream";
 import ModelPicker from "../components/ModelPicker";
 import Markdown from "../components/Markdown";
+import { copyText } from "../components/clipboard";
 
 
 
@@ -27,6 +28,7 @@ export default function TranslateView() {
   const [from, setFrom] = useState<string>("auto");
   const [to, setTo] = useState<string>("zh");
   const [input, setInput] = useState("");
+  const [copied, setCopied] = useState(false);
   const { text, running, error, run, cancel } = useAiStream();
 
   const provider = providers.find((p) => p.id === aiChoice.providerId);
@@ -46,11 +48,11 @@ export default function TranslateView() {
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col p-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <select
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="min-w-28 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-center text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           {langs.map((l) => (
             <option key={l.id} value={l.id}>
@@ -62,7 +64,7 @@ export default function TranslateView() {
         <select
           value={to}
           onChange={(e) => setTo(e.target.value)}
-          className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="min-w-28 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-center text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           {langs.filter((l) => l.id !== "auto").map((l) => (
             <option key={l.id} value={l.id}>
@@ -83,12 +85,25 @@ export default function TranslateView() {
           placeholder="输入要翻译的文本…（Ctrl+Enter 翻译）"
           className="h-36 w-full resize-none rounded-2xl border border-zinc-200/80 bg-white/80 p-4 text-[15px] outline-none backdrop-blur transition-all duration-300 focus:border-emerald-400/70 focus:bg-white focus:shadow-[0_0_0_4px_rgb(16_185_129/0.08)] lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:focus:bg-zinc-900 dark:focus:shadow-[0_0_0_4px_rgb(16_185_129/0.1)]"
         />
-        <div className="h-36 w-full overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white/80 p-4 backdrop-blur lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70">
+        <div className="relative h-36 w-full overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white/80 p-4 backdrop-blur lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70">
           {error && <p className="text-sm text-red-500">{error}</p>}
           {text ? (
             <Markdown text={text} />
           ) : (
             !running && <p className="text-sm text-zinc-400">译文将显示在这里</p>
+          )}
+          {text && !running && (
+            <button
+              onClick={async () => {
+                if (await copyText(text)) {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                }
+              }}
+              className="absolute right-2 top-2 rounded-lg border border-zinc-200/80 bg-white/90 px-2.5 py-1 text-xs text-zinc-500 backdrop-blur hover:text-emerald-600 dark:border-zinc-700/70 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:text-emerald-400"
+            >
+              {copied ? "已复制 ✓" : "复制"}
+            </button>
           )}
         </div>
       </div>

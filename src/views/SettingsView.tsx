@@ -13,7 +13,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
-import { PACK_GUID_URL } from "../links";
+import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
 interface ModelRow {
@@ -463,7 +463,7 @@ function LanguagesPage({
 
       <div className="mt-5">
         <button
-          onClick={() => window.open(PACK_GUID_URL, "_blank", "noopener")}
+          onClick={() => openExternal(PACK_GUID_URL)}
           className="text-xs text-emerald-600 hover:underline dark:text-emerald-400"
         >
           想构建完整的离线词典包？看「创建词典包」教程 →
@@ -596,7 +596,7 @@ export default function SettingsView({
     providers, manifestUrl, loaded, reload,
     languages,
     theme, setTheme, fontScale, setFontScale,
-    hand, setHand,
+    hand, setHand, autoComplete, setAutoComplete,
   } = useSettings();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -985,6 +985,26 @@ export default function SettingsView({
         </div>
       </section>
 
+      {/* AI 补全 */}
+      <section className="mt-4 podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+        <div>
+          <h2 className="text-sm font-medium text-zinc-500">词典未命中时 AI 补全</h2>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            自动：查不到的词立即调 AI 生成释义并存入 AI 词典；手动：结果页出现「AI 补全」按钮，点了才请求
+          </p>
+          <div className="mt-2">
+            <Seg
+              value={autoComplete ? "auto" : "manual"}
+              options={[
+                { id: "auto", label: "自动" },
+                { id: "manual", label: "手动" },
+              ]}
+              onChange={(v) => setAutoComplete(v === "auto")}
+            />
+          </div>
+        </div>
+      </section>
+
       {/* AI / 词典包 / 更新源 / 关于入口 */}
       <section className="mt-4 space-y-2">
         <Row
@@ -999,7 +1019,7 @@ export default function SettingsView({
           onClick={() => setSub("languages")}
         />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
-        <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => window.open(PACK_GUID_URL, "_blank", "noopener")} />
+        <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => openExternal(PACK_GUID_URL)} />
         <Row label="词典包更新源" hint={manifest ? "已配置" : "未配置"} onClick={() => setSub("updates")} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />
       </section>

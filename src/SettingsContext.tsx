@@ -36,6 +36,9 @@ interface SettingsState {
   /** 操作手性：right=主按钮/高频入口靠右（默认），left=靠左 */
   hand: Hand;
   setHand: (h: Hand) => void;
+  /** 词典未命中时的 AI 补全：true=自动生成并入库（默认），false=结果页手动点按钮触发 */
+  autoComplete: boolean;
+  setAutoComplete: (v: boolean) => void;
   /** 全局 AI 选择：provider+model 组合，跨页面共享，localStorage 记忆上次选择 */
   aiChoice: { providerId: string; model: string };
   setAiChoice: (providerId: string, model: string) => void;
@@ -55,6 +58,8 @@ const Ctx = createContext<SettingsState>({
   setFontScale: () => {},
   hand: "right",
   setHand: () => {},
+  autoComplete: true,
+  setAutoComplete: () => {},
   aiChoice: { providerId: "", model: "" },
   setAiChoice: () => {},
 });
@@ -89,6 +94,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(() => readPref("podic.theme", "system", ["light", "dark", "system"]));
   const [fontScale, setFontScaleState] = useState<FontScale>(() => readPref("podic.font", "default", ["small", "default", "large"]));
   const [hand, setHandState] = useState<Hand>(() => readPref("podic.hand", "right", ["right", "left"]));
+  const [autoComplete, setAutoCompleteState] = useState(() => readPref("podic.autocomplete", "on", ["on", "off"]) === "on");
   const [aiChoice, setAiChoiceState] = useState<{ providerId: string; model: string }>(() =>
     readJSON("podic.ai", { providerId: "", model: "" }),
   );
@@ -178,6 +184,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     } catch { /* 静默 */ }
   }, []);
 
+  const setAutoComplete = useCallback((v: boolean) => {
+    setAutoCompleteState(v);
+    try {
+      localStorage.setItem("podic.autocomplete", v ? "on" : "off");
+    } catch { /* 静默 */ }
+  }, []);
+
   // 手性类挂 html，.action-row 等 CSS 按此切换布局
   useEffect(() => {
     document.documentElement.classList.toggle("hand-left", hand === "left");
@@ -197,9 +210,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       languages, setLanguages, languagesFailed,
       theme, setTheme, fontScale, setFontScale,
       hand, setHand,
+      autoComplete, setAutoComplete,
       aiChoice, setAiChoice,
     }),
-    [providers, manifestUrl, loaded, reload, languages, setLanguages, languagesFailed, theme, setTheme, fontScale, setFontScale, hand, setHand, aiChoice, setAiChoice],
+    [providers, manifestUrl, loaded, reload, languages, setLanguages, languagesFailed, theme, setTheme, fontScale, setFontScale, hand, setHand, autoComplete, setAutoComplete, aiChoice, setAiChoice],
   );
 
   return (

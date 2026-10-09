@@ -22,7 +22,7 @@ export default function FallbackCard({
   /** 入库成功后通知父级重查（EntryCard 替换本卡） */
   onSaved: () => void;
 }) {
-  const { aiChoice, setAiChoice } = useSettings();
+  const { aiChoice, setAiChoice, autoComplete } = useSettings();
   // idle=未触发 | running=AI 生成中 | failed=失败（原因可见，可重试）
   const [phase, setPhase] = useState<"idle" | "running" | "failed">("idle");
   const [errMsg, setErrMsg] = useState("");
@@ -33,7 +33,7 @@ export default function FallbackCard({
   qRef.current = q;
   const eligible = wordish(q, lang);
   const blacklisted = isFailedWord(lang, q);
-  const auto = Boolean(aiChoice.providerId) && eligible && !blacklisted;
+  const auto = Boolean(aiChoice.providerId) && eligible && !blacklisted && autoComplete;
 
   const run = (fresh: boolean, myQ: string) => {
     if (!aiChoice.providerId) return;
@@ -113,7 +113,9 @@ export default function FallbackCard({
                 ? "（此类查询不适用 AI 补词）"
                 : blacklisted
                   ? "（AI 补录失败过，可手动重试）"
-                  : ""}
+                  : !autoComplete
+                    ? "（自动补全已关闭，可手动触发）"
+                    : ""}
           </p>
           {/* 手动入口：黑名单词重进/自动资格受限时的恢复路径；黑名单只抑制自动，不抑制手动 */}
           {aiChoice.providerId && eligible && (
@@ -122,7 +124,7 @@ export default function FallbackCard({
                 onClick={() => run(true, q)}
                 className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"
               >
-                AI 生成释义
+                AI 补全
               </button>
               <ModelPicker
                 providerId={aiChoice.providerId}
