@@ -170,9 +170,9 @@ export interface SettingsView {
 export const getSettings = () => api<SettingsView>("/settings");
 
 export const saveSettings = (settings: {
-  providers: (Partial<ProviderView> & { id: string; name: string; protocol: string })[];
-  manifest_url: string;
-  /** 省略 = 后端保留现值（只保存 Provider/manifest 时不影响语言列表） */
+  /** 三组字段均可省略：省略 = 后端保留现值（各页面只提交自己改的字段，防跨端覆盖） */
+  providers?: (Partial<ProviderView> & { id: string; name: string; protocol: string })[];
+  manifest_url?: string;
   languages?: LanguageConfig[];
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 

@@ -26,7 +26,8 @@ export default function FallbackCard({
   // idle=未触发 | running=AI 生成中 | failed=失败（原因可见，可重试）
   const [phase, setPhase] = useState<"idle" | "running" | "failed">("idle");
   const [errMsg, setErrMsg] = useState("");
-  const startedKey = useRef(""); // 按查询键防双触发（StrictMode/依赖变化）
+  const startedKey = useRef(""); // 已自动尝试过的查询键（关→开不重复自动触发）
+  const inflightKey = useRef(""); // 在途请求的查询键（手动请求中切回自动不会重复发起）
   const qRef = useRef(query); // 过期回调防护：AI 返回时查询已变则只入库、不重查界面
 
   const q = query.trim();
@@ -37,6 +38,8 @@ export default function FallbackCard({
 
   const run = (fresh: boolean, myQ: string) => {
     if (!aiChoice.providerId) return;
+    const key = `${lang}:${myQ}`;
+    inflightKey.current = key;
     setPhase("running");
     setErrMsg("");
     completeAndSave({
@@ -49,6 +52,7 @@ export default function FallbackCard({
       fresh,
     })
       .then((r) => {
+        if (inflightKey.current === key) inflightKey.current = "";
         if (!r) {
           setErrMsg("AI 返回的结果解析失败");
           setPhase("failed");
@@ -59,6 +63,7 @@ export default function FallbackCard({
         onSaved();
       })
       .catch((e) => {
+        if (inflightKey.current === key) inflightKey.current = "";
         setErrMsg(e instanceof Error ? e.message : String(e));
         setPhase("failed");
       });
@@ -66,7 +71,7 @@ export default function FallbackCard({
 
   useEffect(() => {
     const key = `${lang}:${q}`;
-    if (!auto || startedKey.current === key) return;
+    if (!auto || startedKey.current === key || inflightKey.current === key) return;
     startedKey.current = key;
     run(false, q); // fresh:false 吃缓存；解析失败的重试才 fresh:true 绕开坏缓存
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,7 +126,7 @@ export default function FallbackCard({
           {aiChoice.providerId && eligible && (
             <div className="action-row mt-2">
               <button
-                onClick={() => run(true, q)}
+                onClick={() => run(false, q)}
                 className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"
               >
                 AI 补全

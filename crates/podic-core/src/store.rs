@@ -375,7 +375,8 @@ pub fn user_dict_by_form(conn: &Connection, lang: &str, form_norm: &str) -> Resu
 }
 
 pub fn list_user_dict(conn: &Connection, lang: Option<&str>, q: &str) -> Result<Vec<UserDictEntry>> {
-    let sql = if q.is_empty() {
+    // 两个分支的占位符个数不同，必须分别绑定：空搜索多绑 ?2 会触发参数越界
+    let mut stmt = conn.prepare(&if q.is_empty() {
         format!("SELECT {UD_COLS} FROM user_dict WHERE (?1 IS NULL OR lang = ?1) ORDER BY id DESC")
     } else {
         format!(
@@ -383,9 +384,12 @@ pub fn list_user_dict(conn: &Connection, lang: Option<&str>, q: &str) -> Result<
              WHERE (?1 IS NULL OR lang = ?1) AND (headword LIKE '%' || ?2 || '%' OR norm LIKE '%' || ?2 || '%')
              ORDER BY id DESC"
         )
+    })?;
+    let rows = if q.is_empty() {
+        stmt.query_map(rusqlite::params![lang], row_to_ud)?
+    } else {
+        stmt.query_map(rusqlite::params![lang, q], row_to_ud)?
     };
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params![lang, q], row_to_ud)?;
     Ok(rows.flatten().collect())
 }
 

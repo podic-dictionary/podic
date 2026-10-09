@@ -331,10 +331,12 @@ pub struct LanguageIn {
 
 #[derive(Deserialize)]
 pub struct SettingsIn {
-    providers: Vec<ProviderIn>,
+    /// 三组字段互相独立：None = 保留现值。按字段提交避免「保存语言把另一端
+    /// 刚保存的 Provider 恢复成旧快照」的跨端覆盖
     #[serde(default)]
-    manifest_url: String,
-    /// None = 保留现值（旧客户端只保存 Provider 时不会抹掉语言列表）；Some 才全量替换
+    providers: Option<Vec<ProviderIn>>,
+    #[serde(default)]
+    manifest_url: Option<String>,
     #[serde(default)]
     languages: Option<Vec<LanguageIn>>,
 }
@@ -377,41 +379,48 @@ pub async fn save_settings(
     Json(input): Json<SettingsIn>,
 ) -> ApiResult<Json<Value>> {
     let mut core = lock(&state);
-    let mut providers = vec![];
-    for p in input.providers {
-        let protocol = match p.protocol.as_str() {
-            "anthropic" => podic_core::settings::Protocol::Anthropic,
-            _ => podic_core::settings::Protocol::OpenAi,
-        };
-        // api_key 为空/掩码时保留旧 key
-        let old_key = core
-            .settings
-            .providers
-            .iter()
-            .find(|o| o.id == p.id)
-            .map(|o| o.api_key.clone())
-            .unwrap_or_default();
-        let api_key = if p.api_key.is_empty() || p.api_key.contains('•') {
-            old_key
-        } else {
-            p.api_key
-        };
-        providers.push(ProviderConfig {
-            id: p.id,
-            name: p.name,
-            protocol,
-            base_url: p.base_url,
-            api_key,
-            models: p.models,
-            active_model: p.active_model,
-            labels: p.labels,
-        });
+    // 先构造并校验完整候选：非法 languages 返回 400 时内存不能已被改了一半
+    let mut candidate = core.settings.clone();
+    if let Some(pins) = &input.providers {
+        let mut providers = vec![];
+        for p in pins {
+            let protocol = match p.protocol.as_str() {
+                "anthropic" => podic_core::settings::Protocol::Anthropic,
+                _ => podic_core::settings::Protocol::OpenAi,
+            };
+            // api_key 为空/掩码时保留旧 key
+            let old_key = core
+                .settings
+                .providers
+                .iter()
+                .find(|o| o.id == p.id)
+                .map(|o| o.api_key.clone())
+                .unwrap_or_default();
+            let api_key = if p.api_key.is_empty() || p.api_key.contains('•') {
+                old_key
+            } else {
+                p.api_key.clone()
+            };
+            providers.push(ProviderConfig {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                protocol,
+                base_url: p.base_url.clone(),
+                api_key,
+                models: p.models.clone(),
+                active_model: p.active_model.clone(),
+                labels: p.labels.clone(),
+            });
+        }
+        candidate.providers = providers;
     }
-    core.settings.providers = providers;
-    core.settings.manifest_url = input.manifest_url;
+    if let Some(u) = &input.manifest_url {
+        candidate.manifest_url = u.clone();
+    }
     if let Some(langs) = &input.languages {
-        core.settings.languages = validate_languages(langs)?;
+        candidate.languages = validate_languages(langs)?;
     }
+    core.settings = candidate;
     core.save_settings()?;
     Ok(Json(json!({ "ok": true })))
 }

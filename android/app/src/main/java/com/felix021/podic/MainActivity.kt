@@ -95,8 +95,6 @@ class MainActivity : Activity() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            // 允许用户手势触发的 window.open（教程等外链走系统浏览器）
-            settings.javaScriptCanOpenWindowsAutomatically = true
             webViewClient = object : WebViewClient() {
                 /// 本机后端页面留在 WebView；http(s) 外链转发系统浏览器打开
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

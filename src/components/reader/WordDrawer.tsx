@@ -50,7 +50,7 @@ export default function WordDrawer({
   aiReady: boolean;
   onClose: () => void;
 }) {
-  const { aiChoice, hand } = useSettings();
+  const { aiChoice, hand, autoComplete } = useSettings();
   const [status, setStatus] = useState<WordStatus | undefined>(initialStatus);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   // idle=未触发 | running=AI 生成中 | failed=失败（可手动重试）
@@ -114,8 +114,9 @@ export default function WordDrawer({
     lookupChain().then((es) => {
       if (!alive) return;
       setEntries(es);
-      // 词典全 miss + 已配 AI + 不在失败集合 → 自动补全
-      if (es.length === 0 && aiReady && ctx && !isFailedWord(lang, norm)) {
+      // 词典全 miss + 已配 AI + 全局自动开关开 + 不在失败集合 → 自动补全；
+      // 开关关时由下方 idle 态的「AI 补全」按钮手动触发
+      if (es.length === 0 && aiReady && autoComplete && ctx && !isFailedWord(lang, norm)) {
         runComplete(false);
       }
     });
@@ -203,9 +204,23 @@ export default function WordDrawer({
             </div>
           )}
           {phase === "idle" && !aiNote && (
-            <p className="py-4 text-center text-sm text-zinc-400">
-              {aiReady ? "词典与 AI 均无结果" : "词典无此词（配置 AI Provider 后可自动补全）"}
-            </p>
+            <div className="py-4 text-center">
+              <p className="text-sm text-zinc-400">
+                {aiReady
+                  ? autoComplete || !ctx
+                    ? "词典与 AI 均无结果"
+                    : "词典无此词（自动补全已关闭）"
+                  : "词典无此词（配置 AI Provider 后可自动补全）"}
+              </p>
+              {aiReady && ctx && !autoComplete && (
+                <button
+                  onClick={() => runComplete(false)}
+                  className="mt-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"
+                >
+                  AI 补全
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

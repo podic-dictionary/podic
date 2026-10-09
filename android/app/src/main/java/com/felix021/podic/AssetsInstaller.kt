@@ -24,7 +24,8 @@ object AssetsInstaller {
         val webStale = run {
             val newHtml = runCatching { ctx.assets.open("web/index.html").use { it.readBytes() } }.getOrNull()
             val oldHtml = runCatching { File(web, "index.html").takeIf { it.isFile }?.readBytes() }.getOrNull()
-            newHtml != oldHtml
+            // ByteArray 的 != 比较的是引用（两次启动必不等），必须 contentEquals
+            !newHtml.contentEquals(oldHtml)
         }
         if (webStale) {
             web.deleteRecursively()
@@ -38,8 +39,10 @@ object AssetsInstaller {
 
         for (name in assetPacks) {
             val out = File(packs, name)
-            // 覆盖条件：还没装过 / 版本升级 / 上次就是内置装的同名包 / 历史版本没记录过清单（一次性迁移）
-            val overwrite = !out.isFile || upgraded || name in prevBundled || prevBundled.isEmpty()
+            // 覆盖条件：还没装过 / 版本升级 / 历史版本没记录过清单（一次性迁移）。
+            // 不能加「name in prevBundled」——清单记录的就是上次内置包名，恒真会让每次
+            // 启动都重拷全部内置 .db（约 400MB I/O）；在线更新写的是新版本文件名，不冲突
+            val overwrite = !out.isFile || upgraded || prevBundled.isEmpty()
             if (!overwrite) continue
             ctx.assets.open("packs/$name").use { input ->
                 out.outputStream().use { output -> input.copyTo(output, 1 shl 16) }

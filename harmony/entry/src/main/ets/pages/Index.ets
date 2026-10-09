@@ -5,6 +5,7 @@ import { resourceManager } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
+import { url } from '@kit.ArkTS';
 import { util } from '@kit.ArkTS';
 import { startServer } from 'libpodic_ohos.so';
 
@@ -203,14 +204,21 @@ struct Index {
           })
           // 本机后端页面留在 Web；http(s) 外链（词典包教程等）交系统浏览器打开
           .onLoadIntercept((event) => {
-            const url = event?.data?.getRequestUrl() ?? '';
-            const isHttp = url.startsWith('http://') || url.startsWith('https://');
-            const isLocal = url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost');
-            if (isHttp && !isLocal) {
+            const raw = event?.data?.getRequestUrl() ?? '';
+            let isExternal = false;
+            try {
+              // 前缀匹配会把 localhost.example.org 这类外部域名误判为本机，必须解析后比 hostname
+              const u = url.URL.parse(raw);
+              isExternal = (u.scheme === 'http' || u.scheme === 'https')
+                && u.hostname !== '127.0.0.1' && u.hostname !== 'localhost';
+            } catch (_e) {
+              // 解析失败的非常规 URL 不拦
+            }
+            if (isExternal) {
               this.ctx?.startAbility({
                 action: 'ohos.want.action.viewData',
                 entities: ['entity.system.browsable'],
-                uri: url
+                uri: raw
               }).catch(() => {
                 // 无可处理应用时静默，停留当前页
               });

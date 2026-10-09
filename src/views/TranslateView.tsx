@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "../SettingsContext";
 import { useAiStream } from "../hooks/useAiStream";
 import ModelPicker from "../components/ModelPicker";
@@ -29,7 +29,16 @@ export default function TranslateView() {
   const [to, setTo] = useState<string>("zh");
   const [input, setInput] = useState("");
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null); // 反馈复位定时器：连点时旧定时器不提前清掉新反馈
   const { text, running, error, run, cancel } = useAiStream();
+
+  // 新译文开始流式输出时清掉上一份译文的「已复制」残留
+  useEffect(() => {
+    if (running) setCopied(false);
+    return () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    };
+  }, [running]);
 
   const provider = providers.find((p) => p.id === aiChoice.providerId);
 
@@ -85,26 +94,32 @@ export default function TranslateView() {
           placeholder="输入要翻译的文本…（Ctrl+Enter 翻译）"
           className="h-36 w-full resize-none rounded-2xl border border-zinc-200/80 bg-white/80 p-4 text-[15px] outline-none backdrop-blur transition-all duration-300 focus:border-emerald-400/70 focus:bg-white focus:shadow-[0_0_0_4px_rgb(16_185_129/0.08)] lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:focus:bg-zinc-900 dark:focus:shadow-[0_0_0_4px_rgb(16_185_129/0.1)]"
         />
-        <div className="relative h-36 w-full overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white/80 p-4 backdrop-blur lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70">
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          {text ? (
-            <Markdown text={text} />
-          ) : (
-            !running && <p className="text-sm text-zinc-400">译文将显示在这里</p>
-          )}
-          {text && !running && (
-            <button
-              onClick={async () => {
-                if (await copyText(text)) {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1500);
-                }
-              }}
-              className="absolute right-2 top-2 rounded-lg border border-zinc-200/80 bg-white/90 px-2.5 py-1 text-xs text-zinc-500 backdrop-blur hover:text-emerald-600 dark:border-zinc-700/70 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:text-emerald-400"
-            >
-              {copied ? "已复制 ✓" : "复制"}
-            </button>
-          )}
+        <div className="flex h-36 w-full flex-col rounded-2xl border border-zinc-200/80 bg-white/80 backdrop-blur lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70">
+          {/* 工具行：复制按钮固定在顶部，不遮正文、不随滚动走 */}
+          <div className="flex h-8 shrink-0 items-center justify-end px-3">
+            {text && !running && (
+              <button
+                onClick={async () => {
+                  if (await copyText(text)) {
+                    setCopied(true);
+                    if (copyTimer.current) window.clearTimeout(copyTimer.current);
+                    copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
+                  }
+                }}
+                className="rounded-lg border border-zinc-200/80 bg-white/90 px-2.5 py-1 text-xs text-zinc-500 backdrop-blur hover:text-emerald-600 dark:border-zinc-700/70 dark:bg-zinc-900/90 dark:text-zinc-400 dark:hover:text-emerald-400"
+              >
+                {copied ? "已复制 ✓" : "复制"}
+              </button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            {text ? (
+              <Markdown text={text} />
+            ) : (
+              !running && <p className="text-sm text-zinc-400">译文将显示在这里</p>
+            )}
+          </div>
         </div>
       </div>
 

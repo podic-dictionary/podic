@@ -133,19 +133,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const prev = languages;
     setLanguagesState(next);
     try {
-      await saveSettings({
-        providers: providers.map((p) => ({
-          id: p.id, name: p.name, protocol: p.protocol, base_url: p.base_url,
-          models: p.models, active_model: p.active_model, labels: p.labels, api_key: "",
-        })),
-        manifest_url: manifestUrl,
-        languages: next,
-      });
+      // 只提交 languages：带上 providers/manifest_url 会把另一端刚保存的配置
+      // 恢复成本端的旧快照（后端对省略字段保留现值）
+      await saveSettings({ languages: next });
     } catch (e) {
       setLanguagesState(prev);
       throw e;
     }
-  }, [languages, providers, manifestUrl]);
+  }, [languages]);
 
   useEffect(() => {
     reload();

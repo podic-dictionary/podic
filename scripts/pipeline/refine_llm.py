@@ -147,20 +147,52 @@ def main():
             return bi, None
 
         n_done = 0
-        with open(refined_path, "a", encoding="utf-8") as out, \
-                cf.ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as pool:
-            futures = [pool.submit(do_batch, bi) for bi in range(n_batch)]
-            for fut in cf.as_completed(futures):
-                bi, rows = fut.result()
-                n_done += 1
-                if rows is None:
-                    n_err += 1
-                    continue  # 不落盘，下次运行自动重试
-                for r in rows:
-                    out.write(json.dumps(r, ensure_ascii=False) + "\n")
-                    refined_data[r["headword"]] = r
-                out.flush()
-                common.log(f"[{n_done}/{n_batch}] 批 {bi + 1} 合并 {len(rows)}/{len(todo[bi * args.batch : (bi + 1) * args.batch])}")
+
+        def persist(out, bi, rows):
+            """一批结果落盘（只在主线程调用，无写竞争）"""
+            nonlocal n_done, n_err
+            n_done += 1
+            if rows is None:
+                n_err += 1
+                return  # 不落盘，下次运行自动重试
+            for r in rows:
+                out.write(json.dumps(r, ensure_ascii=False) + "\n")
+                refined_data[r["headword"]] = r
+            out.flush()
+            common.log(f"[{n_done}/{n_batch}] 批 {bi + 1} 合并 {len(rows)}/{len(todo[bi * args.batch : (bi + 1) * args.batch])}")
+
+        # 滑动窗口提交：最多 concurrency 个在途。一次性 submit 全部批次的话，
+        # Ctrl+C 退出消费循环后线程池仍会跑完队列（费用照付）且结果不落盘
+        conc = max(1, args.concurrency)
+        with open(refined_path, "a", encoding="utf-8") as out:
+            pool = cf.ThreadPoolExecutor(max_workers=conc)
+            try:
+                pending: dict = {}
+                batch_iter = iter(range(n_batch))
+                for bi in batch_iter:
+                    pending[pool.submit(do_batch, bi)] = bi
+                    if len(pending) >= conc:
+                        break
+                while pending:
+                    done, _ = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
+                    for fut in done:
+                        bi = pending.pop(fut)
+                        persist(out, bi, fut.result()[1])
+                    for bi in batch_iter:
+                        pending[pool.submit(do_batch, bi)] = bi
+                        if len(pending) >= conc:
+                            break
+            except KeyboardInterrupt:
+                common.log("[中断] 取消未启动批次，等待在途批次完成落盘…")
+                for fut in pending:
+                    fut.cancel()
+                for fut in pending:
+                    if fut.cancelled():
+                        continue
+                    bi = pending[fut]
+                    persist(out, bi, fut.result()[1])
+            finally:
+                pool.shutdown(wait=True)
         if n_err:
             common.log(f"错误批次 {n_err}（下次运行重试）")
 
@@ -169,12 +201,14 @@ def main():
         return
 
     # ---- 合并回 entries.jsonl + 例句文件 ----
-    neg_id = -1
     sent_path = work / "sentences.jsonl"
     es_path = work / "entry_sentence.jsonl"
     existing_sent_ids = set()
     if sent_path.exists():
         existing_sent_ids = {s["id"] for s in common.read_jsonl(sent_path)}
+    # 负 id 从现有最小值继续分配：每次都从 -1 起步会与旧 AI 例句撞号，
+    # 撞号时下面的 not in 判断把新例句全部静默跳过（run4 例句 0 的根因）
+    neg_id = (min(existing_sent_ids) if existing_sent_ids else 0) - 1
     sent_rows, es_rows = [], []
     for e in entries:
         r = refined_data.get(e["headword"])

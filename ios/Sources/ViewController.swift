@@ -175,9 +175,13 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
         guard let resource = Bundle.main.resourceURL else { return }
         let fm = FileManager.default
 
-        // web：每次启动按 Bundle 版本替换（粗略：目录不存在才拷；升级场景交给 Marker/版本号策略，先保持与 Android 一致的简化版）
+        // web 按 index.html 指纹替换：vite 产物资源名带内容 hash，前端有变 index.html 必变。
+        // 只判「目录存在」会让升级用户永远留着旧前端（新后端配旧 JS）
         let web = dataDir.appendingPathComponent("web", isDirectory: true)
-        if !fm.fileExists(atPath: web.path) {
+        let newHtml = try? Data(contentsOf: resource.appendingPathComponent("web/index.html"))
+        let oldHtml = try? Data(contentsOf: web.appendingPathComponent("index.html"))
+        if newHtml != nil && newHtml != oldHtml {
+            try? fm.removeItem(at: web)
             try? fm.copyItem(at: resource.appendingPathComponent("web"), to: web)
         }
 

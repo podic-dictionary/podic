@@ -212,10 +212,14 @@ def main():
         for s in common.read_jsonl(work / "sentences.jsonl"):
             sent_batch.append((s["id"], s["text"], json.dumps(s.get("translation") or [], ensure_ascii=False)))
         for r in common.read_jsonl(work / "entry_sentence.jsonl"):
-            # 两种键：tatoeba 关联用 entry（headword）；refine 的 AI 例句用 entry_norm（norm）
-            key = r.get("entry") or r.get("entry_norm")
-            # norm 优先（ja 关联键是 norm；fr 无变音词 key 即 norm），变音词 norm 未命中走 casefold(headword)
-            for eid in norm_to_id.get(key) or head_to_id.get(key) or []:
+            # 两种键按语义查各自的映射：entry=headword（tatoeba 关联，en/fr）按 casefold 精确
+            # 关联；entry_norm=norm（refine 的 AI 例句）按 norm。不能一个键同时回退两个映射——
+            # 无变音 headword（如 sur）会先命中 norm_to_id，把例句串到同 norm 的所有词条（sûr）
+            if (key := r.get("entry")) is not None:
+                ids = head_to_id.get(key.casefold()) or norm_to_id.get(key)  # ja 历史数据的 entry 是 norm
+            else:
+                ids = norm_to_id.get(r.get("entry_norm") or "")
+            for eid in ids or []:
                 link_batch.append((eid, r["sentence_id"], r.get("score") or 0.0))
         db.executemany("INSERT OR IGNORE INTO sentence(id, text, translation) VALUES (?,?,?)", sent_batch)
         db.executemany("INSERT OR IGNORE INTO entry_sentence(entry_id, sentence_id, score) VALUES (?,?,?)",

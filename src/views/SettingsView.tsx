@@ -491,9 +491,20 @@ function UserDictPage({ onBack }: { onBack: () => void }) {
   const [entries, setEntries] = useState<UserDictEntry[] | null>(null);
   const [confirmDel, setConfirmDel] = useState<UserDictEntry | null>(null);
 
+  const [loadErr, setLoadErr] = useState("");
+
   useEffect(() => {
     const t = window.setTimeout(() => {
-      listUserDict(undefined, q.trim()).then(setEntries).catch(() => setEntries([]));
+      listUserDict(undefined, q.trim())
+        .then((rows) => {
+          setEntries(rows);
+          setLoadErr("");
+        })
+        .catch((e) => {
+          // 失败不能吞成空列表——否则存量词条全部「消失」还无从排查
+          setEntries([]);
+          setLoadErr(e instanceof Error ? e.message : String(e));
+        });
     }, 200);
     return () => window.clearTimeout(t);
   }, [q]);
@@ -523,7 +534,11 @@ function UserDictPage({ onBack }: { onBack: () => void }) {
 
       {entries === null && <p className="py-8 text-center text-sm text-zinc-400">加载中…</p>}
       {entries !== null && entries.length === 0 && (
-        <p className="py-8 text-center text-sm text-zinc-400">{q ? "无匹配词条" : "还没有补录词条"}</p>
+        loadErr ? (
+          <p className="py-8 text-center text-sm text-red-500">加载失败：{loadErr}</p>
+        ) : (
+          <p className="py-8 text-center text-sm text-zinc-400">{q ? "无匹配词条" : "还没有补录词条"}</p>
+        )
       )}
 
       <ul className="mt-3 space-y-2">
