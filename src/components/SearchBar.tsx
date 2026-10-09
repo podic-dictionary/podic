@@ -17,7 +17,10 @@ export default function SearchBar({
   onClear?: () => void;
 }) {
   const { languages } = useSettings();
-  const langName = (code: string) => languages.find((l) => l.code === code)?.name.slice(0, 1) ?? code;
+  const langName = (code: string) => {
+    const l = languages.find((x) => x.code === code);
+    return (l?.short?.trim() || l?.name.slice(0, 1) || code) as string;
+  };
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SuggestItem[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);

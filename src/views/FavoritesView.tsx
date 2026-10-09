@@ -11,8 +11,10 @@ export default function FavoritesView({
   onOpenWord: (word: string, lang: string) => void;
 }) {
   const { languages } = useSettings();
-  const langName = (code: string) =>
-    languages.find((x) => x.code === code)?.name.slice(0, 1) ?? code;
+  const langName = (code: string) => {
+    const l = languages.find((x) => x.code === code);
+    return l?.short?.trim() || l?.name.slice(0, 1) || code;
+  };
   const [items, setItems] = useState<Favorite[]>([]);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");

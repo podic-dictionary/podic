@@ -5,6 +5,8 @@ export type Lang = string;
 export interface LanguageConfig {
   code: string;
   name: string;
+  /** 切换器/角标简写（如「英」）；缺省用 name 前两字符 */
+  short?: string | null;
 }
 export type View = "search" | "translate" | "reading" | "favorites" | "settings";
 

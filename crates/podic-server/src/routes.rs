@@ -325,6 +325,8 @@ pub struct ProviderIn {
 pub struct LanguageIn {
     code: String,
     name: String,
+    #[serde(default)]
+    short: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -364,7 +366,8 @@ fn validate_languages(langs: &[LanguageIn]) -> Result<Vec<podic_core::settings::
         if !seen.insert(code.clone()) {
             return Err(bad_req(&format!("语言码 {code:?} 重复")));
         }
-        out.push(podic_core::settings::LanguageConfig { code, name });
+        let short = l.short.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        out.push(podic_core::settings::LanguageConfig { code, name, short });
     }
     Ok(out)
 }

@@ -33,6 +33,9 @@ pub struct LanguageConfig {
     pub code: String,
     /// 展示名（如「德语」）
     pub name: String,
+    /// 切换器/角标用的简写（如「英」「En」）；缺省取 name 前两字符
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short: Option<String>,
 }
 
 /// 语言码合法性（与 packs.rs validate 的包语言约束一致）：2-4 位 ASCII 小写字母。
@@ -45,9 +48,9 @@ pub fn valid_lang_code(code: &str) -> bool {
 /// 注册语言默认值（serde 缺字段 + impl Default 共用；derive Default 会给空 Vec，必须手写）
 pub fn default_languages() -> Vec<LanguageConfig> {
     vec![
-        LanguageConfig { code: "en".into(), name: "英语".into() },
-        LanguageConfig { code: "fr".into(), name: "法语".into() },
-        LanguageConfig { code: "ja".into(), name: "日语".into() },
+        LanguageConfig { code: "en".into(), name: "英语".into(), short: Some("英".into()) },
+        LanguageConfig { code: "fr".into(), name: "法语".into(), short: Some("法".into()) },
+        LanguageConfig { code: "ja".into(), name: "日语".into(), short: Some("日".into()) },
     ]
 }
 

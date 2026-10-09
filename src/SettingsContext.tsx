@@ -4,9 +4,9 @@ import type { LanguageConfig } from "./types";
 
 /** 后端不可用时的本地兜底（与后端 default_languages 一致） */
 export const DEFAULT_LANGUAGES: LanguageConfig[] = [
-  { code: "en", name: "英语" },
-  { code: "fr", name: "法语" },
-  { code: "ja", name: "日语" },
+  { code: "en", name: "英语", short: "英" },
+  { code: "fr", name: "法语", short: "法" },
+  { code: "ja", name: "日语", short: "日" },
 ];
 
 export type ThemeMode = "light" | "dark" | "system";

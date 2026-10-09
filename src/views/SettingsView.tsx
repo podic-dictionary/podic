@@ -12,6 +12,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
+import { LANG_PRESETS } from "../components/LanguageSwitcher";
 import Markdown from "../components/Markdown";
 import { PACK_GUIDE_MD } from "../content/packGuide";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
@@ -186,76 +187,29 @@ function SortableLangRow({
   );
 }
 
-/// 语言管理：注册语言的增删与拖拽排序（「移出」只隐藏入口，词条/收藏/文章/标记全部保留，
+/// 语言管理：注册语言的增删改与拖拽排序（「移出」只隐藏入口，词条/收藏/文章/标记全部保留，
 /// 重新添加即恢复）；无词典包的语言靠 AI 补词（user_dict）积累词库
 function LanguagesPage({
   onBack,
+  onGuide,
   curLang,
 }: {
   onBack: () => void;
+  onGuide: () => void;
   curLang: string;
 }) {
   const { languages, setLanguages, languagesFailed } = useSettings();
   const [packs, setPacks] = useState<PackInfo[]>([]);
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
-
-  const reloadPacks = () => listPacks().then((r) => setPacks(r.packs)).catch(() => setPacks([]));
-  useEffect(() => {
-    reloadPacks();
-  }, []);
-
-  const hasPack = (l: string) => packs.some((p) => p.lang === l);
-  // 已装包但未注册：语言被移出后包还在，一键加回
-  const unregisteredPacks = packs.filter((p) => !languages.some((l) => l.code === p.lang));
-
-  const add = async () => {
-    const c = code.trim().toLowerCase();
-    const n = name.trim();
-    if (!/^[a-z]{2,4}$/.test(c)) {
-      setErr("语言码需 2-4 位小写字母（如 de、ko、es）");
-      return;
-    }
-    if (["main", "temp", "auto"].includes(c)) {
-      setErr(`语言码 ${c} 是保留名`);
-      return;
-    }
-    if (!n) {
-      setErr("请填显示名（如「德语」）");
-      return;
-    }
-    if (languages.some((l) => l.code === c)) {
-      setErr(`语言 ${c} 已在列表中`);
-      return;
-    }
-    setBusy(true);
-    setErr("");
-    try {
-      await setLanguages([...languages, { code: c, name: n }]);
-      setCode("");
-      setName("");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (c: string) => {
-    setBusy(true);
-    setErr("");
-    try {
-      await setLanguages(languages.filter((l) => l.code !== c));
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-      setConfirmRemove(null);
-    }
-  };
+  // 行内编辑态：null=浏览；编辑 name 与 short（code 不可改）
+  const [editing, setEditing] = useState<{ code: string; name: string; short: string } | null>(null);
+  // 添加表单：下拉预设（"custom"=自定义码）；自动填的 name/short 可改
+  const [pick, setPick] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [short, setShort] = useState("");
 
   // distance:6px 的激活阈值——列表滚动不误触发拖拽（触摸/鼠标统一 PointerSensor）
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -267,12 +221,83 @@ function LanguagesPage({
     setLanguages(arrayMove(languages, from, to)).catch(() => {}); // 顺序即切换器渲染顺序
   };
 
+  const reloadPacks = () => listPacks().then((r) => setPacks(r.packs)).catch(() => setPacks([]));
+  useEffect(() => {
+    reloadPacks();
+  }, []);
+
+  const hasPack = (l: string) => packs.some((p) => p.lang === l);
+  const unregisteredPacks = packs.filter((p) => !languages.some((l) => l.code === p.lang));
+  const presets = LANG_PRESETS.filter((l) => !languages.some((x) => x.code === l.code));
+  const disabled = busy || languagesFailed;
+
+  const apply = async (next: LanguageConfig[], what: string) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await setLanguages(next);
+    } catch (e) {
+      setErr(`${what}失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEdit = () => {
+    if (!editing) return;
+    const n = editing.name.trim();
+    const sh = editing.short.trim();
+    if (!n) {
+      setErr("显示名不能为空");
+      return;
+    }
+    apply(
+      languages.map((l) =>
+        l.code === editing.code ? { ...l, name: n, short: sh || null } : l,
+      ),
+      "保存",
+    ).then(() => setEditing(null));
+  };
+
+  const add = () => {
+    const c = pick === "custom" ? code.trim().toLowerCase() : pick;
+    const n = name.trim();
+    if (!/^[a-z]{2,4}$/.test(c)) {
+      setErr("语言码需 2-4 位小写字母（如 de、ko、es）");
+      return;
+    }
+    if (["main", "temp", "auto"].includes(c)) {
+      setErr(`语言码 ${c} 是保留名`);
+      return;
+    }
+    if (!n) {
+      setErr("请填语言名（如「德语」）");
+      return;
+    }
+    if (languages.some((l) => l.code === c)) {
+      setErr(`语言 ${c} 已在列表中`);
+      return;
+    }
+    apply(
+      [...languages, { code: c, name: n, short: short.trim() || null }],
+      "添加",
+    ).then(() => {
+      setPick("");
+      setCode("");
+      setName("");
+      setShort("");
+    });
+  };
+
+  const inputCls =
+    "rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm outline-none dark:border-zinc-700 dark:bg-zinc-950";
+
   return (
     <div className="mx-auto max-w-2xl p-4">
       <SubHeader title="语言" onBack={onBack} />
       <p className="mt-1 text-xs text-zinc-400">
-        移出只隐藏切换入口，该语言的词条、收藏、文章与生词标记全部保留，重新添加即恢复。
-        没有词典包的语言查询时由 AI 自动补录词条（需在「AI Provider」配置）。
+        点「编辑」可改显示名与简写（如「英语」→「En」）；移出只隐藏切换入口，词条、收藏、文章与生词标记全部保留，重新添加即恢复。
+        没有词典包的语言查询时由 AI 自动补录词条（需配置 AI Provider）。
       </p>
 
       <div className="mt-4">
@@ -291,22 +316,65 @@ function LanguagesPage({
                   disabled={busy || languagesFailed}
                   onRemove={setConfirmRemove}
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-zinc-800 dark:text-zinc-200">
-                      {l.name}
-                      {l.code === curLang && (
-                        <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
-                          当前
-                        </span>
-                      )}
-                      {!hasPack(l.code) && (
-                        <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                          无词典包
-                        </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 text-xs text-zinc-400">{l.code}</p>
-                  </div>
+                  {editing?.code === l.code ? (
+                    <div className="flex flex-1 flex-wrap items-center gap-2">
+                      <input
+                        value={editing.name}
+                        onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                        placeholder="语言名"
+                        className={`${inputCls} w-28`}
+                      />
+                      <input
+                        value={editing.short}
+                        onChange={(e) => setEditing({ ...editing, short: e.target.value })}
+                        placeholder="简写"
+                        className={`${inputCls} w-16`}
+                      />
+                      <button
+                        onClick={saveEdit}
+                        disabled={busy}
+                        className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        保存
+                      </button>
+                      <button
+                        onClick={() => setEditing(null)}
+                        className="rounded-lg px-2.5 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-zinc-800 dark:text-zinc-200">
+                        {l.name}
+                        {l.short && l.short !== l.name && (
+                          <span className="ml-1.5 text-xs text-zinc-400">（{l.short}）</span>
+                        )}
+                        {l.code === curLang && (
+                          <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                            当前
+                          </span>
+                        )}
+                        {!hasPack(l.code) && (
+                          <span className="ml-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                            无词典包
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-xs text-zinc-400">{l.code}</p>
+                    </div>
+                  )}
+                  {editing?.code !== l.code && (
+                    <button
+                      onClick={() => setEditing({ code: l.code, name: l.name, short: l.short ?? "" })}
+                      disabled={disabled}
+                      className="rounded-lg px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      title="编辑显示名/简写"
+                    >
+                      编辑
+                    </button>
+                  )}
                 </SortableLangRow>
               ))}
             </div>
@@ -324,8 +392,8 @@ function LanguagesPage({
                   {p.lang} · {p.pack_id} v{p.version}
                 </div>
                 <button
-                  onClick={() => setLanguages([...languages, { code: p.lang, name: p.lang }])}
-                  disabled={busy || languagesFailed}
+                  onClick={() => apply([...languages, { code: p.lang, name: p.lang, short: null }], "加入")}
+                  disabled={disabled}
                   className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
                   加入列表
@@ -339,26 +407,59 @@ function LanguagesPage({
       {!languagesFailed ? (
         <div className="podic-card mt-5 rounded-2xl p-4">
           <p className="text-sm text-zinc-700 dark:text-zinc-300">添加语言</p>
-          <div className="mt-2 flex gap-2">
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="de"
-              className="w-20 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
-            />
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="德语"
-              className="flex-1 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
-            />
-            <button
-              onClick={add}
-              disabled={busy}
-              className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+          <div className="mt-2 space-y-2">
+            <select
+              value={pick}
+              onChange={(e) => {
+                setPick(e.target.value);
+                setErr("");
+                if (e.target.value && e.target.value !== "custom") {
+                  const p = LANG_PRESETS.find((x) => x.code === e.target.value);
+                  if (p) {
+                    setName(p.name);
+                    setShort(p.short ?? "");
+                  }
+                }
+              }}
+              className={`${inputCls} w-full`}
             >
-              添加
-            </button>
+              <option value="">选择语言…</option>
+              {presets.map((p) => (
+                <option key={p.code} value={p.code}>
+                  {p.name}（{p.code}）
+                </option>
+              ))}
+              <option value="custom">自定义语言码…</option>
+            </select>
+            {pick === "custom" && (
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="语言码（2-4 位小写字母，如 is）"
+                className={`${inputCls} w-full`}
+              />
+            )}
+            <div className="flex gap-2">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="语言名"
+                className={`${inputCls} min-w-0 flex-1`}
+              />
+              <input
+                value={short}
+                onChange={(e) => setShort(e.target.value)}
+                placeholder="简写"
+                className={`${inputCls} w-16 shrink-0`}
+              />
+              <button
+                onClick={add}
+                disabled={busy || !pick}
+                className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                添加
+              </button>
+            </div>
           </div>
           {err && <p className="mt-2 text-xs text-red-500">{err}</p>}
         </div>
@@ -368,7 +469,7 @@ function LanguagesPage({
 
       <div className="mt-5">
         <button
-          onClick={onBack}
+          onClick={onGuide}
           className="text-xs text-emerald-600 hover:underline dark:text-emerald-400"
         >
           想构建完整的离线词典包？看「创建词典包」教程 →
@@ -380,7 +481,10 @@ function LanguagesPage({
         title="移出语言列表？"
         message={`「${languages.find((l) => l.code === confirmRemove)?.name ?? ""}」将从语言切换中隐藏；词条、收藏、文章与生词标记全部保留，重新添加即恢复。`}
         confirmText="移出"
-        onConfirm={() => confirmRemove && remove(confirmRemove)}
+        onConfirm={() => {
+          if (confirmRemove) apply(languages.filter((l) => l.code !== confirmRemove), "移出");
+          setConfirmRemove(null);
+        }}
         onCancel={() => setConfirmRemove(null)}
       />
     </div>
@@ -794,7 +898,7 @@ export default function SettingsView({
 
   // ---- 二级页：语言管理 ----
   if (sub === "languages") {
-    return <LanguagesPage onBack={() => setSub(null)} curLang={curLang} />;
+    return <LanguagesPage onBack={() => setSub(null)} onGuide={() => setSub("pack-guide")} curLang={curLang} />;
   }
 
   // ---- 二级页：创建词典包教程 ----
