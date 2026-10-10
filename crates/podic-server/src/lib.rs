@@ -53,6 +53,25 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
 /// 组装完整路由：/api/* + 静态前端（dist_dir 不存在时仅 API 可用）
 pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
     axum::Router::new()
+        // 请求日志（打到 stdout/logcat）：真机卡死排查时，最后一个无响应的请求
+        // 直接指向卡点；慢请求（>1s）单独标注
+        .layer(axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                let m = req.method().clone();
+                let p = req.uri().path().to_string();
+                let t = std::time::Instant::now();
+                let res = next.run(req).await;
+                let ms = t.elapsed().as_millis();
+                if p != "/api/health" { // 探活会刷屏
+                    if ms > 1000 {
+                        eprintln!("[podic-http] SLOW {m} {p} {ms}ms");
+                    } else {
+                        eprintln!("[podic-http] {m} {p} {ms}ms");
+                    }
+                }
+                res
+            },
+        ))
         .route("/api/health", axum::routing::get(routes::health))
         .route("/api/packs", axum::routing::get(routes::list_packs))
         .route("/api/packs/import", axum::routing::post(routes::import_pack))

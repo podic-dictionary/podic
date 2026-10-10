@@ -380,8 +380,12 @@ pub async fn attributions(State(state): State<AppState>) -> ApiResult<Json<Value
 }
 
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    let core = lock(&state);
-    Json(json!({ "ok": true, "langs": core.packs.langs() }))
+    // 诊断端点：try_lock 探测全局锁是否被长期持有（持锁方卡死时这里能立刻看出来，
+    // 而不是跟着一起挂）。锁空闲 = 正常返回 langs
+    match state.core.try_lock() {
+        Ok(core) => Json(json!({ "ok": true, "langs": core.packs.langs() })),
+        Err(_) => Json(json!({ "ok": true, "core_locked": true })),
+    }
 }
 
 // ---------------- 设置（api_key 不回传浏览器） ----------------
