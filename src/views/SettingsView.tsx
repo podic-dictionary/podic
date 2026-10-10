@@ -772,7 +772,7 @@ export default function SettingsView({
       });
     };
     return (
-      <div className="mx-auto max-w-2xl p-4">
+      <div className="mx-auto flex min-h-full max-w-2xl flex-col p-4 pb-0">
         <SubHeader
           title="AI Provider"
           onBack={() => (aiDirty ? setLeaveAiAsk(true) : setSub(null))}
@@ -829,7 +829,7 @@ export default function SettingsView({
         )}
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
 
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 flex-1 space-y-3">
           {drafts.map((d) => {
             const tr = testRes[d.id];
             return (
