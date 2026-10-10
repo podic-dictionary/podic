@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   attributions, deleteUserDict, listPacks, listUserDict, saveSettings, testProvider,
 } from "../api";
@@ -14,6 +14,7 @@ import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
+import { setSettingsDirty } from "../lib/dirtyStore";
 import { searchPresets, type ProviderPreset } from "../providerPresets";
 import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
@@ -629,6 +630,28 @@ export default function SettingsView({
   // AI Provider 添加面板：开合 + 搜索词（预设列表模糊匹配）
   const [adding, setAdding] = useState(false);
   const [addQuery, setAddQuery] = useState("");
+  // 未保存检测：草稿签名与已存 providers 对比（掩码 key 视同未改）；离开提示用
+  const [leaveAiAsk, setLeaveAiAsk] = useState(false);
+  const draftSig = (d: Pick<Draft, "name" | "protocol" | "base_url" | "api_key" | "models">) =>
+    [
+      d.name, d.protocol, d.base_url,
+      d.api_key === KEY_MASK ? "" : d.api_key,
+      d.models.map((m) => `${m.name}|${m.label}`).join(";"),
+    ].join("\u00a7");
+  const aiDirty = useMemo(
+    () => {
+      if (!loaded) return false;
+      const a = drafts.map(draftSig);
+      const b = providers.map((p) => ({
+        name: p.name, protocol: p.protocol, base_url: p.base_url,
+        api_key: p.has_key ? KEY_MASK : "",
+        models: p.models.map((m) => ({ name: m, label: p.labels?.[m] ?? "" })),
+      })).map(draftSig);
+      return JSON.stringify(a) !== JSON.stringify(b);
+    },
+    [loaded, drafts, providers],
+  );
+  useEffect(() => { setSettingsDirty(aiDirty); }, [aiDirty]);
 
   useEffect(() => {
     if (loaded) {
@@ -752,7 +775,7 @@ export default function SettingsView({
       <div className="mx-auto max-w-2xl p-4">
         <SubHeader
           title="AI Provider"
-          onBack={() => setSub(null)}
+          onBack={() => (aiDirty ? setLeaveAiAsk(true) : setSub(null))}
           right={
             <button
               onClick={() => setAdding((v) => !v)}
@@ -956,15 +979,35 @@ export default function SettingsView({
           )}
         </div>
 
-        <div className="action-row mt-4">
+        {/* 吸底保存条：未保存时左侧明确提示（离开页面也会有拦截确认） */}
+        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center gap-3 border-t border-zinc-200/70 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/90">
+          {aiDirty ? (
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+              有未保存的修改
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 text-xs text-zinc-400">{status}</span>
+          )}
           <button
             onClick={onSave}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+            className="shrink-0 rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
           >
             保存设置
           </button>
-          {status && <span className="text-xs text-zinc-500">{status}</span>}
         </div>
+
+        <ConfirmDialog
+          open={leaveAiAsk}
+          title="有未保存的修改"
+          message="AI Provider 的改动尚未保存，离开将丢失。"
+          confirmText="直接离开"
+          onConfirm={() => {
+            setLeaveAiAsk(false);
+            setSub(null);
+          }}
+          onCancel={() => setLeaveAiAsk(false)}
+        />
 
         <ConfirmDialog
           open={confirmDelete !== null}

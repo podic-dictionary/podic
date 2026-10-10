@@ -11,6 +11,7 @@ import SettingsView, { type SettingsSub } from "./views/SettingsView";
 import type { Lang, View } from "./types";
 import { parseHash } from "./lib/router";
 import { useInstall } from "./lib/installStore";
+import { useSettingsDirty } from "./lib/dirtyStore";
 
 /** URL 驱动的页面定位：每个页面有自己的 hash（#/search、#/settings/packs），
  * 刷新不回首页；App 壳 deeplink（podic://search?q=…）统一转成 hash 跳转 */
@@ -105,11 +106,14 @@ export default function App() {
   const restoring = useRef(false);
   const exitAllowed = useRef(false);
   const [exitAsk, setExitAsk] = useState(false);
-  // 下载进行中离开词典页：提示确认（后端任务继续跑，进度条全局可见）
+  // 离开拦截：词典下载进行中 / 设置有未保存修改时，切 tab 前确认
   const installState = useInstall();
-  const [leaveAsk, setLeaveAsk] = useState<View | null>(null);
+  const settingsDirty = useSettingsDirty();
+  const [leaveAsk, setLeaveAsk] = useState<{ view: View; reason: "install" | "dirty" } | null>(null);
   const guardView = (v: View) => {
-    if (installState && v !== view) setLeaveAsk(v);
+    if (v === view) return;
+    if (settingsDirty) setLeaveAsk({ view: v, reason: "dirty" });
+    else if (installState) setLeaveAsk({ view: v, reason: "install" });
     else switchView(v);
   };
   // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上
@@ -369,15 +373,19 @@ export default function App() {
         onCancel={() => setExitAsk(false)}
       />
 
-      {/* 词典下载中切页：告知后台继续 + 进度全局可见，不阻断 */}
+      {/* 切页拦截：按原因给文案（下载后台继续 / 未保存修改丢弃） */}
       <ConfirmDialog
         open={leaveAsk !== null}
-        title="词典下载进行中"
-        message="下载会在后台继续进行，顶部进度条随时可查看；离开不影响安装。"
-        confirmText="离开此页"
+        title={leaveAsk?.reason === "dirty" ? "有未保存的修改" : "词典下载进行中"}
+        message={
+          leaveAsk?.reason === "dirty"
+            ? "设置页的改动尚未保存，离开将丢失。"
+            : "下载会在后台继续进行，顶部进度条随时可查看；离开不影响安装。"
+        }
+        confirmText={leaveAsk?.reason === "dirty" ? "直接离开" : "离开此页"}
         confirmClassName="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
         onConfirm={() => {
-          const v = leaveAsk;
+          const v = leaveAsk?.view;
           setLeaveAsk(null);
           if (v) switchView(v);
         }}
