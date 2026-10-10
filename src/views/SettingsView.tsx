@@ -728,20 +728,25 @@ export default function SettingsView({
   // ---- 二级页：AI Provider ----
   if (sub === "ai") {
     const addPreset = (p?: ProviderPreset) => {
-      setDrafts((ds) => [
-        ...ds,
-        p
-          ? {
-              ...emptyDraft(),
-              name: p.label,
-              protocol: p.protocol,
-              base_url: p.baseUrl,
-              models: p.models.map((m) => ({ name: m, label: "" })),
-            }
-          : emptyDraft(),
-      ]);
+      const draft = p
+        ? {
+            ...emptyDraft(),
+            name: p.label,
+            protocol: p.protocol,
+            base_url: p.baseUrl,
+            models: p.models.map((m) => ({ name: m, label: "" })),
+          }
+        : emptyDraft();
+      setDrafts((ds) => [...ds, draft]);
       setAdding(false);
       setAddQuery("");
+      // 新块在页面尾部：滚动定位 + 呼吸高亮，让「添加成功」直接可见
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`provider-${draft.id}`);
+        el?.scrollIntoView({ block: "start", behavior: "smooth" });
+        el?.classList.add("search-flash");
+        window.setTimeout(() => el?.classList.remove("search-flash"), 2000);
+      });
     };
     return (
       <div className="mx-auto max-w-2xl p-4">
@@ -768,6 +773,12 @@ export default function SettingsView({
               placeholder="搜索厂商：zhipu / kimi / openai / coding…"
               className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950"
             />
+            <button
+              onClick={() => addPreset(undefined)}
+              className="mt-2 w-full rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
+            >
+              自定义 Provider（手动填全部字段）…
+            </button>
             <div className="mt-2 max-h-64 overflow-y-auto">
               {searchPresets(addQuery).map((p) => (
                 <button
@@ -791,12 +802,6 @@ export default function SettingsView({
                 <p className="px-3 py-2 text-sm text-zinc-400">没有匹配的厂商</p>
               )}
             </div>
-            <button
-              onClick={() => addPreset(undefined)}
-              className="mt-2 w-full rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
-            >
-              自定义 Provider（手动填全部字段）…
-            </button>
           </div>
         )}
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
@@ -807,6 +812,7 @@ export default function SettingsView({
             return (
               <div
                 key={d.id}
+                id={`provider-${d.id}`}
                 className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80"
               >
                 {/* 名称独占一行；协议换行（挤一行输入区太窄） */}
