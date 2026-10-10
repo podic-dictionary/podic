@@ -24,7 +24,17 @@ impl AnthropicClient {
         } else {
             cfg.base_url.trim_end_matches('/').to_string()
         };
-        let url = format!("{base}/v1/messages");
+        // base 已带版本段（MiniMax 的 …/anthropic/v1）直接接 /messages；
+        // 裸域名（api.anthropic.com）补 /v1/messages
+        let url = if base
+            .rsplit('/')
+            .next()
+            .is_some_and(|seg| seg.len() > 1 && seg.starts_with('v') && seg[1..].starts_with(|c: char| c.is_ascii_digit()))
+        {
+            format!("{base}/messages")
+        } else {
+            format!("{base}/v1/messages")
+        };
         Ok(Self {
             http: reqwest::Client::new(),
             url,

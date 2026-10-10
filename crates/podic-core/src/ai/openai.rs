@@ -16,6 +16,14 @@ pub struct OpenAiClient {
     api_key: String,
 }
 
+/// URL 末段是否为版本段："/v1"、"/v3"、"/v4"、"/v1beta" 这类（字母 v 开头的段）
+fn ends_with_version(base: &str) -> bool {
+    let seg = base.rsplit('/').next().unwrap_or("");
+    seg.len() > 1
+        && seg.starts_with('v')
+        && seg[1..].chars().next().is_some_and(|c| c.is_ascii_digit())
+}
+
 impl OpenAiClient {
     pub fn new(cfg: &ProviderConfig) -> Result<Self> {
         let base = if cfg.base_url.is_empty() {
@@ -23,9 +31,12 @@ impl OpenAiClient {
         } else {
             cfg.base_url.trim_end_matches('/').to_string()
         };
+        // 拼接规则：base 以版本段（/v1、/v3、/v4、/v1beta…）结尾的（z.ai /api/paas/v4、
+        // 火山方舟 /api/v3、OpenAI /v1）直接接 /chat/completions；裸域名（api.openai.com）
+        // 补 /v1/chat/completions；用户填到 /chat/completions 的原样使用
         let url = if base.ends_with("/chat/completions") {
             base
-        } else if base.ends_with("/v1") {
+        } else if ends_with_version(&base) {
             format!("{base}/chat/completions")
         } else {
             format!("{base}/v1/chat/completions")
