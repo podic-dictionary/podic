@@ -46,6 +46,23 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
         flushPendingSearch()
     }
 
+    /// 深链接路由：podic://search?q=… -> location.hash = "#/search?q=…"（前端 hash 路由消费）。
+    /// 页面未加载完成时挂起，didFinish 后重放
+    private var pendingHash: String?
+
+    func openHash(_ hash: String) {
+        let js = "location.hash=\(JSONObject.quote(hash))"
+        webView.evaluateJavaScript(js) { [weak self] result in
+            if result == nil { self?.pendingHash = hash } // 页面未就绪：加载完重放
+        }
+    }
+
+    private func flushPendingHash() {
+        guard let h = pendingHash else { return }
+        pendingHash = nil
+        openHash(h)
+    }
+
     private func flushPendingSearch(retry: Int = 10) {
         guard let s = pendingSearch else { return }
         if webView.isLoading {
@@ -75,6 +92,7 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
         MainActor.assumeIsolated {
             if webView === self.webView {
                 self.flushPendingSearch()
+                self.flushPendingHash()
             } else {
                 self.renderViewDidFinish(webView)
             }

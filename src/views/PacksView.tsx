@@ -13,11 +13,26 @@ import {
 } from "../api";
 import type { PackInfo } from "../types";
 import { useSettings } from "../SettingsContext";
+import { parseHash } from "../lib/router";
 
 const fmtSize = (bytes?: number) =>
   bytes && bytes > 0 ? `${Math.max(1, Math.round(bytes / 1048576))}MB` : "";
 
 export default function PacksView() {
+  // 双 tab（列表/安装）：hash 驱动（#/settings/packs/install），刷新/直链可恢复
+  const [tab, setTabState] = useState<"list" | "install">(
+    () => (parseHash().path[2] === "install" ? "install" : "list"),
+  );
+  useEffect(() => {
+    const onHash = () =>
+      setTabState(parseHash().path[2] === "install" ? "install" : "list");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const setTab = (t: "list" | "install") => {
+    window.location.hash = `#/settings/packs${t === "install" ? "/install" : ""}`;
+  };
+
   const { languages } = useSettings();
   const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
   const [packs, setPacks] = useState<PackInfo[]>([]);
@@ -38,6 +53,15 @@ export default function PacksView() {
   // 已添加但没有词典的语言（虚线占位 + 单独检查）
   const noPackLangs = languages.filter((l) => !packs.some((p) => p.lang === l.code));
   const installing = progress !== null;
+
+  // 源清单（静默后台拉一次）：自导入词典（本地/自定义 URL 装的）在源里没有同 pack_id
+  // 条目，不显示「检查更新」也不参与「更新所有」，避免被源包误覆盖
+  const [catalogData, setCatalogData] = useState<CatalogItem[] | null>(null);
+  useEffect(() => {
+    fetchCatalog().then(setCatalogData).catch(() => {});
+  }, []);
+  const fromSource = (p: PackInfo) =>
+    catalogData == null || catalogData.some((c) => c.lang === p.lang && c.pack_id === p.pack_id);
 
   const refresh = useCallback(async () => {
     try {
@@ -61,7 +85,15 @@ export default function PacksView() {
         setNotice({ title: `没有「${langName(lang)}」词典`, message: "更新源里没有该语言的词典包，可稍后再试或从本地导入" });
         return;
       }
-      const cur = packs.find((p) => p.lang === lang)?.version;
+      const installed = packs.find((p) => p.lang === lang);
+      if (installed && installed.pack_id !== item.pack_id) {
+        setNotice({
+          title: `「${langName(lang)}」词典为自行导入`,
+          message: "当前词典（" + installed.pack_id + "）不来自更新源，为避免覆盖已停用在线更新；如需替换请手动导入",
+        });
+        return;
+      }
+      const cur = installed?.version;
       if (cur && cur === item.version) {
         setNotice({ title: `「${langName(lang)}」已是最新`, message: `当前版本 v${cur}` });
         return;
@@ -108,7 +140,10 @@ export default function PacksView() {
       for (const lang of langs) {
         const item = cat.find((c) => c.lang === lang);
         if (!item) continue;
-        const cur = packs.find((p) => p.lang === lang)?.version;
+        const installed = packs.find((p) => p.lang === lang);
+        // 自导入词典跳过（pack_id 不在源里），避免误覆盖
+        if (installed && installed.pack_id !== item.pack_id) continue;
+        const cur = installed?.version;
         if (cur === item.version) continue;
         if (await install(item)) done += 1;
         else failures.push(langName(lang));
@@ -175,10 +210,25 @@ export default function PacksView() {
   return (
     <div className="mx-auto max-w-2xl">
       <h1 className="text-lg font-medium">词典</h1>
-      <p className="mt-1 text-sm text-zinc-400">
-        词典数据以独立包形式安装；每个词典可单独检查更新，或底部一键更新全部。
-      </p>
 
+      {/* tab 切换：列表（已装 + 无词典占位）/ 安装（在线更新·导入·自定义 URL） */}
+      <div className="mt-3 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
+        {(["list", "install"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              tab === t
+                ? "bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-400"
+                : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            }`}
+          >
+            {t === "list" ? "列表" : "安装"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "list" && (
       <div className="mt-3 space-y-2">
         {packs.map((p) => (
           <div
@@ -224,7 +274,8 @@ export default function PacksView() {
               </div>
             ) : (
               <div className="flex shrink-0 gap-1">
-                {checkBtn(p.lang)}
+                {/* 自导入词典（pack_id 不在源里）不给更新入口，防误覆盖 */}
+                {fromSource(p) && checkBtn(p.lang)}
                 <button
                   onClick={() => setConfirmRemove(p)}
                   disabled={installing}
@@ -257,8 +308,10 @@ export default function PacksView() {
           </div>
         ))}
       </div>
+      )}
 
-      {/* ---- 底部操作：三块明确分隔 ---- */}
+      {/* ---- 安装 tab：三块明确分隔 ---- */}
+      {tab === "install" && (
       <div className="mt-5 space-y-3">
         {/* ① 在线更新 */}
         <section className="podic-card flex items-center justify-between gap-3 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
@@ -336,6 +389,7 @@ export default function PacksView() {
           </div>
         </section>
       </div>
+      )}
 
       <ConfirmDialog
         open={confirmRemove !== null}

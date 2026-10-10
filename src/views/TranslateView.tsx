@@ -42,6 +42,17 @@ export default function TranslateView() {
 
   const provider = providers.find((p) => p.id === aiChoice.providerId);
 
+  // deeplink（#/translate?text=… / podic://translate?text=…）：预填并自动翻译
+  useEffect(() => {
+    const onExternal = (e: Event) => {
+      const { text } = (e as CustomEvent<{ text: string }>).detail;
+      if (!text) return;
+      setInput(text);
+    };
+    window.addEventListener("podic:translate", onExternal);
+    return () => window.removeEventListener("podic:translate", onExternal);
+  }, []);
+
   const go = () => {
     if (running) {
       cancel();

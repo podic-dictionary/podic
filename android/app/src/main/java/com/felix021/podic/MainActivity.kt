@@ -92,6 +92,7 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDeepLink = deepLinkHash(intent)
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -139,12 +140,33 @@ class MainActivity : Activity() {
             val port = PodicNative.startServer(dataDir.absolutePath, 0) // 0=内核挑空闲端口，杜绝端口冲突
             runOnUiThread {
                 if (port > 0) {
-                    webView.loadUrl("http://127.0.0.1:$port")
+                    // 冷启动深链接（podic://search?q=…）拼进初始 URL 的 hash，前端路由直接落到目标页
+                    webView.loadUrl("http://127.0.0.1:$port" + (pendingDeepLink?.let { "#$it" } ?: ""))
                 } else {
                     webView.loadData("podic 后端启动失败，请重启应用", "text/plain", null)
                 }
             }
         }.start()
+    }
+
+    /// 深链接 hash：podic://search?q=hi&lang=en -> /search?q=hi&lang=en（host 当路径段）
+    private fun deepLinkHash(intent: Intent?): String? {
+        val data = intent?.data ?: return null
+        if (data.scheme != "podic") return null
+        val path = data.host ?: return null
+        val q = data.encodedQuery
+        return path + (if (!q.isNullOrEmpty()) "?$q" else "")
+    }
+
+    private var pendingDeepLink: String? = null
+
+    /// 热启动深链接：改 hash 即可（前端 hashchange 路由消费）
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val hash = deepLinkHash(intent) ?: return
+        if (this::webView.isInitialized) {
+            webView.evaluateJavascript("location.hash=${org.json.JSONObject.quote(hash)}", null)
+        }
     }
 
     /// 返回语义：JS 能处理（二级页/其他 tab）就交给 JS 回上级；查词栈底弹退出确认

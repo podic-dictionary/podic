@@ -9,6 +9,16 @@ import TranslateView from "./views/TranslateView";
 import FavoritesView from "./views/FavoritesView";
 import SettingsView, { type SettingsSub } from "./views/SettingsView";
 import type { Lang, View } from "./types";
+import { parseHash } from "./lib/router";
+
+/** URL 驱动的页面定位：每个页面有自己的 hash（#/search、#/settings/packs），
+ * 刷新不回首页；App 壳 deeplink（podic://search?q=…）统一转成 hash 跳转 */
+const SETTINGS_SUBS = ["ai", "about", "updates", "packs", "userdict", "languages"] as const;
+const viewOf = (p?: string): View =>
+  (VIEWS.some((v) => v.id === p) ? p : "search") as View;
+const subOf = (s?: string): SettingsSub =>
+  (SETTINGS_SUBS as readonly string[]).includes(s ?? "") ? (s as SettingsSub) : null;
+const hashUrl = (v: View, s: SettingsSub | null) => `#/${v}${s ? `/${s}` : ""}`;
 
 const VIEWS: {
   id: View;
@@ -90,10 +100,25 @@ export default function App() {
   const restoring = useRef(false);
   const exitAllowed = useRef(false);
   const [exitAsk, setExitAsk] = useState(false);
+  // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上
   useEffect(() => {
-    if (!history.state?.podic) {
-      history.replaceState({ podic: 1, view: "search", sub: null }, "");
-      history.pushState({ podic: 1, view: "search", sub: null, sentinel: true }, "");
+    const r = parseHash();
+    const v = viewOf(r.path[0]);
+    const s = v === "settings" ? subOf(r.path[1]) : null;
+    if (v !== "search") setView(v);
+    if (s) setSettingsSub(s);
+    history.replaceState({ podic: 1, view: v, sub: s }, "", hashUrl(v, s));
+    history.pushState({ podic: 1, view: v, sub: s, sentinel: true }, "", hashUrl(v, s));
+    // deeplink 查询参数：#/search?q=…&lang=… / #/translate?text=…
+    const q = r.params.get("q");
+    if (v === "search" && q) {
+      window.dispatchEvent(
+        new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+      );
+    }
+    const text = r.params.get("text");
+    if (v === "translate" && text) {
+      window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } }));
     }
   }, []);
   useEffect(() => {
@@ -105,9 +130,33 @@ export default function App() {
     const hs = { ...(history.state ?? {}) } as Record<string, unknown>;
     delete hs.sentinel;
     if (JSON.stringify(hs) !== JSON.stringify(state)) {
-      history.pushState(state, "");
+      // pushState 携带 hash URL：返回栈条目自带页面地址，popstate 恢复时地址栏同步
+      history.pushState(state, "", hashUrl(view, settingsSub));
     }
   }, [view, settingsSub, articleId]);
+
+  // hash 跳转（deeplink / 手动改地址）：派生页面状态并按需触发查询
+  useEffect(() => {
+    const onHash = () => {
+      const r = parseHash();
+      const v = viewOf(r.path[0]);
+      const s = v === "settings" ? subOf(r.path[1]) : null;
+      if (v !== view) switchView(v);
+      else if (s !== settingsSub) setSettingsSub(s);
+      const q = r.params.get("q");
+      if (v === "search" && q) {
+        window.dispatchEvent(
+          new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+        );
+      }
+      const text = r.params.get("text");
+      if (v === "translate" && text) {
+        window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } }));
+      }
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  });
   // 把「能否应用内返回」与回退动作同步给 App 壳（WebView 的 canGoBack 不认 pushState）
   useEffect(() => {
     const w = window as unknown as {
@@ -172,12 +221,14 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("podic:search", { detail: { q: w, lang: l } }));
   };
 
-  // App 壳深链接入口：podic://search?q=hi&lang=en -> iOS 壳 evaluateJavaScript 调到这里
+  // App 壳深链接入口：podic://search?q=hi&lang=en -> 壳 evaluateJavaScript 调到这里。
+  // 统一转 hash（#/search?q=…），hashchange 监听派生页面状态并触发查询
   useEffect(() => {
     (window as unknown as { __podicSearch?: (q: string, lang?: string) => void }).__podicSearch =
       (q, lang) => {
-        if (lang && languages.some((l) => l.code === lang)) setLang(lang);
-        openWord(q, lang ?? "en");
+        const params = new URLSearchParams({ q });
+        if (lang) params.set("lang", lang);
+        window.location.hash = `#/search?${params.toString()}`;
       };
   });
 
