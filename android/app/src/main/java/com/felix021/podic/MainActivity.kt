@@ -19,6 +19,15 @@ class MainActivity : Activity() {
     /// SPA 渲染用的隐藏 WebView（同屏只留一个，新请求会销毁旧的）
     private var renderView: WebView? = null
 
+    /// WebView 的 destroy 必须先从视图树 detach，attached 状态销毁会留下
+    /// 半死的 Chromium surface/输入通道（日志刷 "destroy() called while still attached"）
+    private fun destroyRenderView() {
+        val v = renderView ?: return
+        renderView = null
+        (v.parent as? ViewGroup)?.removeView(v)
+        v.destroy()
+    }
+
     /// JS 侧同步「能否应用内返回」（非查词页/有二级页）。WebView 的 canGoBack 不认
     /// pushState 条目，所以返回语义由 JS 桥接驱动
     inner class PodicBridge {
@@ -47,8 +56,7 @@ class MainActivity : Activity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun startRender(url: String, token: String) {
-        renderView?.destroy()
-        renderView = null
+        destroyRenderView()
 
         var finished = false
         val view = { renderView }
@@ -59,9 +67,8 @@ class MainActivity : Activity() {
             val jHtml = org.json.JSONObject.quote(html)
             webView.evaluateJavascript("window.__podicRenderResult?.($jToken, $jHtml)", null)
             // 只清理仍属于本次请求的 view（新请求已把它换掉时不能误杀）
-            if (view() === renderView && renderView != null) {
-                renderView?.destroy()
-                renderView = null
+            if (view() === renderView) {
+                destroyRenderView()
             }
         }
 
@@ -149,9 +156,23 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /// 后台暂停 WebView 的 JS/渲染：省电是其一，更重要的是让 Chromium 线程安静下来——
+    /// 活跃状态下被系统 cgroup freezer 冻结，binder 事务状态脏，回前台解冻后
+    /// 容易卡死主线程（input ANR，真机两次复现）。Rust 后端不受影响（下载照跑）。
+    override fun onPause() {
+        webView.onPause()
+        renderView?.onPause()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webView.onResume()
+        renderView?.onResume()
+    }
+
     /// 深链接 hash：podic://search?q=hi&lang=en -> /search?q=hi&lang=en（host 当路径段）
-    private fun deepLinkHash(intent: Intent?): String? {
-        val data = intent?.data ?: return null
+    private fun deepLinkHash(intent: Intent?): String? {        val data = intent?.data ?: return null
         if (data.scheme != "podic") return null
         val path = data.host ?: return null
         val q = data.encodedQuery
