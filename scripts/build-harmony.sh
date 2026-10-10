@@ -79,7 +79,7 @@ rm -rf "$RAWFILE/web"
 cp -r dist "$RAWFILE/web"
 mkdir -p "$RAWFILE/packs"
 rm -f "$RAWFILE/packs"/*.db
-cp packs/*-dict-*.db "$RAWFILE/packs/" 2>/dev/null || echo "  (未找到 packs/*-dict-*.db，跳过内置词典包)"
+cp packs/en-dict-*.db "$RAWFILE/packs/" 2>/dev/null || echo "  (未找到 packs/en-dict-*.db，跳过内置词典包)"
 ls -lh "$RAWFILE/packs/" 2>/dev/null || true
 
 # 运行期按清单拷贝 rawfile：ArkTS 侧不依赖 getRawFileList（其对目录/文件的列举行为不稳定）
