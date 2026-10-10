@@ -775,17 +775,35 @@ export default function SettingsView({
       });
     };
     return (
-      <div className="mx-auto flex min-h-full max-w-2xl flex-col p-4 pb-0">
+      <div className="mx-auto max-w-2xl p-4">
         <SubHeader
           title="AI Provider"
           onBack={() => (aiDirty ? setLeaveAiAsk(true) : setSub(null))}
           right={
-            <button
-              onClick={() => setAdding((v) => !v)}
-              className="ml-auto flex shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
-            >
-              <PlusIcon size={13} /> 添加
-            </button>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {/* 保存按钮即未保存状态指示：有修改=实心+红点，干净=描边，失败=红可重试 */}
+              <button
+                onClick={onSave}
+                disabled={status === "保存中…"}
+                title={status.startsWith("已保存") ? "" : status}
+                className={aiDirty
+                  ? "relative rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
+                  : status.includes("失败")
+                    ? "relative rounded-xl bg-red-500 px-3 py-1.5 text-xs text-white hover:bg-red-600"
+                    : "relative rounded-xl border border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400"}
+              >
+                {status === "保存中…" ? "保存中…" : status.includes("失败") ? "保存失败·重试" : status.startsWith("已保存") ? "已保存 ✓" : "保存设置"}
+                {aiDirty && status !== "保存中…" && (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-white bg-red-500 dark:border-zinc-950" aria-hidden />
+                )}
+              </button>
+              <button
+                onClick={() => setAdding((v) => !v)}
+                className="flex shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
+              >
+                <PlusIcon size={13} /> 添加
+              </button>
+            </div>
           }
         />
 
@@ -832,7 +850,7 @@ export default function SettingsView({
         )}
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
 
-        <div className="mt-3 flex-1 space-y-3">
+        <div className="mt-3 space-y-3">
           {drafts.map((d) => {
             const tr = testRes[d.id];
             return (
@@ -980,24 +998,6 @@ export default function SettingsView({
           {drafts.length === 0 && (
             <p className="py-6 text-center text-sm text-zinc-400">还没有配置，点右上角「添加」</p>
           )}
-        </div>
-
-        {/* 吸底保存条：未保存时左侧明确提示（离开页面也会有拦截确认） */}
-        <div className="sticky bottom-0 -mx-4 mt-4 flex items-center gap-3 border-t border-zinc-200/70 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/90">
-          {aiDirty ? (
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
-              有未保存的修改
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1 text-xs text-zinc-400">{status}</span>
-          )}
-          <button
-            onClick={onSave}
-            className="shrink-0 rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
-          >
-            保存设置
-          </button>
         </div>
 
         <ConfirmDialog
