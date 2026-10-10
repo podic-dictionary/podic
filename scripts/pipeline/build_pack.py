@@ -176,17 +176,23 @@ def main():
         head_to_id.setdefault(head.casefold(), []).append(eid)
 
     zh_batch = []
+    # 同 headword 可有多条词条（如 LLM 把俄语变格词归一成同一词典形），各自义项数不同：
+    # sense_idx 必须按「挂载目标词条」的义项数钳制，不能只按产生方钳
+    eid_senses_len = dict(db.execute("SELECT id, json_array_length(senses) FROM entry"))
     for e in common.read_jsonl(work / "entries.jsonl"):
         # zh_terms 属于产生它的那个词条：按 casefold(headword) 精确关联。
         # 按 norm 会串到同 norm 的异形词条（élève/élevé），且对方义项数更少时 sense_idx 越界
         eid_list = head_to_id.get(e["headword"].casefold()) or []
-        max_idx = len(e.get("senses") or []) - 1
-        if not eid_list or max_idx < 0:
+        if not eid_list:
             continue
         for row in e.get("zh_terms") or []:
-            term, sense_idx = row[0], min(int(row[1]), max_idx)  # 精修/补齐覆盖 senses 后可能变短，钳到有效范围
+            term, raw_idx = row[0], int(row[1])
             origin = row[2] if len(row) > 2 else "pipeline"
             for eid in eid_list:
+                n_senses = eid_senses_len.get(eid) or 0
+                if n_senses <= 0:
+                    continue
+                sense_idx = min(raw_idx, n_senses - 1)  # 目标义项更少时钳到有效范围
                 zh_batch.append((common.zh_term_norm(term), eid, sense_idx, origin))
     db.executemany("INSERT OR IGNORE INTO zh_index(term_norm, entry_id, sense_idx, origin) VALUES (?,?,?,?)",
                    zh_batch)

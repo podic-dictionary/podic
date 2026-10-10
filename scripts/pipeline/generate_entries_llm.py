@@ -4,7 +4,7 @@
 （多语言化后用户为新注册语言构建 community 词典包的第一步）。
 
 - 输入: 词单文件（每行一个词，或 `词<TAB>频次`；UTF-8）
-- 输出: <work-dir>/entries.jsonl（原子写）+ 空 forms.jsonl
+- 输出: <work-dir>/entries.jsonl + forms.jsonl（变位归一映射，输入词被模型归一成词典形时记 form）
 - 断点: <work-dir>/llm_entries.jsonl 逐词追加（word 一行 JSON），重跑只补缺失词
 - norm/频次由脚本计算（与 crates/podic-core/src/norm.rs 同步的 common.norm），不交给 LLM
 - 协议: --protocol openai（OPENAI_BASE_URL/OPENAI_API_KEY）| anthropic（ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN 或 API_KEY）
@@ -205,8 +205,11 @@ def main():
                 done[w] = entry
                 n_ok += 1
 
-    # 组装 entries.jsonl（构建协议）+ 空 forms.jsonl；原子写
-    entries = []
+    # 组装 entries.jsonl + forms.jsonl（变位归一映射）；原子写。
+    # 模型常把词形归一成词典形（如 найдём->найти）：输入词与输出 headword 不同时
+    # 必须记 form，否则按词形查询全部 miss（词表里的词形是用户真实输入的样子）
+    entries, forms = [], []
+    seen_forms = set()
     for w, freq in words:
         d = done.get(w)
         if not d:
@@ -218,7 +221,12 @@ def main():
             "senses": d["senses"], "zh_terms": zh_terms,
             "extra": {"source": "llm", "model": args.model},
         })
-    for name, rows_ in (("entries.jsonl", entries), ("forms.jsonl", [])):
+        if w != d["headword"] and w.lower() != d["headword"].lower():
+            fn = common.norm(w, args.lang)
+            if fn != d["norm"] and (fn, d["norm"]) not in seen_forms:
+                seen_forms.add((fn, d["norm"]))
+                forms.append({"form_norm": fn, "entry_norm": d["norm"], "rule": "变位归一"})
+    for name, rows_ in (("entries.jsonl", entries), ("forms.jsonl", forms)):
         tmp = work / f"{name}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             for r in rows_:
