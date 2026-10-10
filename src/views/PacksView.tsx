@@ -20,18 +20,21 @@ const fmtSize = (bytes?: number) =>
   bytes && bytes > 0 ? `${Math.max(1, Math.round(bytes / 1048576))}MB` : "";
 
 export default function PacksView() {
-  // 双 tab（列表/安装）：hash 驱动（#/settings/packs/install），刷新/直链可恢复
-  const [tab, setTabState] = useState<"list" | "install">(
-    () => (parseHash().path[2] === "install" ? "install" : "list"),
-  );
+  // 三 tab（列表/安装/更新源）：hash 驱动（#/settings/packs/install、…/source），刷新/直链可恢复
+  const [tab, setTabState] = useState<"list" | "install" | "source">(() => {
+    const t = parseHash().path[2];
+    return t === "install" || t === "source" ? t : "list";
+  });
   useEffect(() => {
-    const onHash = () =>
-      setTabState(parseHash().path[2] === "install" ? "install" : "list");
+    const onHash = () => {
+      const t = parseHash().path[2];
+      setTabState(t === "install" || t === "source" ? t : "list");
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const setTab = (t: "list" | "install") => {
-    window.location.hash = `#/settings/packs${t === "install" ? "/install" : ""}`;
+  const setTab = (t: "list" | "install" | "source") => {
+    window.location.hash = `#/settings/packs${t === "list" ? "" : `/${t}`}`;
   };
 
   const { languages } = useSettings();
@@ -204,9 +207,9 @@ export default function PacksView() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      {/* tab 切换：列表（已装 + 无词典占位）/ 安装（在线更新·导入·自定义 URL·更新源） */}
+      {/* tab 切换：列表（已装 + 无词典占位）/ 安装（在线更新·导入·自定义 URL）/ 更新源 */}
       <div className="mt-3 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
-        {(["list", "install"] as const).map((t) => (
+        {(["list", "install", "source"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -216,7 +219,7 @@ export default function PacksView() {
                 : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
             }`}
           >
-            {t === "list" ? "列表" : "安装"}
+            {t === "list" ? "列表" : t === "install" ? "安装" : "更新源"}
           </button>
         ))}
       </div>
@@ -381,15 +384,13 @@ export default function PacksView() {
             />
           </div>
         </section>
+      </div>
+      )}
 
-        {/* ④ 更新源 */}
-        <section className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
-          <h2 className="text-sm font-medium">更新源</h2>
-          <p className="mt-0.5 text-xs text-zinc-400">在线更新与安装使用的词典发布源</p>
-          <div className="mt-3">
-            <UpdateSourcePicker />
-          </div>
-        </section>
+      {/* ---- 更新源 tab：独立配置页 ---- */}
+      {tab === "source" && (
+      <div className="mt-3">
+        <UpdateSourcePicker />
       </div>
       )}
 

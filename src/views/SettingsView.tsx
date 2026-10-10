@@ -744,13 +744,13 @@ export default function SettingsView({
                 key={d.id}
                 className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80"
               >
-                {/* 头部：名称做标题 + 协议 + 删除 */}
+                {/* 头部：名称输入 + 协议 + 删除 */}
                 <div className="flex items-center gap-2">
                   <input
                     value={d.name}
                     onChange={(e) => patch(d.id, { name: e.target.value })}
                     placeholder="未命名 Provider"
-                    className="min-w-0 flex-1 border-none bg-transparent p-0 text-base font-medium outline-none placeholder:font-normal placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-medium outline-none transition-colors placeholder:font-normal placeholder:text-zinc-300 focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:placeholder:text-zinc-600 dark:focus:border-emerald-600"
                   />
                   <select
                     value={d.protocol}
