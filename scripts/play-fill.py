@@ -32,8 +32,8 @@ TRACK = "alpha"  # 老版 API 轨道名，Console 里显示为「封闭测试」
 VERSION = json.load(open("package.json"))["version"]
 VC = int(re.search(r"versionCode\s*=\s*(\d+)", open("android/app/build.gradle.kts").read()).group(1))
 RELEASE_NOTES = [
-    {"language": "zh-CN", "text": "查词无结果时 AI 自动补录结构化词条进用户词典（下次直接命中，可在设置管理）；查词框一键清空；法语词典补齐 10 万短语与缩写（RTT、au fil du temps 等）。"},
-    {"language": "en-US", "text": "Lookup miss now auto-fills a structured entry into your dictionary via AI (manageable in Settings); one-tap search clear; French dictionary expanded with 100k phrases and abbreviations (RTT, au fil du temps, ...)."},
+    {"language": "zh-CN", "text": "安装包只内置英文词典（体积减半），法语/日语/俄语在线安装且升级不丢；新增俄语 5000 高频词词典；深链接直达查词/翻译；词典页改版（列表/安装/更新源）；AI Provider 内置 29 家厂商预设（智谱/DeepSeek/Kimi/MiniMax/OpenAI 等，填 Key 即用）；设置页可搜索；修复后台卡死问题。"},
+    {"language": "en-US", "text": "Slimmer install (English dictionary only; French/Japanese/Russian install on demand and survive upgrades); new Russian 5k-word dictionary; deep links for lookup & translate; redesigned dictionary page; 29 built-in AI provider presets (Zhipu, DeepSeek, Kimi, MiniMax, OpenAI, ...); searchable settings; fixed background freeze."},
 ]
 
 sa = json.load(open(SA_PATH))
