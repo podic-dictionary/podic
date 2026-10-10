@@ -1,10 +1,11 @@
 # podic
 
-干净清爽简洁的开源词典：**英 / 法 / 日 ↔ 中文**，桌面级体验的 Web 应用，附加可自配的 AI 能力（翻译、例句、深度讲解、词典缺词兜底）。
+干净清爽简洁的开源词典：**多语言 ↔ 中文**（内置英 / 法 / 日 / 俄，可注册任意语言），桌面级体验的 Web 应用，附加可自配的 AI 能力（翻译、例句、深度讲解、词典缺词兜底）。
 
 - 词典数据全部来自开源项目（ECDICT / Lexique / JMdict / CFDICT / Tatoeba），见 [ATTRIBUTIONS.md](ATTRIBUTIONS.md)
-- 词典以「词典包」（单文件 SQLite）形式安装：本地导入，或从 GitHub Release / 自定义 URL 在线更新
-- AI 支持 **OpenAI 兼容** 与 **Anthropic** 两种协议，一个 Provider 可配多个模型、随时切换
+- 词典以「词典包」（单文件 SQLite）形式安装：本地导入，或从 GitHub Release / 自定义 URL 在线更新；安装包只内置英文，其他语言在线安装且升级不丢（每语言自动挂载最高版本）
+- 深链接直达查词 / 翻译：`podic://search?q=word&lang=en`、`podic://translate?text=…`（Android / iOS / 鸿蒙 / 网页一致），网页版每个页面有独立 URL
+- AI 支持 **OpenAI 兼容** 与 **Anthropic** 两种协议，内置 29 家厂商预设（智谱 / z.ai / DeepSeek / Kimi / MiniMax / 百炼 / 火山方舟 / OpenAI / Anthropic…，端点均已实测），选厂商填 Key 即用；一个 Provider 可配多个模型随时切换
 - 后端为 Rust（`podic-core` 纯库 + `podic-server` Axum 壳），前端 React + Vite + Tailwind
 
 ## 使用
@@ -42,10 +43,10 @@ python3 scripts/pipeline/refine_llm.py --lang ja --limit 5000 --rank-file data/w
 bash scripts/pipeline/build_all.sh 0.1.0   # 重新打包（refined 已有断点续跑，不会重复）
 ```
 
-发布词典包：
+发布词典包（单 tag `packs` 滚动发布，每语言一个 `{lang}-metainfo.json` 发布记录，未变化的语言不重复上传）：
 
 ```bash
-bash scripts/release.sh 0.1.0   # gh release 上传 packs/*.db.gz + manifest.json
+python3 scripts/pipeline/make_manifest.py --lang fr --notes fr=说明 [--upload]
 ```
 
 App 内「词典包 → 检查更新」读取 manifest 直链（`releases/latest/download/manifest.json`），不消耗 GitHub API 配额。
@@ -60,7 +61,7 @@ crates/podic-mobile  移动壳：Android JNI + iOS C ABI
 crates/podic-ohos    鸿蒙壳：HarmonyOS NEXT NAPI（见 docs/harmony.md）
 android/ ios/ harmony/  三端宿主工程（WebView + 本地后端）
 scripts/pipeline/    Python 数据管道（下载/清洗/建包/精修/发布）
-packs/               构建产物 podic-{en,fr,ja}-<ver>.db + manifest.json
+packs/               构建产物 {lang}-dict-<ver>.db + {lang}-metainfo.json + manifest.json
 ```
 
 查询分级：`norm 精确 → 屈折形式(form 表) → FTS 模糊 → 前缀 → 中文反查索引`；
@@ -69,5 +70,5 @@ packs/               构建产物 podic-{en,fr,ja}-<ver>.db + manifest.json
 ## Roadmap
 
 - [ ] Tauri 桌面壳（复用 podic-core，零重写）
-- [ ] 词典包在线更新频率限制与自动检查
+- [ ] 词典包自动检查更新（当前为手动触发）
 - [ ] 生词本导出（CSV / Anki）
