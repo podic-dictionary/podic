@@ -14,7 +14,7 @@ import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
-import { PROVIDER_PRESETS } from "../providerPresets";
+import { searchPresets, type ProviderPreset } from "../providerPresets";
 import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
@@ -623,6 +623,9 @@ export default function SettingsView({
   const [testRes, setTestRes] = useState<Record<string, { ok: boolean; msg: string } | undefined>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [sources, setSources] = useState<{ name: string; url: string; license: string }[]>([]);
+  // AI Provider 添加面板：开合 + 搜索词（预设列表模糊匹配）
+  const [adding, setAdding] = useState(false);
+  const [addQuery, setAddQuery] = useState("");
 
   useEffect(() => {
     if (loaded) {
@@ -721,43 +724,78 @@ export default function SettingsView({
 
   // ---- 二级页：AI Provider ----
   if (sub === "ai") {
+    const addPreset = (p?: ProviderPreset) => {
+      setDrafts((ds) => [
+        ...ds,
+        p
+          ? {
+              ...emptyDraft(),
+              name: p.label,
+              protocol: p.protocol,
+              base_url: p.baseUrl,
+              models: p.models.map((m) => ({ name: m, label: "" })),
+            }
+          : emptyDraft(),
+      ]);
+      setAdding(false);
+      setAddQuery("");
+    };
     return (
       <div className="mx-auto max-w-2xl p-4">
         <SubHeader
           title="AI Provider"
           onBack={() => setSub(null)}
           right={
-            // 预设下拉：选厂商直接预填 base URL/协议/代表模型；「自定义…」给空表单
-            <select
-              value=""
-              onChange={(e) => {
-                if (e.target.value === "") return;
-                const p = PROVIDER_PRESETS[Number(e.target.value)];
-                setDrafts((ds) => [
-                  ...ds,
-                  p
-                    ? {
-                        ...emptyDraft(),
-                        name: p.label,
-                        protocol: p.protocol,
-                        base_url: p.baseUrl,
-                        models: p.models.map((m) => ({ name: m, label: "" })),
-                      }
-                    : emptyDraft(),
-                ]);
-              }}
-              className="ml-auto shrink-0 cursor-pointer rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white outline-none hover:bg-emerald-700 dark:bg-emerald-700"
+            <button
+              onClick={() => setAdding((v) => !v)}
+              className="ml-auto flex shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
             >
-              <option value="">＋ 添加</option>
-              {PROVIDER_PRESETS.map((p, i) => (
-                <option key={p.label} value={i}>
-                  {p.label}
-                </option>
-              ))}
-              <option value={PROVIDER_PRESETS.length}>自定义…</option>
-            </select>
+              <PlusIcon size={13} /> 添加
+            </button>
           }
         />
+
+        {/* 添加面板：搜索预设（label/别名/URL 模糊匹配）或直接自定义 */}
+        {adding && (
+          <div className="mt-3 rounded-2xl border border-zinc-200 bg-white/85 p-3 dark:border-zinc-800 dark:bg-zinc-900/80">
+            <input
+              autoFocus
+              value={addQuery}
+              onChange={(e) => setAddQuery(e.target.value)}
+              placeholder="搜索厂商：zhipu / kimi / openai / coding…"
+              className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <div className="mt-2 max-h-64 overflow-y-auto">
+              {searchPresets(addQuery).map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => addPreset(p)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm">
+                      {p.label}
+                      <span className="ml-1.5 text-xs text-zinc-400">
+                        {p.protocol === "anthropic" ? "Anthropic 协议" : ""}
+                      </span>
+                    </span>
+                    <span className="block truncate text-xs text-zinc-400">{p.baseUrl}</span>
+                  </span>
+                  <span aria-hidden className="shrink-0 text-zinc-300">›</span>
+                </button>
+              ))}
+              {searchPresets(addQuery).length === 0 && (
+                <p className="px-3 py-2 text-sm text-zinc-400">没有匹配的厂商</p>
+              )}
+            </div>
+            <button
+              onClick={() => addPreset(undefined)}
+              className="mt-2 w-full rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700"
+            >
+              自定义 Provider（手动填全部字段）…
+            </button>
+          </div>
+        )}
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
 
         <div className="mt-3 space-y-3">
