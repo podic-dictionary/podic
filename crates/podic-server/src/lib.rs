@@ -1,6 +1,7 @@
 //! podic-server 库入口：装配 AppState / 路由，供桌面 bin 与移动端壳（podic-mobile）复用。
 
 pub mod error;
+pub mod log;
 pub mod reader_routes;
 pub mod routes;
 pub mod state;
@@ -32,7 +33,7 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
             Ok(v) => {
                 reader_vocab.insert("ja".to_string(), v);
             }
-            Err(e) => eprintln!("ja 分词词表预热失败（将懒构建）: {e}"),
+            Err(e) => plog!("ja 分词词表预热失败（将懒构建）: {e}"),
         }
     }
 
@@ -64,9 +65,9 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
                 let ms = t.elapsed().as_millis();
                 if p != "/api/health" { // 探活会刷屏
                     if ms > 1000 {
-                        eprintln!("[podic-http] SLOW {m} {p} {ms}ms");
+                        plog!("[podic-http] SLOW {m} {p} {ms}ms");
                     } else {
-                        eprintln!("[podic-http] {m} {p} {ms}ms");
+                        plog!("[podic-http] {m} {p} {ms}ms");
                     }
                 }
                 res
@@ -134,7 +135,7 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
     let std_listener = match std::net::TcpListener::bind(&addr) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("podic bind {addr}: {e}");
+            plog!("podic bind {addr}: {e}");
             return -1;
         }
     };
@@ -153,7 +154,7 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
             {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("podic tokio runtime: {e}");
+                    plog!("podic tokio runtime: {e}");
                     return;
                 }
             };
@@ -161,20 +162,20 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
                 let listener = match tokio::net::TcpListener::from_std(std_listener) {
                     Ok(l) => l,
                     Err(e) => {
-                        eprintln!("podic listener: {e}");
+                        plog!("podic listener: {e}");
                         return;
                     }
                 };
                 let state = match init_state(&data_dir) {
                     Ok(s) => s,
                     Err(e) => {
-                        eprintln!("podic init state: {e}");
+                        plog!("podic init state: {e}");
                         return;
                     }
                 };
                 let app = build_router(state, &dist_dir);
                 if let Err(e) = axum::serve(listener, app).await {
-                    eprintln!("podic serve: {e}");
+                    plog!("podic serve: {e}");
                 }
             });
         })
