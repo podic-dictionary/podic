@@ -33,6 +33,6 @@ xcodebuild -create-xcframework \
 echo "[4/4] 资源"
 mkdir -p ios/Resources/web ios/Resources/packs
 rsync -a --delete dist/ ios/Resources/web/
-rsync -a --delete packs/ ios/Resources/packs/ --include 'podic-*.db' --exclude '*'
+rsync -a --delete packs/ ios/Resources/packs/ --include '*-dict-*.db' --exclude '*'
 
 echo "完成：ios/Frameworks/PodicMobile.xcframework + ios/Resources（xcodegen generate 后可构建，见 ios/README.md）"

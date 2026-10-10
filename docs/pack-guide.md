@@ -21,8 +21,8 @@ title: 为新语言创建词典包
 **2. 打包**（需 Python 3 与本仓库代码，`git clone https://github.com/podic-dictionary/podic` 后在仓库根目录执行）：
 
 ```bash
-python3 scripts/pipeline/build_pack.py --lang de --pack-id community-de \
-  --version 0.1.0 --sources manual --out packs/community-de-0.1.0.db
+python3 scripts/pipeline/build_pack.py --lang de \
+  --version 0.1.0 --sources manual --out packs/de-dict-0.1.0.db
 ```
 
 **3. 校验并导入**：先 `python3 scripts/pipeline/validate_pack.py packs/community-de-0.1.0.db`，通过后在 App「设置 → 词典包管理 → 导入本地词典包」选择 .db 文件。
@@ -54,7 +54,7 @@ python3 scripts/pipeline/generate_entries_llm.py \
 
 - **一种语言只有一个生效的包**：导入同语言的新包会替换旧包（旧文件保留在包目录，重启后生效新包）
 - 语言码必须与注册语言一致（2-4 位小写字母）
-- 自定义包建议用 `community-` 前缀的 pack_id 与官方包区分
+- pack_id 缺省即 `<lang>-dict`，与发布资产命名一致
 
 ## 发布与在线更新（metainfo 机制）
 

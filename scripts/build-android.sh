@@ -44,7 +44,7 @@ cp -r dist android/app/src/main/assets/web
 mkdir -p android/app/src/main/assets/packs
 # aapt2 对 *.gz 资产会去后缀并透明解压（与 .db 同名冲突），这里统一只放 .db
 rm -f android/app/src/main/assets/packs/*.db android/app/src/main/assets/packs/*.gz
-cp packs/podic-*.db android/app/src/main/assets/packs/
+cp packs/*-dict-*.db android/app/src/main/assets/packs/
 ls -lh android/app/src/main/assets/packs/ || true
 
 echo "[4/4] gradle $GRADLE_TASK"

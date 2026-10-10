@@ -57,14 +57,14 @@ export default function PacksView() {
   const noPackLangs = languages.filter((l) => !packs.some((p) => p.lang === l.code));
   const installing = progress !== null;
 
-  // 源清单（静默后台拉一次）：自导入词典（本地/自定义 URL 装的）在源里没有同 pack_id
-  // 条目，不显示「检查更新」也不参与「更新所有」，避免被源包误覆盖
+  // 源清单（静默后台拉一次）：更新源里有该语言的词典即可更新；自导入的包
+  // （pack_id 不同）在确认框里明示「将替换」，由用户把关而不是直接隐藏入口
   const [catalogData, setCatalogData] = useState<CatalogItem[] | null>(null);
   useEffect(() => {
     fetchCatalog().then(setCatalogData).catch(() => {});
   }, []);
-  const fromSource = (p: PackInfo) =>
-    catalogData == null || catalogData.some((c) => c.lang === p.lang && c.pack_id === p.pack_id);
+  const hasInSource = (lang: string) =>
+    catalogData == null || catalogData.some((c) => c.lang === lang);
 
   const refresh = useCallback(async () => {
     try {
@@ -89,13 +89,6 @@ export default function PacksView() {
         return;
       }
       const installed = packs.find((p) => p.lang === lang);
-      if (installed && installed.pack_id !== item.pack_id) {
-        setNotice({
-          title: `「${langName(lang)}」词典为自行导入`,
-          message: "当前词典（" + installed.pack_id + "）不来自更新源，为避免覆盖已停用在线更新；如需替换请手动导入",
-        });
-        return;
-      }
       const cur = installed?.version;
       if (cur && cur === item.version) {
         setNotice({ title: `「${langName(lang)}」已是最新`, message: `当前版本 v${cur}` });
@@ -145,8 +138,6 @@ export default function PacksView() {
         const item = cat.find((c) => c.lang === lang);
         if (!item) continue;
         const installed = packs.find((p) => p.lang === lang);
-        // 自导入词典跳过（pack_id 不在源里），避免误覆盖
-        if (installed && installed.pack_id !== item.pack_id) continue;
         const cur = installed?.version;
         if (cur === item.version) continue;
         if (await install(item)) done += 1;
@@ -276,8 +267,8 @@ export default function PacksView() {
               </div>
             ) : (
               <div className="flex shrink-0 gap-1">
-                {/* 自导入词典（pack_id 不在源里）不给更新入口，防误覆盖 */}
-                {fromSource(p) && checkBtn(p.lang)}
+                {/* 更新源里有该语言才给入口；自导入包走确认框替换 */}
+                {hasInSource(p.lang) && checkBtn(p.lang)}
                 <button
                   onClick={() => setConfirmRemove(p)}
                   disabled={installing}
@@ -424,9 +415,12 @@ export default function PacksView() {
         message={
           confirmInstall
             ? [
-                packs.some((p) => p.lang === confirmInstall.lang)
-                  ? `v${packs.find((p) => p.lang === confirmInstall.lang)?.version} → v${confirmInstall.version}`
-                  : `v${confirmInstall.version}${confirmInstall.entry_count ? ` · ${confirmInstall.entry_count.toLocaleString()} 词条` : ""}`,
+                (() => {
+                  const cur = packs.find((p) => p.lang === confirmInstall.lang);
+                  if (!cur) return `v${confirmInstall.version}${confirmInstall.entry_count ? ` · ${confirmInstall.entry_count.toLocaleString()} 词条` : ""}`;
+                  const replaced = cur.pack_id !== confirmInstall.pack_id;
+                  return `v${cur.version}${replaced ? `（${cur.pack_id}）` : ""} → v${confirmInstall.version}${replaced ? "，将替换你导入的词典" : ""}`;
+                })(),
                 fmtSize(confirmInstall.size) ? `下载体积 ${fmtSize(confirmInstall.size)}` : "",
                 confirmInstall.notes ?? "",
               ]

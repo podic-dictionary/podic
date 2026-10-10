@@ -110,7 +110,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lang", required=True, help="语言码（2-4 位小写字母，多语言化后支持任意语言）")
     ap.add_argument("--version", default="0.1.0")
-    ap.add_argument("--pack-id", default="", help="包标识（缺省 podic-<lang>；自定义包建议 community- 前缀）")
+    ap.add_argument("--pack-id", default="", help="包标识（缺省 <lang>-dict，与发布资产命名一致）")
     ap.add_argument("--sources", default="", help="逗号分隔的 SOURCES 键或自由文本名，写进 meta")
     ap.add_argument("--examples", action="store_true", help="合并 sentences.jsonl / entry_sentence.jsonl")
     ap.add_argument("--out", help="输出 db 路径，缺省 packs/<pack_id>-<version>.db")
@@ -119,7 +119,7 @@ def main():
         ap.error(f"--lang {args.lang!r} 不合法（2-4 位小写字母）")
 
     work = common.WORK / args.lang
-    pack_id = args.pack_id or f"podic-{args.lang}"
+    pack_id = args.pack_id or f"{args.lang}-dict"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", pack_id):
         ap.error(f"--pack-id {pack_id!r} 不合法（文件名安全字符）")
     out = Path(args.out) if args.out else common.ROOT / "packs" / f"{pack_id}-{args.version}.db"
@@ -135,7 +135,7 @@ def main():
     db.executescript(DDL)
 
     # ---- meta ----
-    pack_id = args.pack_id or f"podic-{args.lang}"
+    pack_id = args.pack_id or f"{args.lang}-dict"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", pack_id):
         ap.error(f"--pack-id {pack_id!r} 不合法（文件名安全字符）")
     for k, v in [

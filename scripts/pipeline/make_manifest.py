@@ -55,9 +55,10 @@ def fetch_remote_meta(tag: str, lang: str) -> dict | None:
 
 
 def slim(entry: dict) -> dict:
-    """发布记录里每个版本条目保留的字段（history 复用同结构）"""
+    """history 条目 = 纯版本记录：只留版本号/说明/构建信息。
+    旧版 .db.gz 资产不长期保留（release 里会被清理），file/sha256 指向已删文件就是死链"""
     return {k: entry[k] for k in
-            ("version", "notes", "built_at", "entry_count", "file", "sha256", "size", "sources") if k in entry}
+            ("version", "notes", "built_at", "entry_count", "sources") if k in entry}
 
 
 def main():
@@ -146,7 +147,9 @@ def main():
         if prev and prev.get("version") != entry["version"]:
             history.insert(0, slim(prev))
         seen = set()
-        entry["history"] = [h for h in history if not (h["version"] in seen or seen.add(h["version"]))]
+        # 存量条目也过 slim：清掉指向已清理资产的 file/sha256/size 死链字段
+        entry["history"] = [slim(h) if "file" in h else h
+                            for h in history if not (h["version"] in seen or seen.add(h["version"]))]
 
         entries.append(entry)
         meta_path = packs_dir / f"{lang}-metainfo.json"
