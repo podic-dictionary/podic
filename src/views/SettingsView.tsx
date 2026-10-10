@@ -14,6 +14,7 @@ import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
+import { PROVIDER_PRESETS } from "../providerPresets";
 import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
@@ -726,12 +727,35 @@ export default function SettingsView({
           title="AI Provider"
           onBack={() => setSub(null)}
           right={
-            <button
-              onClick={() => setDrafts((ds) => [...ds, emptyDraft()])}
-              className="ml-auto flex shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
+            // 预设下拉：选厂商直接预填 base URL/协议/代表模型；「自定义…」给空表单
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value === "") return;
+                const p = PROVIDER_PRESETS[Number(e.target.value)];
+                setDrafts((ds) => [
+                  ...ds,
+                  p
+                    ? {
+                        ...emptyDraft(),
+                        name: p.label,
+                        protocol: p.protocol,
+                        base_url: p.baseUrl,
+                        models: p.models.map((m) => ({ name: m, label: "" })),
+                      }
+                    : emptyDraft(),
+                ]);
+              }}
+              className="ml-auto shrink-0 cursor-pointer rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white outline-none hover:bg-emerald-700 dark:bg-emerald-700"
             >
-              <PlusIcon size={13} /> 添加
-            </button>
+              <option value="">＋ 添加</option>
+              {PROVIDER_PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>
+                  {p.label}
+                </option>
+              ))}
+              <option value={PROVIDER_PRESETS.length}>自定义…</option>
+            </select>
           }
         />
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
