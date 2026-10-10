@@ -278,33 +278,63 @@ def main():
                f"跳过 {stats['skip']} -> {prog}")
 
     # 组装 entries.jsonl + forms.jsonl（变位归一映射）；原子写。
-    # 模型常把词形归一成词典形（如 найдём->найти）：输入词与输出 headword 不同时
-    # 必须记 form，否则按词形查询全部 miss（词表里的词形是用户真实输入的样子）
-    entries, forms = [], []
-    seen_forms = set()
+    # 模型常把词形归一成词典形（如 найдём->найти）：多个输入词归一到同一 norm 时
+    # 合并为一条词条——主词条用首个到达的（词单按频降序，首个即最高频，最接近词典形），
+    # senses 用主词条的（变位词条的释义只是"某某的变位"说明，并进词典形是噪音），
+    # pos 取并集；否则查 быть 会出十几张重复卡。所有输入词形仍记 form，按词形查询走归一映射。
+    merged: dict[str, dict] = {}
     for w, freq in words:
         d = done.get(w)
         if not d:
             continue
-        zh_terms = [[s["zh"], i, "llm"] for i, s in enumerate(d["senses"]) if s.get("zh")]
+        m = merged.get(d["norm"])
+        if m is None:
+            merged[d["norm"]] = {
+                "headword": d["headword"], "norm": d["norm"], "reading": d["reading"],
+                "pos": list(d["pos"]), "senses": d["senses"], "freq": freq, "forms": [w],
+            }
+        else:
+            m["freq"] = max(m["freq"], freq)
+            for pp in d["pos"]:
+                if pp not in m["pos"]:
+                    m["pos"].append(pp)
+            m["forms"].append(w)
+    def split_zh(zh: str) -> list[str]:
+        """释义切到反查粒度：去括号补充 -> 分号/逗号/顿号分段 -> 2-8 字短词。
+        LLM 释义是流畅短语（"美丽的，漂亮的；好的"），整条做 term 反查永远 miss"""
+        t = re.sub(r"[（(][^）)]*[）)]", "", zh)
+        out = []
+        for seg in re.split(r"[；;]", t):
+            for w in re.split(r"[，,、]", seg):
+                w = w.strip().strip("。，,、")
+                if 2 <= len(w) <= 8:
+                    out.append(w)
+        return out
+
+    entries = []
+    forms = []
+    for norm, m in merged.items():
+        zh_terms = [[t, i, "llm"] for i, s in enumerate(m["senses"]) if s.get("zh")
+                    for t in split_zh(s["zh"])]
         entries.append({
-            "headword": d["headword"], "norm": d["norm"], "reading": d["reading"] or None,
-            "ipa": None, "pos": d["pos"], "gender": None, "freq": d["freq"],
-            "senses": d["senses"], "zh_terms": zh_terms,
+            "headword": m["headword"], "norm": m["norm"], "reading": m["reading"] or None,
+            "ipa": None, "pos": m["pos"], "gender": None, "freq": m["freq"],
+            "senses": m["senses"], "zh_terms": zh_terms,
             "extra": {"source": "llm", "model": args.model},
         })
-        if w != d["headword"] and w.lower() != d["headword"].lower():
-            fn = common.norm(w, args.lang)
-            if fn != d["norm"] and (fn, d["norm"]) not in seen_forms:
-                seen_forms.add((fn, d["norm"]))
-                forms.append({"form_norm": fn, "entry_norm": d["norm"], "rule": "变位归一"})
+        for w in m["forms"]:
+            if w != m["headword"] and w.lower() != m["headword"].lower():
+                fn = common.norm(w, args.lang)
+                if fn != m["norm"]:
+                    forms.append({"form_norm": fn, "entry_norm": m["norm"], "rule": "变位归一"})
     for name, rows_ in (("entries.jsonl", entries), ("forms.jsonl", forms)):
         tmp = work / f"{name}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             for r in rows_:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         os.replace(tmp, work / name)
-    common.log(f"完成：生成 {len(entries)} 条 -> {work / 'entries.jsonl'}")
+    common.log(f"完成：{len(entries)} 词条（合并自 {sum(len(m['forms']) for m in merged.values())} 个输入词）"
+               f" -> {work / 'entries.jsonl'}")
     if stats["skip"]:
         sys.exit(1)
 
