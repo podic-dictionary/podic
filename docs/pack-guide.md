@@ -71,7 +71,7 @@ python3 scripts/pipeline/generate_entries_llm.py \
 
 - `notes` 是版本说明，App 的更新提示会直接展示
 - `history` 保留历史版本记录；旧版 `.db.gz` 按文件名在 release 里共存，可回溯下载
-- App 端「设置 → 词典包更新源」指向 release 下载目录，**只按已安装语言逐个拉取 metainfo**——没更新的语言包不产生下载
+- App 端「设置 → 词典包更新源」指向 release 下载目录，**只按已安装语言逐个拉取 metainfo**——没更新的词典不产生下载
 
 发新版本（在仓库根目录）：
 

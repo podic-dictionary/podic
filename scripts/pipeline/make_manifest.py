@@ -110,14 +110,16 @@ def main():
         new_sha = file_sha256(db_path)
         local_meta_path = packs_dir / f"{lang}-metainfo.json"
         local_prev = json.load(open(local_meta_path, encoding="utf-8")) if local_meta_path.exists() else None
-        # 版本与哈希一致且本次没改说明 → 跳过；--notes 传入（补说明）时强制重传
+        # 资产命名统一「语言码-dict-版本」开头（release 页按语言聚合排序）；
+        # 官方/社区之分在包内 meta.pack_id，文件名不承载
+        gz_path = packs_dir / f"{lang}-dict-{meta['version']}.db.gz"
+        # 版本/哈希/文件名都一致且本次没改说明 → 跳过；--notes 传入（补说明）时强制重传
         if (remote and remote.get("version") == meta["version"] and remote.get("sha256") == new_sha
-                and lang not in notes_in):
+                and remote.get("file") == gz_path.name and lang not in notes_in):
             common.log(f"[{lang}] v{meta['version']} 与 release 一致，跳过（不重复上传）")
             entries.append(remote)
             continue
 
-        gz_path = db_path.with_name(db_path.name + ".gz")
         if not gz_path.exists() or file_sha256(db_path) != new_sha:
             with open(db_path, "rb") as fin, gzip.open(gz_path, "wb", compresslevel=6) as fout:
                 shutil.copyfileobj(fin, fout, 1 << 20)

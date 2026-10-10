@@ -130,3 +130,13 @@ export const GripIcon = (p: IconProps) => (
     <path d="M15 19v.01" />
   </Svg>
 );
+
+/// 加载指示：CSS 圆环旋转（按钮内联用，currentColor 跟随文字色）
+export function SpinnerIcon({ className = "" }: { className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-[-2px] ${className}`}
+    />
+  );
+}

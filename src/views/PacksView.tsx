@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ConfirmDialog from "../components/ConfirmDialog";
+import NoticeDialog from "../components/NoticeDialog";
+import { SpinnerIcon } from "../components/icons";
 import {
   fetchCatalog,
   importPack,
@@ -19,24 +21,29 @@ export default function PacksView() {
   const { languages } = useSettings();
   const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
   const [packs, setPacks] = useState<PackInfo[]>([]);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ lang: string; p: InstallProgress } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<PackInfo | null>(null);
   /** 检查到的可更新/可安装项（确认框：版本、说明、体积告知后再下载） */
   const [confirmInstall, setConfirmInstall] = useState<CatalogItem | null>(null);
-  /** 「更新所有语言包」的运行态说明（正在检查/下载哪个语言） */
-  const [batchNote, setBatchNote] = useState("");
+  /** 结果通知（弹窗）：操作结果必须在操作处可感知，不能只写在页面顶端 */
+  const [notice, setNotice] = useState<{ title: string; message?: string } | null>(null);
+
+  // 各操作独立的进行态：不能共用——「检查中」不该让无关的导入按钮显示处理中
+  const [checking, setChecking] = useState<string | null>(null); // 正在检查的语言码
+  const [updatingAll, setUpdatingAll] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [urlBusy, setUrlBusy] = useState(false);
   const [customUrl, setCustomUrl] = useState("");
 
-  // 已添加但没有词典包的语言（虚线占位 + 单独检查）
+  // 已添加但没有词典的语言（虚线占位 + 单独检查）
   const noPackLangs = languages.filter((l) => !packs.some((p) => p.lang === l.code));
+  const installing = progress !== null;
 
   const refresh = useCallback(async () => {
     try {
       setPacks((await listPacks()).packs);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setNotice({ title: "词典列表加载失败", message: e instanceof Error ? e.message : String(e) });
     }
   }, []);
 
@@ -44,37 +51,30 @@ export default function PacksView() {
     refresh();
   }, [refresh]);
 
-  const flash = (msg: string) => {
-    setError(msg);
-    window.setTimeout(() => setError((prev) => (prev === msg ? "" : prev)), 2500);
-  };
-
-  /** 检查单个语言：源里有无词典包、已装版本是否落后；有则弹确认框告知详情 */
+  /** 检查单个语言：源里有无词典、已装版本是否落后；有则弹确认框告知详情 */
   const onCheck = async (lang: string) => {
-    setBusy(true);
-    setError("");
+    setChecking(lang);
     try {
       const cat = await fetchCatalog();
       const item = cat.find((c) => c.lang === lang);
       if (!item) {
-        flash(`更新源里没有「${langName(lang)}」的词典包`);
+        setNotice({ title: `没有「${langName(lang)}」词典`, message: "更新源里没有该语言的词典包，可稍后再试或从本地导入" });
         return;
       }
       const cur = packs.find((p) => p.lang === lang)?.version;
       if (cur && cur === item.version) {
-        flash(`「${langName(lang)}」已是最新版本 v${cur}`);
+        setNotice({ title: `「${langName(lang)}」已是最新`, message: `当前版本 v${cur}` });
         return;
       }
       setConfirmInstall(item);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setNotice({ title: "检查失败", message: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false);
+      setChecking(null);
     }
   };
 
   const install = async (u: { lang: string; url: string; sha256?: string }) => {
-    setError("");
     const { done } = installPackStream(
       { lang: u.lang, url: u.url, sha256: u.sha256 ?? "" },
       (p) => setProgress({ lang: u.lang, p }),
@@ -84,7 +84,7 @@ export default function PacksView() {
       await refresh();
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setNotice({ title: "安装失败", message: e instanceof Error ? e.message : String(e) });
       return false;
     } finally {
       setProgress(null);
@@ -97,11 +97,11 @@ export default function PacksView() {
     if (item) await install(item);
   };
 
-  /** 更新所有：已装包升级 + 已添加无包语言装包，逐个检查逐个安装 */
+  /** 更新所有：已装词典升级 + 已添加无词典语言装包，逐个检查逐个安装 */
   const onUpdateAll = async () => {
-    setBusy(true);
-    setError("");
+    setUpdatingAll(true);
     let done = 0;
+    const failures: string[] = [];
     try {
       const cat = await fetchCatalog();
       const langs = [...packs.map((p) => p.lang), ...noPackLangs.map((l) => l.code)];
@@ -110,63 +110,74 @@ export default function PacksView() {
         if (!item) continue;
         const cur = packs.find((p) => p.lang === lang)?.version;
         if (cur === item.version) continue;
-        setBatchNote(
-          `正在安装「${langName(lang)}」v${item.version}${fmtSize(item.size) ? `（${fmtSize(item.size)}）` : ""}…`,
-        );
         if (await install(item)) done += 1;
+        else failures.push(langName(lang));
       }
-      flash(done > 0 ? `已更新 ${done} 个词典包` : "全部语言已是最新");
+      if (failures.length > 0) {
+        setNotice({ title: "部分词典更新失败", message: `失败：${failures.join("、")}；成功 ${done} 个` });
+      } else {
+        setNotice({ title: done > 0 ? `已更新 ${done} 个词典` : "全部词典已是最新" });
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setNotice({ title: "更新失败", message: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBatchNote("");
-      setBusy(false);
+      setUpdatingAll(false);
     }
   };
 
   const onInstallUrl = async () => {
     const url = customUrl.trim();
     if (!url) return;
+    setUrlBusy(true);
     if (await install({ lang: "custom", url })) setCustomUrl("");
+    setUrlBusy(false);
   };
 
   const onImport = async (files: FileList | null) => {
     if (!files?.length) return;
-    setBusy(true);
-    setError("");
+    setImporting(true);
     try {
       for (const f of files) await importPack(f);
       await refresh();
+      setNotice({ title: "导入成功", message: `${files.length} 个词典包已安装` });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setNotice({ title: "导入失败", message: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false);
+      setImporting(false);
     }
   };
 
   const onRemove = async (lang: string) => {
-    setBusy(true);
     try {
       await removePack(lang);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+      setNotice({ title: "删除失败", message: e instanceof Error ? e.message : String(e) });
     }
   };
 
-  const installing = progress !== null || busy;
+  const checkBtn = (lang: string, label = "检查更新") => (
+    <button
+      onClick={() => onCheck(lang)}
+      disabled={installing || checking !== null || updatingAll}
+      className="whitespace-nowrap rounded-lg border border-emerald-500 px-3 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+    >
+      {checking === lang ? (
+        <span className="inline-flex items-center gap-1.5">
+          <SpinnerIcon /> 检查中…
+        </span>
+      ) : (
+        label
+      )}
+    </button>
+  );
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="text-lg font-medium">词典包</h1>
+      <h1 className="text-lg font-medium">词典</h1>
       <p className="mt-1 text-sm text-zinc-400">
-        词典数据以独立包形式安装；每个包可单独检查更新，或底部一键更新全部。
+        词典数据以独立包形式安装；每个词典可单独检查更新，或底部一键更新全部。
       </p>
-
-      {error && <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">{error}</p>}
-      {batchNote && <p className="mt-3 text-sm text-violet-500">{batchNote}</p>}
 
       <div className="mt-3 space-y-2">
         {packs.map((p) => (
@@ -213,13 +224,7 @@ export default function PacksView() {
               </div>
             ) : (
               <div className="flex shrink-0 gap-1">
-                <button
-                  onClick={() => onCheck(p.lang)}
-                  disabled={installing}
-                  className="whitespace-nowrap rounded-lg border border-emerald-500 px-3 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
-                >
-                  检查更新
-                </button>
+                {checkBtn(p.lang)}
                 <button
                   onClick={() => setConfirmRemove(p)}
                   disabled={installing}
@@ -232,7 +237,7 @@ export default function PacksView() {
           </div>
         ))}
 
-        {/* 已添加但无词典包的语言：虚线占位，检查源里有则直接装 */}
+        {/* 已添加但无词典的语言：虚线占位，检查源里有则确认安装 */}
         {noPackLangs.map((l) => (
           <div
             key={l.code}
@@ -241,29 +246,100 @@ export default function PacksView() {
             <div className="min-w-0 flex-1">
               <p className="font-medium text-zinc-500">{l.name}</p>
               <p className="mt-0.5 text-sm text-zinc-400">
-                无词典包（查词走 AI 补全，可点「检查」从更新源安装）
+                无词典（查词走 AI 补全，可点「检查」从更新源安装）
               </p>
             </div>
             {progress?.lang === l.code ? (
-              <p className="shrink-0 text-xs text-zinc-400">
-                {progress.p.phase === "download" ? "下载中…" : "安装中…"}
-              </p>
+              <p className="shrink-0 text-xs text-zinc-400">安装中…</p>
             ) : (
-              <button
-                onClick={() => onCheck(l.code)}
-                disabled={installing}
-                className="shrink-0 whitespace-nowrap rounded-lg border border-emerald-500 px-3 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
-              >
-                检查
-              </button>
+              checkBtn(l.code, "检查")
             )}
           </div>
         ))}
       </div>
 
+      {/* ---- 底部操作：三块明确分隔 ---- */}
+      <div className="mt-5 space-y-3">
+        {/* ① 在线更新 */}
+        <section className="podic-card flex items-center justify-between gap-3 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium">在线更新</h2>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              逐个检查已装词典的更新与无词典语言的安装源，有新版本即下载
+            </p>
+          </div>
+          <button
+            onClick={() => void onUpdateAll()}
+            disabled={installing || checking !== null || updatingAll}
+            className="shrink-0 whitespace-nowrap rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {updatingAll ? (
+              <span className="inline-flex items-center gap-1.5">
+                <SpinnerIcon /> 更新中…
+              </span>
+            ) : (
+              "更新所有词典"
+            )}
+          </button>
+        </section>
+
+        {/* ② 本地导入 */}
+        <section className="podic-card flex items-center justify-between gap-3 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium">本地导入</h2>
+            <p className="mt-0.5 text-xs text-zinc-400">选择 .db 词典包文件导入（可多选）</p>
+          </div>
+          <label className="inline-flex shrink-0 cursor-pointer items-center whitespace-nowrap rounded-xl border border-emerald-500 px-4 py-2 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950">
+            {importing ? (
+              <span className="inline-flex items-center gap-1.5">
+                <SpinnerIcon /> 导入中…
+              </span>
+            ) : (
+              "导入本地词典包"
+            )}
+            <input
+              type="file"
+              accept=".db"
+              multiple
+              className="hidden"
+              onChange={(e) => onImport(e.target.files)}
+            />
+          </label>
+        </section>
+
+        {/* ③ 自定义 URL */}
+        <section className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+          <h2 className="text-sm font-medium">自定义 URL 安装</h2>
+          <p className="mt-0.5 text-xs text-zinc-400">任意可直链的 .db.gz / .db 词典包地址</p>
+          <div className="action-row mt-3">
+            <button
+              onClick={() => void onInstallUrl()}
+              disabled={!customUrl.trim() || urlBusy || installing}
+              className="shrink-0 whitespace-nowrap rounded-xl bg-violet-600 px-4 py-2 text-sm text-white hover:bg-violet-700 disabled:opacity-50"
+            >
+              {urlBusy ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <SpinnerIcon /> 安装中…
+                </span>
+              ) : (
+                "下载安装"
+              )}
+            </button>
+            {/* .action-row > * 的 flex:0 0 auto 特异性高于 tailwind flex-1，用 inline style 撑满 */}
+            <input
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              placeholder="https://…/fr-dict-0.1.3.db.gz"
+              style={{ flex: "1 1 auto", minWidth: 0 }}
+              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </div>
+        </section>
+      </div>
+
       <ConfirmDialog
         open={confirmRemove !== null}
-        title={`删除${langName(confirmRemove?.lang ?? "")}词典包？`}
+        title={`删除${langName(confirmRemove?.lang ?? "")}词典？`}
         message="将移除本地词典文件，查词时该语言不可用。可稍后重新导入或在线更新恢复。"
         onConfirm={async () => {
           const lang = confirmRemove!.lang;
@@ -277,8 +353,8 @@ export default function PacksView() {
         open={confirmInstall !== null}
         title={
           confirmInstall && packs.some((p) => p.lang === confirmInstall.lang)
-            ? `更新${langName(confirmInstall?.lang ?? "")}词典包？`
-            : `安装${langName(confirmInstall?.lang ?? "")}词典包？`
+            ? `更新${langName(confirmInstall?.lang ?? "")}词典？`
+            : `安装${langName(confirmInstall?.lang ?? "")}词典？`
         }
         message={
           confirmInstall
@@ -294,47 +370,17 @@ export default function PacksView() {
             : ""
         }
         confirmText="下载安装"
+        confirmClassName="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
         onConfirm={() => void onConfirmInstall()}
         onCancel={() => setConfirmInstall(null)}
       />
 
-      {/* 底部操作：一键更新全部 + 自定义 URL（手性布局：右利手主按钮在右） */}
-      <div className="action-row mt-4">
-        <button
-          onClick={onUpdateAll}
-          disabled={installing}
-          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
-        >
-          更新所有语言包
-        </button>
-        <label className="inline-block cursor-pointer rounded-xl border border-emerald-500 px-4 py-2 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950">
-          {busy ? "处理中…" : "导入本地词典包"}
-          <input
-            type="file"
-            accept=".db"
-            multiple
-            className="hidden"
-            onChange={(e) => onImport(e.target.files)}
-          />
-        </label>
-      </div>
-      <div className="action-row mt-2">
-        <button
-          onClick={() => void onInstallUrl()}
-          disabled={!customUrl.trim() || installing}
-          className="rounded-xl bg-violet-600 px-4 py-2 text-sm text-white hover:bg-violet-700 disabled:opacity-50"
-        >
-          下载安装
-        </button>
-        {/* .action-row > * 的 flex:0 0 auto 特异性高于 tailwind flex-1，用 inline style 撑满 */}
-        <input
-          value={customUrl}
-          onChange={(e) => setCustomUrl(e.target.value)}
-          placeholder="自定义 URL 安装（.db.gz / .db 直链）"
-          style={{ flex: "1 1 auto", minWidth: 0 }}
-          className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900"
-        />
-      </div>
+      <NoticeDialog
+        open={notice !== null}
+        title={notice?.title ?? ""}
+        message={notice?.message}
+        onClose={() => setNotice(null)}
+      />
     </div>
   );
 }

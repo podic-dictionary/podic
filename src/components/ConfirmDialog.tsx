@@ -6,6 +6,7 @@ export default function ConfirmDialog({
   title,
   message,
   confirmText = "删除",
+  confirmClassName = "bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700",
   onConfirm,
   onCancel,
 }: {
@@ -13,6 +14,8 @@ export default function ConfirmDialog({
   title: string;
   message?: string;
   confirmText?: string;
+  /** 破坏性操作红色（默认），安装/更新类给 emerald 变体 */
+  confirmClassName?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -40,7 +43,7 @@ export default function ConfirmDialog({
         <div className="action-row mt-4 gap-2">
           <button
             onClick={onConfirm}
-            className="rounded-xl bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
+            className={`rounded-xl ${confirmClassName}`}
           >
             {confirmText}
           </button>

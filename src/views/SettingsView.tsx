@@ -184,7 +184,7 @@ function UpdatesPage({
 
   return (
     <div className="mx-auto max-w-2xl p-4">
-      <SubHeader title="词典包更新源" onBack={onBack} />
+      <SubHeader title="词典更新源" onBack={onBack} />
       <p className="mt-1 text-xs text-zinc-400">
         用于「词典包」页的在线词典包与检查更新；点「测速」比较各源延迟后选择。
       </p>
@@ -1022,7 +1022,7 @@ export default function SettingsView({
     );
   }
 
-  // ---- 二级页：词典包更新源 ----
+  // ---- 二级页：词典更新源 ----
   if (sub === "updates") {
     return (
       <UpdatesPage
@@ -1132,7 +1132,7 @@ export default function SettingsView({
         />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
         <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => openExternal(PACK_GUID_URL)} />
-        <Row label="词典包更新源" hint={manifest ? "已配置" : "未配置"} onClick={() => setSub("updates")} />
+        <Row label="词典更新源" hint={manifest ? "已配置" : "未配置"} onClick={() => setSub("updates")} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />
       </section>
     </div>
