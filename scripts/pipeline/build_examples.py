@@ -40,6 +40,9 @@ def main():
     # en/fr 关联键用 casefold(headword) 保变音：norm 去变音会碰撞（élève/élevé 同 norm，例句互串）
     lang_entries: dict[str, dict[str, dict]] = {}
     for lang in ["en", "fr", "ja", "de", "es", "ru"]:
+        if not (common.WORK / lang / "entries.jsonl").exists():
+            common.log(f"[{lang}] 无 entries.jsonl，跳过")
+            continue
         entries = list(common.read_jsonl(common.WORK / lang / "entries.jsonl"))
         entries.sort(key=lambda x: -x.get("freq", 0))
         top = entries[: args.top]
@@ -123,7 +126,8 @@ def main():
     common.log(f"ja 词频表: {len(ja_freq)} 词 -> {freq_path}")
 
     # 第二遍：取 en/fr 命中句子的文本
-    hit_ids_enfr = set(hits["en"]) | set(hits["fr"])
+    # 非 ja 命中句都要取文本（de/es/ru 同走整词匹配路径）
+    hit_ids_word = set().union(*hits.values()) if hits else set()
     sent_text: dict[int, str] = {}
     for raw in open(sent_path, encoding="utf-8"):
         parts = raw.rstrip("\n").split("\t")
@@ -133,11 +137,11 @@ def main():
             sid = int(parts[0])
         except ValueError:
             continue
-        if sid in hit_ids_enfr:
+        if sid in hit_ids_word:
             sent_text[sid] = parts[2]
 
     # 第三遍：links.csv，为命中句子找翻译（优先中文）
-    need_ids = set(hits["en"]) | set(hits["fr"]) | set(hits["ja"])
+    need_ids = hit_ids_word
     translations: dict[int, list] = defaultdict(list)
     n_links = 0
     for raw in open(links_path, encoding="utf-8"):
@@ -171,6 +175,8 @@ def main():
 
     # 组装输出
     for lang in ["en", "fr", "ja", "de", "es", "ru"]:
+        if lang not in lang_entries:
+            continue
         m = lang_entries[lang]
         out_sents = common.WORK / lang / "sentences.jsonl"
         out_links = common.WORK / lang / "entry_sentence.jsonl"
