@@ -115,12 +115,17 @@ export default function PacksView() {
                 key={u.lang}
                 className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30"
               >
-                <p className="text-sm">
-                  {langName(u.lang)} 词典包可更新：
-                  <span className="text-zinc-400">
-                    v{u.current_version} → v{u.latest_version}
-                  </span>
-                </p>
+                <div>
+                  <p className="text-sm">
+                    {langName(u.lang)} 词典包可更新：
+                    <span className="text-zinc-400">
+                      v{u.current_version} → v{u.latest_version}
+                    </span>
+                  </p>
+                  {u.notes && (
+                    <p className="mt-0.5 text-xs text-zinc-400">{u.notes}</p>
+                  )}
+                </div>
                 {progress?.lang === u.lang ? (
                   <div className="w-40">
                     <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">

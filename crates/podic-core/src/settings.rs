@@ -77,10 +77,11 @@ impl Default for Settings {
     }
 }
 
-/// 词典包更新源默认地址（podic-dictionary/dict 的 latest release manifest）。
-/// 国内网络可整串套镜像前缀（如 https://gh-proxy.com/ + 本地址）
+/// 词典包更新源默认地址（podic-dictionary/dict 的 packs release 下载目录，
+/// 内含 {lang}-metainfo.json 与词典包文件）。国内网络可整串套镜像前缀
+/// （如 https://gh-proxy.com/ + 本地址）；自定义源也支持旧式 manifest.json 直链
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://github.com/podic-dictionary/dict/releases/latest/download/manifest.json";
+    "https://github.com/podic-dictionary/dict/releases/latest/download/";
 
 impl Settings {
     pub fn load(path: &Path) -> std::io::Result<Settings> {

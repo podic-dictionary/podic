@@ -1,5 +1,7 @@
-//! 词典包在线更新：manifest 直链检查 + 下载 + sha256 校验 + 原子替换。
-//! manifest 格式见 scripts/pipeline/build_all.sh 产出的 manifest.json。
+//! 词典包在线更新：按语言的 metainfo 检查 + 下载 + sha256 校验 + 原子替换。
+//! 更新源两种形态：
+//! - 基地址（默认）：`{base}/{lang}-metainfo.json` 逐语言获取，只下载有更新的包
+//! - 以 `.json` 结尾：旧式全量 manifest 直链（自定义源兼容），格式见 build_all.sh 产出的 manifest.json
 
 use crate::error::Error;
 use crate::packs::PackInfo;
@@ -17,6 +19,9 @@ pub struct PackUpdate {
     pub pack_id: String,
     pub current_version: String,
     pub latest_version: String,
+    /// 本版本说明（metainfo 的 notes）
+    #[serde(default)]
+    pub notes: String,
     /// .db.gz 下载地址
     pub url: String,
     /// 解压后 .db 的 sha256
@@ -38,6 +43,8 @@ fn default_schema_version() -> i64 {
     1
 }
 
+/// 单个词典包的发布记录。metainfo（{lang}-metainfo.json）顶层即最新版本 + history；
+/// 旧式 manifest.json 的 packs[] 是同结构的扁平清单（无 history）
 #[derive(Debug, Deserialize)]
 struct ManifestPack {
     lang: String,
@@ -45,11 +52,28 @@ struct ManifestPack {
     version: String,
     file: String,
     #[serde(default)]
+    notes: String,
+    #[serde(default)]
     url: Option<String>,
     #[serde(default)]
     sha256: Option<String>,
     #[serde(default)]
     size: u64,
+    #[serde(default)]
+    history: Vec<HistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub version: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub sha256: String,
+    #[serde(default)]
+    pub size: u64,
 }
 
 /// 简单版本比较：按数字段比较，"0.2.0" > "0.1.9"
@@ -75,14 +99,39 @@ pub async fn check_updates(manifest_url: &str, installed: &[PackInfo]) -> Result
         return Ok(vec![]);
     }
     let http = reqwest::Client::new();
-    let resp = http.get(manifest_url).send().await?;
-    if !resp.status().is_success() {
-        return Err(Error::Other(format!("获取 manifest 失败: {}", resp.status())));
-    }
-    let manifest: Manifest = serde_json::from_str(&resp.text().await?)?;
+    // 以 .json 结尾 = 旧式全量 manifest 直链；否则视为基地址，按语言拉 metainfo
+    let packs: Vec<ManifestPack> = if manifest_url.ends_with(".json") {
+        let resp = http.get(manifest_url).send().await?;
+        if !resp.status().is_success() {
+            return Err(Error::Other(format!("获取 manifest 失败: {}", resp.status())));
+        }
+        serde_json::from_str::<Manifest>(&resp.text().await?)?.packs
+    } else {
+        let base = manifest_url.trim_end_matches('/');
+        let mut v = vec![];
+        // 只查已装语言；顺序去重（installed 同语言重复挂载已由包管理保证唯一）
+        let mut langs: Vec<&str> = installed.iter().map(|i| i.lang.as_str()).collect();
+        langs.sort_unstable();
+        langs.dedup();
+        for lang in langs {
+            let u = format!("{base}/{lang}-metainfo.json");
+            let resp = match http.get(&u).send().await {
+                Ok(r) => r,
+                Err(_) => continue, // 网络问题跳过该语言，不影响其他语言
+            };
+            if !resp.status().is_success() {
+                continue; // 源里没有该语言的包（404 等）
+            }
+            match serde_json::from_str::<ManifestPack>(&resp.text().await?) {
+                Ok(p) => v.push(p),
+                Err(_) => continue, // 单语言元数据损坏不拖垮整体
+            }
+        }
+        v
+    };
 
     let mut out = vec![];
-    for p in &manifest.packs {
+    for p in &packs {
         let current = installed
             .iter()
             .find(|i| i.lang == p.lang)
@@ -96,18 +145,10 @@ pub async fn check_updates(manifest_url: &str, installed: &[PackInfo]) -> Result
         let url = match &p.url {
             Some(u) => u.clone(),
             None => {
-                // manifest 放在 releases/latest/download/ 下时，构造同目录直链
+                // 同目录相对链接：manifest/metainfo 与 .db.gz 放在同一发布目录
                 match manifest_url.rsplit_once('/') {
-                    Some((base, _)) if base.ends_with("releases/latest/download") => {
-                        format!("{base}/{}", p.file)
-                    }
-                    _ => {
-                        // 同目录相对链接
-                        match manifest_url.rsplit_once('/') {
-                            Some((base, _)) => format!("{base}/{}", p.file),
-                            None => continue,
-                        }
-                    }
+                    Some((base, _)) => format!("{}/{}", base, p.file),
+                    None => continue,
                 }
             }
         };
@@ -116,6 +157,7 @@ pub async fn check_updates(manifest_url: &str, installed: &[PackInfo]) -> Result
             pack_id: p.pack_id.clone(),
             current_version,
             latest_version: p.version.clone(),
+            notes: p.notes.clone(),
             url,
             sha256: p.sha256.clone().unwrap_or_default(),
             size: p.size,

@@ -81,6 +81,8 @@ export interface PackUpdate {
   pack_id: string;
   current_version: string;
   latest_version: string;
+  /** 版本说明（metainfo 的 notes） */
+  notes?: string;
   url: string;
   sha256: string;
   size: number;

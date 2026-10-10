@@ -56,6 +56,38 @@ python3 scripts/pipeline/generate_entries_llm.py \
 - 语言码必须与注册语言一致（2-4 位小写字母）
 - 自定义包建议用 `community-` 前缀的 pack_id 与官方包区分
 
+## 发布与在线更新（metainfo 机制）
+
+官方词典包发布在 [podic-dictionary/dict](https://github.com/podic-dictionary/dict) 仓库唯一的 `packs` release 里，每个语言一份 **`{lang}-metainfo.json` 发布记录**：
+
+```json
+{
+  "lang": "fr", "pack_id": "podic-fr", "version": "0.1.3",
+  "notes": "本版本的一句话说明",
+  "file": "podic-fr-0.1.3.db.gz", "sha256": "…", "size": 29734207,
+  "history": [ { "version": "0.1.2", "notes": "…", "file": "…", "sha256": "…" } ]
+}
+```
+
+- `notes` 是版本说明，App 的更新提示会直接展示
+- `history` 保留历史版本记录；旧版 `.db.gz` 按文件名在 release 里共存，可回溯下载
+- App 端「设置 → 词典包更新源」指向 release 下载目录，**只按已安装语言逐个拉取 metainfo**——没更新的语言包不产生下载
+
+发新版本（在仓库根目录）：
+
+```bash
+python3 scripts/pipeline/make_manifest.py --lang ru --upload \
+  --notes ru=本版说明
+```
+
+脚本会压缩 `packs/podic-ru-*.db`、生成/更新 `ru-metainfo.json`（历史自动接续）并上传；**版本没变的语言自动跳过，不重复上传**。`manifest.json`（全量清单）同时刷新，兼容旧版 App。
+
 ## 分享你的包
 
-词典包是单个 .db 文件，直接发文件即可。如果你的词条来自开放数据（如 Wiktionary 系 CC BY-SA），分享时需保留数据来源署名；LLM 生成的内容建议标注模型名，供使用者判断质量。
+三种方式按需选：
+
+1. **直接发文件**：词典包是单个 .db 文件，发给别人在「词典包管理 → 导入本地词典包」即可用。
+2. **自建更新源**：把 `.db.gz` + `{lang}-metainfo.json` 放到任意可直链的静态目录（自己的 release / 对象存储），让使用者在「词典包更新源」填该目录地址。
+3. **贡献官方源**：向 [podic-dictionary/dict](https://github.com/podic-dictionary/dict) 提 PR（.packs/ 工作文件不用提交，只提 metainfo 与说明），维护者合并后统一发布。
+
+无论哪种方式：词条来自开放数据（如 Wiktionary 系 CC BY-SA）需保留来源署名；LLM 生成的内容建议标注模型名，供使用者判断质量。
