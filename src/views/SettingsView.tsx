@@ -809,29 +809,23 @@ export default function SettingsView({
                 key={d.id}
                 className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80"
               >
-                {/* 头部：名称输入 + 协议 + 删除 */}
-                <div className="flex items-center gap-2">
-                  <input
-                    value={d.name}
-                    onChange={(e) => patch(d.id, { name: e.target.value })}
-                    placeholder="未命名 Provider"
-                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-medium outline-none transition-colors placeholder:font-normal placeholder:text-zinc-300 focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:placeholder:text-zinc-600 dark:focus:border-emerald-600"
-                  />
+                {/* 名称独占一行；协议换行（挤一行输入区太窄） */}
+                <input
+                  value={d.name}
+                  onChange={(e) => patch(d.id, { name: e.target.value })}
+                  placeholder="未命名 Provider"
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-medium outline-none transition-colors placeholder:font-normal placeholder:text-zinc-300 focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:placeholder:text-zinc-600 dark:focus:border-emerald-600"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="shrink-0 text-xs text-zinc-400">协议</span>
                   <select
                     value={d.protocol}
                     onChange={(e) => patch(d.id, { protocol: e.target.value as "openai" | "anthropic" })}
-                    className="shrink-0 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-950"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-950"
                   >
                     <option value="openai">OpenAI 兼容</option>
                     <option value="anthropic">Anthropic</option>
                   </select>
-                  <button
-                    onClick={() => setConfirmDelete(d.id)}
-                    title="删除"
-                    className="shrink-0 rounded-lg p-2 text-zinc-300 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-zinc-600 dark:hover:bg-red-950"
-                  >
-                    <TrashIcon size={16} />
-                  </button>
                 </div>
 
                 <div className="mt-3 space-y-2.5">
@@ -925,7 +919,8 @@ export default function SettingsView({
                   </div>
                 </div>
 
-                <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                {/* 底部：测试连接 + 删除同行（尾部）；结果独立一行，长错误换行不溢出 */}
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <button
                     onClick={() => onTest(d.id)}
                     disabled={testing === d.id}
@@ -934,10 +929,17 @@ export default function SettingsView({
                     <ZapIcon size={13} />
                     {testing === d.id ? "测试中…" : "测试连接"}
                   </button>
+                  <button
+                    onClick={() => setConfirmDelete(d.id)}
+                    title="删除"
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-red-400/60 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
+                  >
+                    <TrashIcon size={13} /> 删除
+                  </button>
                   {tr && (
-                    <span className={`min-w-0 flex-1 text-xs ${tr.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                    <p className={`w-full break-words text-xs ${tr.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
                       {tr.msg}
-                    </span>
+                    </p>
                   )}
                 </div>
               </div>
