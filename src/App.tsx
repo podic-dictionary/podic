@@ -126,15 +126,21 @@ export default function App() {
     history.replaceState({ podic: 1, view: v, sub: s }, "", hashUrl(v, s));
     history.pushState({ podic: 1, view: v, sub: s, sentinel: true }, "", hashUrl(v, s));
     // deeplink 查询参数：#/search?q=…&lang=… / #/translate?text=…
+    // 延到下一帧：switchView 触发的渲染要先 commit，目标视图的事件监听器才注册好，
+    // 同 tick dispatch 会丢（deeplink 直达翻译页时 TranslateView 还没挂载）
     const q = r.params.get("q");
     if (v === "search" && q) {
-      window.dispatchEvent(
-        new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+      requestAnimationFrame(() =>
+        window.dispatchEvent(
+          new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+        ),
       );
     }
     const text = r.params.get("text");
     if (v === "translate" && text) {
-      window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } }));
+      requestAnimationFrame(() =>
+        window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } })),
+      );
     }
   }, []);
   useEffect(() => {
@@ -161,13 +167,17 @@ export default function App() {
       else if (s !== settingsSub) setSettingsSub(s);
       const q = r.params.get("q");
       if (v === "search" && q) {
-        window.dispatchEvent(
-          new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+        requestAnimationFrame(() =>
+          window.dispatchEvent(
+            new CustomEvent("podic:search", { detail: { q, lang: r.params.get("lang") } }),
+          ),
         );
       }
       const text = r.params.get("text");
       if (v === "translate" && text) {
-        window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } }));
+        requestAnimationFrame(() =>
+          window.dispatchEvent(new CustomEvent("podic:translate", { detail: { text } })),
+        );
       }
     };
     window.addEventListener("hashchange", onHash);

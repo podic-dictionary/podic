@@ -48,22 +48,24 @@ export default function TranslateView() {
       const { text } = (e as CustomEvent<{ text: string }>).detail;
       if (!text) return;
       setInput(text);
+      go(text); // deeplink 明确带 text：预填并直接开翻（不经 state，override 传参）
     };
     window.addEventListener("podic:translate", onExternal);
     return () => window.removeEventListener("podic:translate", onExternal);
   }, []);
 
-  const go = () => {
+  const go = (override?: string) => {
     if (running) {
       cancel();
       return;
     }
-    if (!input.trim()) return;
+    const src = (override ?? input).trim();
+    if (!src) return;
     const hint =
       from === "auto"
         ? `翻译成${langLabel(to)}（自动识别源语言）：\n\n`
         : `把下面的${langLabel(from)}翻译成${langLabel(to)}：\n\n`;
-    run("translate", hint + input, { provider_id: aiChoice.providerId, model: aiChoice.model });
+    run("translate", hint + src, { provider_id: aiChoice.providerId, model: aiChoice.model });
   };
 
   return (
@@ -137,7 +139,7 @@ export default function TranslateView() {
       {/* 动作行：输入框下方、贴手性侧 */}
       <div className="action-row mt-3">
         <button
-          onClick={go}
+          onClick={() => go()}
           disabled={!provider || (!input.trim() && !running)}
           className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
         >

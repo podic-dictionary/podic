@@ -80,7 +80,7 @@ function Examples({ entry, auto }: { entry: Entry; auto: boolean }) {
       </button>
     );
   }
-  if (sentences === null || sentences.length === 0) return null;
+  if (!sentences || sentences.length === 0) return null;
   return (
     <section className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
       <h3 className="eyebrow text-zinc-400">例句</h3>
