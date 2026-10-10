@@ -33,6 +33,9 @@ interface Draft {
   active_model: string; // 不在表单展示，保存时同步为列表第一项
 }
 
+/// 已保存 Key 的掩码：真实 key 不回传浏览器，字段以掩码占位；保存时含掩码 = 未修改
+const KEY_MASK = "••••••••";
+
 const emptyDraft = (): Draft => ({
   id: `p-${Date.now()}`,
   name: "",
@@ -632,7 +635,7 @@ export default function SettingsView({
       setDrafts(
         providers.map((p) => ({
           ...p,
-          api_key: p.has_key ? "••••••••" : "",
+          api_key: p.has_key ? KEY_MASK : "",
           models: p.models.map((m) => ({ name: m, label: p.labels?.[m] ?? "" })),
         })),
       );
@@ -846,18 +849,36 @@ export default function SettingsView({
                     <div className="relative">
                       <input
                         value={d.api_key}
-                        onChange={(e) => patch(d.id, { api_key: e.target.value })}
+                        onChange={(e) =>
+                          patch(d.id, {
+                            api_key:
+                              d.api_key === KEY_MASK
+                                ? e.target.value.replace(KEY_MASK, "") // 掩码态输入 = 覆盖
+                                : e.target.value,
+                          })
+                        }
                         placeholder="sk-…"
                         type={showKey[d.id] ? "text" : "password"}
                         className={`${inputRow} pr-10`}
                       />
-                      <button
-                        onClick={() => setShowKey((s) => ({ ...s, [d.id]: !s[d.id] }))}
-                        title={showKey[d.id] ? "隐藏" : "显示"}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                      >
-                        {showKey[d.id] ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
-                      </button>
+                      {d.api_key === KEY_MASK ? (
+                        /* 已保存的 Key 不回传浏览器（字段值是掩码），eye 在掩码态切换
+                           password/text 显示的都是圆点字符——无意义，换成「已保存」徽标 */
+                        <span
+                          title="已保存的 Key 不回显；重新输入即可覆盖"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+                        >
+                          已保存
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setShowKey((s) => ({ ...s, [d.id]: !s[d.id] }))}
+                          title={showKey[d.id] ? "隐藏" : "显示"}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
+                        >
+                          {showKey[d.id] ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div>
