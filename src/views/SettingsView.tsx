@@ -726,12 +726,15 @@ export default function SettingsView({
     setTesting(id);
     try {
       const d = drafts.find((x) => x.id === id)!;
-      // 先保存再测试，确保用最新配置；模型显式取当前输入列表的第一项
-      // （active_model 只在保存时同步，测试不能依赖它，否则新填的模型发不出去）
-      if (!(await onSave())) return;
-      setStatus("");
+      // 测试用表单当前值（草稿直传后端），不再自动保存——保存必须是显式动作，
+      // 测试触发的隐式保存曾把用户没确认的半成品状态写进配置
       const model = firstModel(d);
-      const r = await testProvider(id, model);
+      const r = await testProvider(id, model, {
+        protocol: d.protocol,
+        base_url: d.base_url,
+        // 掩码/空 = 用已存 key 测；重输的 key 直接用
+        api_key: d.api_key === KEY_MASK ? "" : d.api_key,
+      });
       setTestRes((m) => ({
         ...m,
         [id]: r.ok

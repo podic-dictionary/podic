@@ -198,10 +198,15 @@ export const saveSettings = (settings: {
   languages?: LanguageConfig[];
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 
-export const testProvider = (provider_id: string, model?: string) =>
+export const testProvider = (
+  provider_id: string,
+  model?: string,
+  /** 表单草稿：测试用当前输入值，不必先保存（key 掩码/空时后端用已存的） */
+  draft?: { protocol?: string; base_url?: string; api_key?: string },
+) =>
   api<{ ok: boolean; latency_ms?: number; error?: string }>("/settings/test-provider", {
     method: "POST",
-    body: JSON.stringify({ provider_id, model }),
+    body: JSON.stringify({ provider_id, model, draft }),
     headers: { "Content-Type": "application/json" },
   });
 
