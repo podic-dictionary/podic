@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json};
 use podic_core::ai::{prompt, AnyClient, ChatRequest, Msg};
-use podic_core::settings::ProviderConfig;
+use podic_core::settings::{Protocol, ProviderConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -747,13 +747,24 @@ pub struct TestProviderReq {
     pub provider_id: String,
     #[serde(default)]
     pub model: Option<String>,
+    /// 表单草稿覆盖（测试用当前输入值，不必先保存）：非空时覆盖已存配置。
+    /// api_key 为掩码/空时不覆盖——用已存 key 测
+    #[serde(default)]
+    pub draft: Option<TestDraft>,
+}
+
+#[derive(Deserialize)]
+pub struct TestDraft {
+    pub protocol: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
 }
 
 pub async fn test_provider(
     State(state): State<AppState>,
     Json(req): Json<TestProviderReq>,
 ) -> ApiResult<Json<Value>> {
-    let (provider, model) = {
+    let (mut provider, model) = {
         let core = lock(&state);
         let p = core
             .settings
@@ -768,6 +779,21 @@ pub async fn test_provider(
             .unwrap_or_else(|| p.active_model.clone());
         (p, m)
     };
+    // 表单草稿优先（未保存的修改也能测）；key 只在明确重输时覆盖（掩码/空=用已存的）
+    if let Some(d) = &req.draft {
+        if let Some(proto) = &d.protocol {
+            // serde 枚举小写字符串解析（"openai"/"anthropic"）
+            if let Ok(p) = serde_json::from_str::<Protocol>(&serde_json::to_string(proto).unwrap_or_default()) {
+                provider.protocol = p;
+            }
+        }
+        if let Some(u) = &d.base_url {
+            if !u.is_empty() { provider.base_url = u.clone(); }
+        }
+        if let Some(k) = &d.api_key {
+            if !k.is_empty() && !k.contains('•') { provider.api_key = k.clone(); }
+        }
+    }
     let chat = ChatRequest {
         model,
         system: None,
