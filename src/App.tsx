@@ -14,6 +14,9 @@ import { useInstall } from "./lib/installStore";
 
 /** URL 驱动的页面定位：每个页面有自己的 hash（#/search、#/settings/packs），
  * 刷新不回首页；App 壳 deeplink（podic://search?q=…）统一转成 hash 跳转 */
+// 底部 tab 顺序：查词固定居中（左右利手都在拇指易点区），其余按手性分布，
+// 右利手 = 设置-阅读-查词-翻译-生词，左利手镜像（桌面 Sidebar 固定顺序不随 hand 变）
+const NAV_ORDER: View[] = ["settings", "reading", "search", "translate", "favorites"];
 const SETTINGS_SUBS = ["ai", "about", "updates", "packs", "userdict", "languages"] as const;
 const viewOf = (p?: string): View =>
   (VIEWS.some((v) => v.id === p) ? p : "search") as View;
@@ -74,7 +77,8 @@ export default function App() {
     }
   }, [languages, lang, setLang]);
   // 右手: 高频入口靠右（查词在最右、拇指热区）；左手: 原顺序
-  const navViews = hand === "right" ? [...VIEWS].reverse() : VIEWS;
+  const navViews = (hand === "right" ? NAV_ORDER : [...NAV_ORDER].reverse())
+    .map((id) => VIEWS.find((v) => v.id === id)!);
   // 各 tab 常驻（display 切换）保住内部状态；滚动位置按 tab 记忆恢复
   const mainRef = useRef<HTMLElement>(null);
   const scrollPos = useRef<Partial<Record<View, number>>>({});

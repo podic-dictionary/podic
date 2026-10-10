@@ -280,3 +280,21 @@ html.hand-left .action-row {
   flex-direction: row;
   justify-content: flex-start;
 }
+
+/* 设置搜索定位后的呼吸高亮：emerald 描边脉冲 3 次（约 2s），
+   暗色用亮一档的 emerald-400 */
+@keyframes search-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 0 transparent; }
+  50% { box-shadow: inset 0 0 0 2px rgb(16 185 129 / 0.55); }
+}
+.dark .search-flash {
+  animation-name: search-breathe-dark;
+}
+@keyframes search-breathe-dark {
+  0%, 100% { box-shadow: inset 0 0 0 0 transparent; }
+  50% { box-shadow: inset 0 0 0 2px rgb(52 211 153 / 0.6); }
+}
+.search-flash {
+  border-radius: 1rem;
+  animation: search-breathe 0.62s ease-in-out 3;
+}

@@ -12,6 +12,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
+import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
 import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
@@ -948,24 +949,27 @@ export default function SettingsView({
   return (
     <div className="mx-auto max-w-2xl p-4">
       <h1 className="text-lg font-medium">设置</h1>
+      <div className="mt-3">
+        <SettingsSearch setSub={setSub} />
+      </div>
 
       {/* 外观 */}
       <section className="mt-4 space-y-4 podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
-        <div>
+        <div id="set-theme">
           <h2 className="text-sm font-medium text-zinc-500">色彩模式</h2>
           <div className="mt-2">
             <Seg value={theme} options={THEME_OPTS} onChange={setTheme} />
           </div>
         </div>
-        <div>
+        <div id="set-font">
           <h2 className="text-sm font-medium text-zinc-500">页面字体大小</h2>
           <div className="mt-2">
             <Seg value={fontScale} options={FONT_OPTS} onChange={setFontScale} />
           </div>
         </div>
-        <div>
+        <div id="set-hand">
           <h2 className="text-sm font-medium text-zinc-500">操作手性</h2>
-          <p className="mt-0.5 text-xs text-zinc-400">按钮与高频入口靠哪一侧（右手时底部 tab 中「查词」在最右）</p>
+          <p className="mt-0.5 text-xs text-zinc-400">按钮与高频入口靠哪一侧（「查词」tab 始终居中，其余按手性左右分布）</p>
           <div className="mt-2">
             <Seg value={hand} options={HAND_OPTS} onChange={setHand} />
           </div>
@@ -973,7 +977,7 @@ export default function SettingsView({
       </section>
 
       {/* AI 补全 */}
-      <section className="mt-4 podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+      <section className="mt-4 podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80" id="set-auto">
         <div>
           <h2 className="text-sm font-medium text-zinc-500">词典未命中时 AI 补全</h2>
           <p className="mt-0.5 text-xs text-zinc-400">

@@ -190,7 +190,7 @@ export default function PacksView() {
     <button
       onClick={() => onCheck(lang)}
       disabled={installing || checking !== null || updatingAll}
-      className="whitespace-nowrap rounded-lg border border-emerald-500 px-3 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+      className="whitespace-nowrap rounded-lg border border-emerald-500 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
     >
       {checking === lang ? (
         <span className="inline-flex items-center gap-1.5">
@@ -224,11 +224,9 @@ export default function PacksView() {
       {tab === "list" && (
       <div className="mt-3 space-y-2">
         {packs.map((p) => (
-          <div
-            key={p.lang}
-            className="flex items-center justify-between gap-3 podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80"
-          >
-            <div className="min-w-0 flex-1">
+          <div key={p.lang} className="podic-card rounded-2xl bg-white/85 p-3.5 dark:bg-zinc-900/80">
+            {/* 文案全宽；按钮挪到下一行，不再挤压词条信息 */}
+            <div>
               <p className="font-medium">
                 {langName(p.lang)}
                 <span className="ml-2 text-xs text-zinc-400">
@@ -245,8 +243,8 @@ export default function PacksView() {
               )}
             </div>
             {progress?.lang === p.lang ? (
-              <div className="w-36 shrink-0">
-                <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+              <div className="mt-2 flex items-center gap-2">
+                <div className="h-1.5 max-w-48 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                   <div
                     className="h-full bg-violet-500 transition-all"
                     style={{
@@ -257,7 +255,7 @@ export default function PacksView() {
                     }}
                   />
                 </div>
-                <p className="mt-1 text-right text-xs text-zinc-400">
+                <p className="shrink-0 text-xs text-zinc-400">
                   {progress.p.phase === "download"
                     ? `下载中 ${Math.round(progress.p.downloaded / 1048576)}MB`
                     : progress.p.phase === "extract"
@@ -266,13 +264,13 @@ export default function PacksView() {
                 </p>
               </div>
             ) : (
-              <div className="flex shrink-0 gap-1">
+              <div className="mt-2 flex justify-end gap-1.5">
                 {/* 更新源里有该语言才给入口；自导入包走确认框替换 */}
                 {hasInSource(p.lang) && checkBtn(p.lang)}
                 <button
                   onClick={() => setConfirmRemove(p)}
                   disabled={installing}
-                  className="whitespace-nowrap rounded-lg px-3 py-2.5 text-sm text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
+                  className="whitespace-nowrap rounded-lg px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
                 >
                   删除
                 </button>
@@ -285,19 +283,21 @@ export default function PacksView() {
         {noPackLangs.map((l) => (
           <div
             key={l.code}
-            className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-zinc-300 bg-transparent p-4 dark:border-zinc-700"
+            className="rounded-2xl border border-dashed border-zinc-300 bg-transparent p-3.5 dark:border-zinc-700"
           >
-            <div className="min-w-0 flex-1">
+            <div>
               <p className="font-medium text-zinc-500">{l.name}</p>
               <p className="mt-0.5 text-sm text-zinc-400">
                 无词典（查词走 AI 补全，可点「检查」从更新源安装）
               </p>
             </div>
-            {progress?.lang === l.code ? (
-              <p className="shrink-0 text-xs text-zinc-400">安装中…</p>
-            ) : (
-              checkBtn(l.code, "检查")
-            )}
+            <div className="mt-2 flex justify-end">
+              {progress?.lang === l.code ? (
+                <p className="py-1.5 text-xs text-zinc-400">安装中…</p>
+              ) : (
+                checkBtn(l.code, "检查")
+              )}
+            </div>
           </div>
         ))}
       </div>
