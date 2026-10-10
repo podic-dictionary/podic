@@ -213,6 +213,18 @@ pub async fn packs_catalog(
     Ok(Json(json!({ "catalog": out })))
 }
 
+/// 同语言并发安装互斥表：两个任务共用 update-{lang}.db.part 临时文件，
+/// 先完成的会把它 rename 走，后完成的在校验时报 ENOENT（实测复现）。
+/// Vec::new 是 const fn，HashSet 不是，static 里只能用 Vec
+static INSTALLING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct InstallGuard(String);
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        INSTALLING.lock().unwrap().retain(|l| l != &self.0);
+    }
+}
+
 /// POST /api/packs/install：SSE 返回进度 {type: progress|done|error}
 pub async fn install_pack(
     State(state): State<AppState>,
@@ -223,6 +235,19 @@ pub async fn install_pack(
     let tx2 = tx.clone();
 
     tokio::spawn(async move {
+        {
+            let mut g = INSTALLING.lock().unwrap();
+            if g.contains(&req.lang) {
+                let _ = tx.send(sse_event(json!({
+                    "type": "error",
+                    "message": format!("「{}」的安装任务正在进行中，请等待完成", req.lang),
+                })));
+                return;
+            }
+            g.push(req.lang.clone());
+        }
+        let _guard = InstallGuard(req.lang.clone());
+
         let packs_dir = {
             let core = lock(&state);
             core.packs.packs_dir().to_path_buf()
