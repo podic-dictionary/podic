@@ -113,6 +113,106 @@ pub struct InstallReq {
     sha256: String,
 }
 
+/// GET /api/packs/speed-test?url=<更新源基地址>：拉一次 manifest.json 测延迟（帮用户选源）
+pub async fn speed_test(
+    Query(p): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Json<Value>> {
+    let Some(base) = p.get("url") else {
+        return Err(bad_req("缺少 url 参数"));
+    };
+    let base = base.trim().trim_end_matches('/');
+    let full = if base.ends_with(".json") {
+        base.to_string()
+    } else {
+        format!("{base}/manifest.json")
+    };
+    let t0 = std::time::Instant::now();
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| ApiError(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match http.get(&full).send().await {
+        Ok(r) if r.status().is_success() => {
+            let _ = r.bytes().await;
+            Ok(Json(json!({ "ms": t0.elapsed().as_millis() as u64 })))
+        }
+        Ok(r) => Err(ApiError(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("源不可用: HTTP {}", r.status()),
+        )),
+        Err(e) => Err(ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("连接失败: {e}"))),
+    }
+}
+/// metainfo 基地址模式拉 {base}/manifest.json（发布脚本保证与各语言 metainfo 同步），
+/// 旧式 manifest 直链原样使用
+pub async fn packs_catalog(
+    State(state): State<AppState>,
+    Query(p): Query<UpdateParams>,
+) -> ApiResult<Json<Value>> {
+    let (url, installed) = {
+        let core = lock(&state);
+        let configured = core.settings.manifest_url.trim();
+        (
+            p.manifest.clone().unwrap_or_else(|| {
+                if configured.is_empty() {
+                    podic_core::settings::DEFAULT_MANIFEST_URL.to_string()
+                } else {
+                    configured.to_string()
+                }
+            }),
+            core.packs.list(),
+        )
+    };
+    let full = if url.ends_with(".json") {
+        url
+    } else {
+        format!("{}/manifest.json", url.trim_end_matches('/'))
+    };
+    let http = reqwest::Client::new();
+    let resp = http.get(&full).send().await.map_err(|e| {
+        ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("获取词典目录失败: {e}"))
+    })?;
+    if !resp.status().is_success() {
+        return Err(ApiError(
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("获取词典目录失败: {}", resp.status()),
+        ));
+    }
+    let body = resp.text().await.map_err(|e| {
+        ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("获取词典目录失败: {e}"))
+    })?;
+    let manifest: Value = serde_json::from_str(&body)
+        .map_err(|e| ApiError(axum::http::StatusCode::BAD_GATEWAY, format!("词典目录解析失败: {e}")))?;
+
+    let base = match full.rsplit_once('/') {
+        Some((b, _)) => format!("{b}/"),
+        None => String::new(),
+    };
+    let mut out = vec![];
+    if let Some(packs) = manifest["packs"].as_array() {
+        for p in packs {
+            let lang = p["lang"].as_str().unwrap_or_default().to_string();
+            let installed_version = installed
+                .iter()
+                .find(|i| i.lang == lang)
+                .map(|i| i.version.clone());
+            let mut item = p.clone();
+            item["installed_version"] = match &installed_version {
+                Some(v) => json!(v),
+                None => Value::Null,
+            };
+            // 下载直链：无显式 url 时按清单所在目录拼
+            if item.get("url").and_then(|u| u.as_str()).unwrap_or("").is_empty() {
+                if let Some(file) = p["file"].as_str() {
+                    item["url"] = json!(format!("{base}{file}"));
+                }
+            }
+            out.push(item);
+        }
+    }
+    Ok(Json(json!({ "catalog": out })))
+}
+
 /// POST /api/packs/install：SSE 返回进度 {type: progress|done|error}
 pub async fn install_pack(
     State(state): State<AppState>,

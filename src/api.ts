@@ -91,6 +91,26 @@ export interface PackUpdate {
 
 export const checkUpdates = () => api<{ updates: PackUpdate[] }>("/packs/updates").then((r) => r.updates);
 
+/** 更新源的全量词典清单（含未安装语言）；installed_version 为 null = 未安装 */
+export interface CatalogItem {
+  lang: string;
+  pack_id: string;
+  version: string;
+  notes?: string;
+  entry_count?: number;
+  file: string;
+  url: string;
+  sha256?: string;
+  size?: number;
+  installed_version?: string | null;
+}
+
+export const fetchCatalog = () => api<{ catalog: CatalogItem[] }>("/packs/catalog").then((r) => r.catalog);
+
+/** 测更新源延迟：拉一次 manifest.json，返回耗时毫秒 */
+export const speedTest = (baseUrl: string) =>
+  api<{ ms: number }>(`/packs/speed-test?url=${encodeURIComponent(baseUrl)}`).then((r) => r.ms);
+
 export interface InstallProgress {
   phase: "download" | "extract" | "verify";
   downloaded: number;

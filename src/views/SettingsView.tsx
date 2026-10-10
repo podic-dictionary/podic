@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  attributions, deleteUserDict, listPacks, listUserDict, saveSettings, testProvider,
+  attributions, deleteUserDict, listPacks, listUserDict, saveSettings, speedTest, testProvider,
 } from "../api";
 import type { LanguageConfig, PackInfo, UserDictEntry } from "../types";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -108,6 +108,118 @@ function Row({ label, hint, onClick }: { label: string; hint?: string; onClick: 
 }
 
 /// 二级页头部：返回按钮独立一行、样式醒目（系统返回手势/返回键同语义）
+/// 更新源：两个预设（GitHub 直连 / gh-proxy 加速）+ 自定义；「测速」并发拉各源的
+/// manifest.json 比延迟，帮用户（尤其国内网络）直接选最快的
+const UPDATE_PRESETS = [
+  { id: "github", label: "GitHub", url: "" }, // 空 = 后端默认源
+  { id: "ghproxy", label: "GitHub（gh-proxy 加速）", url: "https://gh-proxy.com/https://github.com/podic-dictionary/dict/releases/latest/download/" },
+] as const;
+
+function UpdatesPage({
+  onBack,
+  manifest,
+  setManifest,
+  onSave,
+  status,
+}: {
+  onBack: () => void;
+  manifest: string;
+  setManifest: (v: string) => void;
+  onSave: () => Promise<boolean>;
+  status: string;
+}) {
+  const [speed, setSpeed] = useState<Record<string, number | "fail">>({});
+  const [testing, setTesting] = useState(false);
+  // 当前选中：与某预设值相同（含空）→ 该预设；否则自定义
+  const presetId = UPDATE_PRESETS.find((p) => p.url === manifest)?.id ?? "custom";
+  const customUrl = presetId === "custom" ? manifest : "";
+
+  const onSpeedTest = async () => {
+    setTesting(true);
+    setSpeed({});
+    const candidates: [string, string][] = UPDATE_PRESETS.map((p) => [p.id, p.url]);
+    if (presetId === "custom" && customUrl.trim()) candidates.push(["custom", customUrl.trim()]);
+    await Promise.all(
+      candidates.map(async ([id, url]) => {
+        const probe = url || "https://github.com/podic-dictionary/dict/releases/latest/download/";
+        try {
+          const ms = await speedTest(probe);
+          setSpeed((s) => ({ ...s, [id]: ms }));
+        } catch {
+          setSpeed((s) => ({ ...s, [id]: "fail" }));
+        }
+      }),
+    );
+    setTesting(false);
+  };
+
+  const fastest = Object.entries(speed)
+    .filter(([, v]) => v !== "fail")
+    .sort((a, b) => (a[1] as number) - (b[1] as number))[0]?.[0];
+
+  const row = (id: string, label: string, pick: () => void) => (
+    <button
+      key={id}
+      onClick={pick}
+      className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
+        presetId === id
+          ? "border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30"
+          : "border-zinc-200 bg-white/80 hover:border-emerald-300 dark:border-zinc-700 dark:bg-zinc-900/70"
+      }`}
+    >
+      <span className="flex items-center gap-2">
+        <span className={presetId === id ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}>
+          {presetId === id ? "●" : "○"}
+        </span>
+        {label}
+        {fastest === id && <span className="text-xs text-emerald-600 dark:text-emerald-400">最快 ✓</span>}
+      </span>
+      {speed[id] !== undefined && (
+        <span className={`text-xs ${speed[id] === "fail" ? "text-red-500" : "text-zinc-400"}`}>
+          {speed[id] === "fail" ? "不可用" : `${speed[id]} ms`}
+        </span>
+      )}
+    </button>
+  );
+
+  return (
+    <div className="mx-auto max-w-2xl p-4">
+      <SubHeader title="词典包更新源" onBack={onBack} />
+      <p className="mt-1 text-xs text-zinc-400">
+        用于「词典包」页的在线词典包与检查更新；点「测速」比较各源延迟后选择。
+      </p>
+      <div className="mt-3 space-y-2">
+        {UPDATE_PRESETS.map((p) => row(p.id, p.label, () => setManifest(p.url)))}
+        {row("custom", "自定义源（manifest 直链或发布目录）", () => setManifest(customUrl || "https://"))}
+        {presetId === "custom" && (
+          <input
+            value={manifest}
+            onChange={(e) => setManifest(e.target.value)}
+            placeholder="https://…/（manifest.json 直链或 release 下载目录）"
+            className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
+          />
+        )}
+      </div>
+      <div className="action-row mt-4">
+        <button
+          onClick={onSpeedTest}
+          disabled={testing}
+          className="rounded-xl border border-emerald-500 px-4 py-2 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+        >
+          {testing ? "测速中…" : "测速"}
+        </button>
+        <button
+          onClick={() => void onSave()}
+          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+        >
+          保存设置
+        </button>
+        {status && <span className="text-xs text-zinc-500">{status}</span>}
+      </div>
+    </div>
+  );
+}
+
 function SubHeader({
   title,
   onBack,
@@ -913,28 +1025,13 @@ export default function SettingsView({
   // ---- 二级页：词典包更新源 ----
   if (sub === "updates") {
     return (
-      <div className="mx-auto max-w-2xl p-4">
-        <SubHeader title="词典包更新源" onBack={() => setSub(null)} />
-        <p className="mt-1 text-xs text-zinc-400">
-          用于「词典包」页的在线检查更新；留空用默认源（podic-dictionary/dict 的 release）。
-          国内网络可整串套镜像前缀加速，如 https://gh-proxy.com/https://github.com/…
-        </p>
-        <input
-          value={manifest}
-          onChange={(e) => setManifest(e.target.value)}
-          placeholder="留空 = 默认源（dict releases manifest）"
-          className="mt-3 w-full rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-700"
-        />
-        <div className="action-row mt-4">
-          <button
-            onClick={onSave}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
-          >
-            保存设置
-          </button>
-          {status && <span className="text-xs text-zinc-500">{status}</span>}
-        </div>
-      </div>
+      <UpdatesPage
+        onBack={() => setSub(null)}
+        manifest={manifest}
+        setManifest={setManifest}
+        onSave={onSave}
+        status={status}
+      />
     );
   }
 

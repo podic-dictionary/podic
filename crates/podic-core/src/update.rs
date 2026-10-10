@@ -175,8 +175,8 @@ pub struct DownloadProgress {
     pub total: u64,
 }
 
-/// 下载 .db.gz -> 解压 -> sha256 校验 -> 原子落盘到 dest。
-/// 返回 (dest, 解压后字节数)。
+/// 下载 .db.gz（或裸 .db）-> 解压 -> sha256 校验 -> 原子落盘到 dest。
+/// URL 不以 .gz 结尾时视为裸 .db，跳过解压。返回 (dest, 落盘字节数)。
 pub async fn download_and_verify(
     url: &str,
     sha256_expected: &str,
@@ -188,10 +188,10 @@ pub async fn download_and_verify(
     let resp = http.get(url).send().await?.error_for_status()?;
     let total = resp.content_length().unwrap_or(0);
 
-    // 下载到临时 .gz
+    // 下载到临时文件（gzip 与裸 db 同路）
     let tmp_gz = dest.with_extension("db.gz.part");
     let mut file = std::fs::File::create(&tmp_gz)?;
-    let mut hasher = Sha256::new(); // 对 .gz 内容（仅作下载完整性参考）
+    let mut hasher = Sha256::new(); // 对下载内容（仅作完整性参考）
     let mut downloaded: u64 = 0;
     let mut resp = resp;
     while let Some(chunk) = resp.chunk().await? {
@@ -210,14 +210,19 @@ pub async fn download_and_verify(
     }
     drop(file);
 
-    // 解压
-    on_progress(DownloadProgress { phase: "extract".into(), downloaded, total });
     let tmp_db = dest.with_extension("db.part");
-    let gz = std::fs::File::open(&tmp_gz)?;
-    let mut decoder = flate2::read::GzDecoder::new(gz);
-    let mut out = std::fs::File::create(&tmp_db)?;
-    std::io::copy(&mut decoder, &mut out)?;
-    drop(out);
+    if url.to_ascii_lowercase().ends_with(".gz") {
+        // 解压
+        on_progress(DownloadProgress { phase: "extract".into(), downloaded, total });
+        let gz = std::fs::File::open(&tmp_gz)?;
+        let mut decoder = flate2::read::GzDecoder::new(gz);
+        let mut out = std::fs::File::create(&tmp_db)?;
+        std::io::copy(&mut decoder, &mut out)?;
+        drop(out);
+    } else {
+        // 裸 .db（自定义 URL 直链）：直接改名进入校验环节
+        std::fs::rename(&tmp_gz, &tmp_db)?;
+    }
     let _ = std::fs::remove_file(&tmp_gz);
 
     // 校验解压后 db 的 sha256

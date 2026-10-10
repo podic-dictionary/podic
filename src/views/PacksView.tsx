@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
-  checkUpdates,
+  fetchCatalog,
   importPack,
   installPackStream,
   listPacks,
   removePack,
+  type CatalogItem,
   type InstallProgress,
-  type PackUpdate,
 } from "../api";
 import type { PackInfo } from "../types";
 import { useSettings } from "../SettingsContext";
@@ -17,11 +17,12 @@ export default function PacksView() {
   const { languages } = useSettings();
   const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
   const [packs, setPacks] = useState<PackInfo[]>([]);
-  const [updates, setUpdates] = useState<PackUpdate[] | null>(null);
+  const [catalog, setCatalog] = useState<CatalogItem[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ lang: string; p: InstallProgress } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<PackInfo | null>(null);
+  const [customUrl, setCustomUrl] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -35,14 +36,11 @@ export default function PacksView() {
     refresh();
   }, [refresh]);
 
-  const onCheckUpdates = async () => {
+  const onOpenCatalog = async () => {
     setBusy(true);
     setError("");
     try {
-      const u = await checkUpdates();
-      setUpdates(u);
-      if (u.length === 0) setError("已是最新版本");
-      setTimeout(() => setError((prev) => (prev === "已是最新版本" ? "" : prev)), 2500);
+      setCatalog(await fetchCatalog());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -50,18 +48,34 @@ export default function PacksView() {
     }
   };
 
-  const onInstall = async (u: PackUpdate) => {
+  // 安装/更新走同一端点；刷新后同步目录里的已装版本标记
+  const onInstall = async (u: { lang: string; url: string; sha256?: string }) => {
     setError("");
-    const { done } = installPackStream(u, (p) => setProgress({ lang: u.lang, p }));
+    const { done } = installPackStream({ lang: u.lang, url: u.url, sha256: u.sha256 ?? "" }, (p) =>
+      setProgress({ lang: u.lang, p }),
+    );
     try {
       await done;
       await refresh();
-      setUpdates((us) => us?.filter((x) => x.lang !== u.lang) ?? null);
+      setCatalog((cs) =>
+        cs?.map((c) =>
+          c.lang === u.lang
+            ? { ...c, installed_version: packs.find((p2) => p2.lang === u.lang)?.version ?? c.version }
+            : c,
+        ) ?? null,
+      );
+      if (u.lang === "custom") setCustomUrl("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setProgress(null);
     }
+  };
+
+  const onInstallUrl = async () => {
+    const url = customUrl.trim();
+    if (!url) return;
+    await onInstall({ lang: "custom", url });
   };
 
   const onImport = async (files: FileList | null) => {
@@ -99,35 +113,47 @@ export default function PacksView() {
 
       {error && <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">{error}</p>}
 
-      {/* 在线更新 */}
+      {/* 在线词典包：更新源的全量目录（含未安装语言）+ 自定义 URL 安装 */}
       <div className="action-row mt-3">
         <button
-          onClick={onCheckUpdates}
+          onClick={onOpenCatalog}
           disabled={busy}
           className="rounded-lg border border-emerald-500 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
         >
-          检查更新
+          在线词典包
         </button>
-        {updates && updates.length > 0 && (
-          <div className="mt-2 space-y-2">
-            {updates.map((u) => (
+        {catalog && catalog.length === 0 && (
+          <span className="text-sm text-zinc-400">更新源里没有词典包</span>
+        )}
+      </div>
+      {catalog && catalog.length > 0 && (
+        <div className="mt-2 space-y-2">
+          {catalog.map((c) => {
+            const installed = c.installed_version ?? null;
+            const canUpdate = installed !== null && installed !== c.version;
+            return (
               <div
-                key={u.lang}
+                key={c.lang}
                 className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30"
               >
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm">
-                    {langName(u.lang)} 词典包可更新：
-                    <span className="text-zinc-400">
-                      v{u.current_version} → v{u.latest_version}
+                    {langName(c.lang)}
+                    <span className="ml-1 text-zinc-400">
+                      v{c.version}
+                      {installed
+                        ? canUpdate
+                          ? `（已装 v${installed}，可更新）`
+                          : "（已装最新）"
+                        : c.entry_count
+                          ? ` · ${(c.entry_count / 1000).toFixed(1)}k 词条${c.size ? ` · ${Math.max(1, Math.round(c.size / 1048576))}MB` : ""}`
+                          : ""}
                     </span>
                   </p>
-                  {u.notes && (
-                    <p className="mt-0.5 text-xs text-zinc-400">{u.notes}</p>
-                  )}
+                  {c.notes && <p className="mt-0.5 text-xs text-zinc-400">{c.notes}</p>}
                 </div>
-                {progress?.lang === u.lang ? (
-                  <div className="w-40">
+                {progress?.lang === c.lang ? (
+                  <div className="w-40 shrink-0">
                     <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                       <div
                         className="h-full bg-violet-500 transition-all"
@@ -147,18 +173,35 @@ export default function PacksView() {
                           : "校验中…"}
                     </p>
                   </div>
-                ) : (
+                ) : canUpdate || installed === null ? (
                   <button
-                    onClick={() => onInstall(u)}
-                    className="rounded-lg bg-violet-600 px-3 py-2.5 text-sm text-white hover:bg-violet-700"
+                    onClick={() => onInstall(c)}
+                    className="shrink-0 rounded-lg bg-violet-600 px-3 py-2.5 text-sm text-white hover:bg-violet-700"
                   >
-                    更新
+                    {canUpdate ? "更新" : "安装"}
                   </button>
-                )}
+                ) : null}
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
+      )}
+
+      {/* 自定义 URL 安装：.db.gz 或 .db 直链（sha256 不填则跳过校验） */}
+      <div className="action-row mt-2">
+        <input
+          value={customUrl}
+          onChange={(e) => setCustomUrl(e.target.value)}
+          placeholder="自定义 URL 安装（.db.gz / .db 直链）"
+          className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900"
+        />
+        <button
+          onClick={onInstallUrl}
+          disabled={!customUrl.trim() || progress !== null}
+          className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-600 hover:bg-violet-50 disabled:opacity-50 dark:hover:bg-violet-950"
+        >
+          下载安装
+        </button>
       </div>
 
       <div className="mt-4 space-y-3">

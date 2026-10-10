@@ -12,3 +12,6 @@ export function openExternal(url: string) {
   }
   window.open(url, "_blank", "noopener");
 }
+
+/** 官方词典包发布目录（更新源基地址）；镜像 = 在整串前加代理前缀 */
+export const DICT_PACK_BASE = "https://github.com/podic-dictionary/dict/releases/latest/download/";

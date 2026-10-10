@@ -58,6 +58,8 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/packs/import", axum::routing::post(routes::import_pack))
         .route("/api/packs/{lang}", axum::routing::delete(routes::remove_pack))
         .route("/api/packs/updates", axum::routing::get(routes::check_updates))
+        .route("/api/packs/catalog", axum::routing::get(routes::packs_catalog))
+        .route("/api/packs/speed-test", axum::routing::get(routes::speed_test))
         .route("/api/packs/install", axum::routing::post(routes::install_pack))
         .route("/api/lookup", axum::routing::get(routes::lookup))
         .route("/api/suggest", axum::routing::get(routes::suggest))
