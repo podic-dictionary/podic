@@ -14,6 +14,7 @@ import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
+import { PROVIDER_PRESETS } from "../providerPresets";
 import { openExternal, PACK_GUID_URL } from "../links";
 import { useSettings, type FontScale, type Hand, type ThemeMode } from "../SettingsContext";
 
@@ -726,12 +727,35 @@ export default function SettingsView({
           title="AI Provider"
           onBack={() => setSub(null)}
           right={
-            <button
-              onClick={() => setDrafts((ds) => [...ds, emptyDraft()])}
-              className="ml-auto flex shrink-0 items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700"
+            // 预设下拉：选厂商直接预填 base URL/协议/代表模型；「自定义…」给空表单
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value === "") return;
+                const p = PROVIDER_PRESETS[Number(e.target.value)];
+                setDrafts((ds) => [
+                  ...ds,
+                  p
+                    ? {
+                        ...emptyDraft(),
+                        name: p.label,
+                        protocol: p.protocol,
+                        base_url: p.baseUrl,
+                        models: p.models.map((m) => ({ name: m, label: "" })),
+                      }
+                    : emptyDraft(),
+                ]);
+              }}
+              className="ml-auto shrink-0 cursor-pointer rounded-xl bg-emerald-600 px-3 py-1.5 text-xs text-white outline-none hover:bg-emerald-700 dark:bg-emerald-700"
             >
-              <PlusIcon size={13} /> 添加
-            </button>
+              <option value="">＋ 添加</option>
+              {PROVIDER_PRESETS.map((p, i) => (
+                <option key={p.label} value={i}>
+                  {p.label}
+                </option>
+              ))}
+              <option value={PROVIDER_PRESETS.length}>自定义…</option>
+            </select>
           }
         />
         <p className="mt-1 text-xs text-zinc-400">OpenAI 兼容 / Anthropic 双协议</p>
@@ -744,13 +768,13 @@ export default function SettingsView({
                 key={d.id}
                 className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80"
               >
-                {/* 头部：名称做标题 + 协议 + 删除 */}
+                {/* 头部：名称输入 + 协议 + 删除 */}
                 <div className="flex items-center gap-2">
                   <input
                     value={d.name}
                     onChange={(e) => patch(d.id, { name: e.target.value })}
                     placeholder="未命名 Provider"
-                    className="min-w-0 flex-1 border-none bg-transparent p-0 text-base font-medium outline-none placeholder:font-normal placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm font-medium outline-none transition-colors placeholder:font-normal placeholder:text-zinc-300 focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:placeholder:text-zinc-600 dark:focus:border-emerald-600"
                   />
                   <select
                     value={d.protocol}

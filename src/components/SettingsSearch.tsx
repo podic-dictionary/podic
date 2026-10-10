@@ -43,7 +43,7 @@ const ENTRIES: SearchEntry[] = [
   { title: "更新所有词典", desc: "逐个检查更新并下载安装", keywords: ["更新", "升级", "下载", "检查"], hash: "#/settings/packs/install" },
   { title: "本地导入", desc: "选择 .db 词典包文件导入", keywords: ["导入", "文件", "db", "离线"], hash: "#/settings/packs/install" },
   { title: "自定义 URL 安装", desc: "从任意直链地址下载安装", keywords: ["url", "链接", "下载", "安装", "自定义"], hash: "#/settings/packs/install" },
-  { title: "更新源", desc: "GitHub 直连 / 加速 / 自定义 + 测速", keywords: ["源", "加速", "测速", "代理", "gh-proxy", "镜像"], hash: "#/settings/packs/install" },
+  { title: "更新源", desc: "GitHub 直连 / 加速 / 自定义 + 测速", keywords: ["源", "加速", "测速", "代理", "gh-proxy", "镜像"], hash: "#/settings/packs/source" },
   // 外链
   { title: "创建词典包", desc: "LLM 批量生成 · 打包 · 导入教程", keywords: ["教程", "构建", "制作", "打包"], external: true },
   { title: "关于 / 数据来源", desc: "版本 · 开源致谢", keywords: ["版本", "致谢", "许可", "开源", "license"], sub: "about" },
