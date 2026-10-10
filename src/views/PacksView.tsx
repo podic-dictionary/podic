@@ -9,11 +9,12 @@ import {
   listPacks,
   removePack,
   type CatalogItem,
-  type InstallProgress,
 } from "../api";
 import type { PackInfo } from "../types";
 import { useSettings } from "../SettingsContext";
+import UpdateSourcePicker from "../components/UpdateSourcePicker";
 import { parseHash } from "../lib/router";
+import { setInstall, useInstall } from "../lib/installStore";
 
 const fmtSize = (bytes?: number) =>
   bytes && bytes > 0 ? `${Math.max(1, Math.round(bytes / 1048576))}MB` : "";
@@ -36,7 +37,9 @@ export default function PacksView() {
   const { languages } = useSettings();
   const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
   const [packs, setPacks] = useState<PackInfo[]>([]);
-  const [progress, setProgress] = useState<{ lang: string; p: InstallProgress } | null>(null);
+  // 下载进度走全局 store：切页面不丢，词典页外由 App 顶栏镜像显示
+  const installState = useInstall();
+  const progress = installState ? { lang: installState.lang, p: installState.p } : null;
   const [confirmRemove, setConfirmRemove] = useState<PackInfo | null>(null);
   /** 检查到的可更新/可安装项（确认框：版本、说明、体积告知后再下载） */
   const [confirmInstall, setConfirmInstall] = useState<CatalogItem | null>(null);
@@ -107,9 +110,10 @@ export default function PacksView() {
   };
 
   const install = async (u: { lang: string; url: string; sha256?: string }) => {
+    const label = u.lang === "custom" ? "自定义词典" : langName(u.lang);
     const { done } = installPackStream(
       { lang: u.lang, url: u.url, sha256: u.sha256 ?? "" },
-      (p) => setProgress({ lang: u.lang, p }),
+      (p) => setInstall({ lang: u.lang, label, p }),
     );
     try {
       await done;
@@ -119,7 +123,7 @@ export default function PacksView() {
       setNotice({ title: "安装失败", message: e instanceof Error ? e.message : String(e) });
       return false;
     } finally {
-      setProgress(null);
+      setInstall(null);
     }
   };
 
@@ -209,9 +213,7 @@ export default function PacksView() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="text-lg font-medium">词典</h1>
-
-      {/* tab 切换：列表（已装 + 无词典占位）/ 安装（在线更新·导入·自定义 URL） */}
+      {/* tab 切换：列表（已装 + 无词典占位）/ 安装（在线更新·导入·自定义 URL·更新源） */}
       <div className="mt-3 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
         {(["list", "install"] as const).map((t) => (
           <button
@@ -386,6 +388,15 @@ export default function PacksView() {
               style={{ flex: "1 1 auto", minWidth: 0 }}
               className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 dark:border-zinc-700 dark:bg-zinc-900"
             />
+          </div>
+        </section>
+
+        {/* ④ 更新源 */}
+        <section className="podic-card rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+          <h2 className="text-sm font-medium">更新源</h2>
+          <p className="mt-0.5 text-xs text-zinc-400">在线更新与安装使用的词典发布源</p>
+          <div className="mt-3">
+            <UpdateSourcePicker />
           </div>
         </section>
       </div>

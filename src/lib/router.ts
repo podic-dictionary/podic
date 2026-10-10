@@ -24,7 +24,13 @@ export function navigate(path: string, params?: Record<string, string | undefine
         Object.entries(params).filter(([, v]) => v !== undefined && v !== "") as [string, string][],
       ).toString()
     : "";
-  window.location.hash = `#/${path.replace(/^\//, "")}${q ? `?${q}` : ""}`;
+  const url = `#/${path.replace(/^\//, "")}${q ? `?${q}` : ""}`;
+  // 不用 location.hash 赋值：它会产生一条 state=null 的匿名 history 条目，
+  // 返回键 pop 到它时会被当成「跨出应用」误弹退出确认。这里用 replaceState
+  // 原地改地址（tab 级切换不该有新 history 条目）；若 hash 变化引起页面状态
+  // 变化，App 的返回栈 effect 会自行 pushState 入栈。hashchange 需手动派发
+  history.replaceState(history.state, "", url);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
 /** hashchange 驱动的路由状态；同 hash 重复 navigate 不触发 */

@@ -10,6 +10,7 @@ import FavoritesView from "./views/FavoritesView";
 import SettingsView, { type SettingsSub } from "./views/SettingsView";
 import type { Lang, View } from "./types";
 import { parseHash } from "./lib/router";
+import { useInstall } from "./lib/installStore";
 
 /** URL 驱动的页面定位：每个页面有自己的 hash（#/search、#/settings/packs），
  * 刷新不回首页；App 壳 deeplink（podic://search?q=…）统一转成 hash 跳转 */
@@ -100,6 +101,13 @@ export default function App() {
   const restoring = useRef(false);
   const exitAllowed = useRef(false);
   const [exitAsk, setExitAsk] = useState(false);
+  // 下载进行中离开词典页：提示确认（后端任务继续跑，进度条全局可见）
+  const installState = useInstall();
+  const [leaveAsk, setLeaveAsk] = useState<View | null>(null);
+  const guardView = (v: View) => {
+    if (installState && v !== view) setLeaveAsk(v);
+    else switchView(v);
+  };
   // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上
   useEffect(() => {
     const r = parseHash();
@@ -186,9 +194,16 @@ export default function App() {
       } | null;
       if (!s?.podic) {
         if (exitAllowed.current) return; // 确认过退出，放行离开页面
-        // 兜底：跨过 base 的返回，推回哨兵并弹确认
-        history.pushState({ podic: 1, view: "search", sub: null, sentinel: true }, "");
-        setExitAsk(true);
+        // state=null：hash 赋值产生的匿名条目（已改 replaceState，此处兜底旧条目）。
+        // 按当前 hash 恢复页面状态而不是弹退出——用户只是返回了一步 hash 导航
+        const r = parseHash();
+        const v0 = viewOf(r.path[0]);
+        const s0 = v0 === "settings" ? subOf(r.path[1]) : null;
+        if (v0 !== view || s0 !== settingsSub) {
+          restoring.current = true;
+          setView(v0);
+          setSettingsSub(s0);
+        }
         return;
       }
       if (!s.sentinel && s.view === "search" && !s.sub) {
@@ -204,7 +219,8 @@ export default function App() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, []);
+    // 兜底分支读 view/settingsSub，需要随状态更新监听闭包
+  }, [view, settingsSub]);
 
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollPos.current[view] ?? 0;
@@ -241,7 +257,7 @@ export default function App() {
         {VIEWS.map((v) => (
           <button
             key={v.id}
-            onClick={() => switchView(v.id)}
+            onClick={() => guardView(v.id)}
             className={`flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-xs transition-colors ${
               view === v.id
                 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
@@ -278,6 +294,23 @@ export default function App() {
           )}
         </header>
 
+        {/* 下载进行中的全局指示（词典页自身有卡片内进度，这里覆盖其他页面） */}
+        {installState && view !== "settings" && (
+          <button
+            onClick={() => switchView("settings")}
+            className="flex items-center gap-2 border-b border-violet-200 bg-violet-50/70 px-4 py-1.5 text-xs text-violet-600 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300"
+          >
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            {installState.label}下载中
+            {installState.p.phase === "download" && installState.p.total > 0
+              ? ` ${Math.round((installState.p.downloaded / installState.p.total) * 100)}%`
+              : installState.p.phase === "extract"
+                ? "（解压中）"
+                : ""}
+            <span className="ml-auto text-violet-400">查看 ›</span>
+          </button>
+        )}
+
         <main
           ref={mainRef}
           className="min-h-0 flex-1 overscroll-contain overflow-y-auto"
@@ -303,7 +336,7 @@ export default function App() {
         {navViews.map((v) => (
           <button
             key={v.id}
-            onClick={() => switchView(v.id)}
+            onClick={() => guardView(v.id)}
             className={`relative flex flex-1 flex-col items-center gap-1 py-2 leading-none transition-colors ${
               view === v.id
                 ? "text-emerald-600 dark:text-emerald-400"
@@ -330,6 +363,21 @@ export default function App() {
           history.go(-2); // 跨过 base+哨兵离开页面（App 壳不弹这个框）
         }}
         onCancel={() => setExitAsk(false)}
+      />
+
+      {/* 词典下载中切页：告知后台继续 + 进度全局可见，不阻断 */}
+      <ConfirmDialog
+        open={leaveAsk !== null}
+        title="词典下载进行中"
+        message="下载会在后台继续进行，顶部进度条随时可查看；离开不影响安装。"
+        confirmText="离开此页"
+        confirmClassName="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+        onConfirm={() => {
+          const v = leaveAsk;
+          setLeaveAsk(null);
+          if (v) switchView(v);
+        }}
+        onCancel={() => setLeaveAsk(null)}
       />
     </div>
   );
