@@ -54,25 +54,6 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
 /// 组装完整路由：/api/* + 静态前端（dist_dir 不存在时仅 API 可用）
 pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
     axum::Router::new()
-        // 请求日志（打到 stdout/logcat）：真机卡死排查时，最后一个无响应的请求
-        // 直接指向卡点；慢请求（>1s）单独标注
-        .layer(axum::middleware::from_fn(
-            |req: axum::extract::Request, next: axum::middleware::Next| async move {
-                let m = req.method().clone();
-                let p = req.uri().path().to_string();
-                let t = std::time::Instant::now();
-                let res = next.run(req).await;
-                let ms = t.elapsed().as_millis();
-                if p != "/api/health" { // 探活会刷屏
-                    if ms > 1000 {
-                        plog!("[podic-http] SLOW {m} {p} {ms}ms");
-                    } else {
-                        plog!("[podic-http] {m} {p} {ms}ms");
-                    }
-                }
-                res
-            },
-        ))
         .route("/api/health", axum::routing::get(routes::health))
         .route("/api/packs", axum::routing::get(routes::list_packs))
         .route("/api/packs/import", axum::routing::post(routes::import_pack))
@@ -104,6 +85,25 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))
+        // 请求日志（打到 logcat）：真机卡死排查时，最后一个无响应的请求直接指向卡点；
+        // 慢请求（>1s）单独标注。axum 的 layer 只覆盖在它之前注册的路由，必须在链尾
+        .layer(axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                let m = req.method().clone();
+                let p = req.uri().path().to_string();
+                let t = std::time::Instant::now();
+                let res = next.run(req).await;
+                let ms = t.elapsed().as_millis();
+                if p != "/api/health" { // 探活会刷屏
+                    if ms > 1000 {
+                        plog!("[podic-http] SLOW {m} {p} {ms}ms");
+                    } else {
+                        plog!("[podic-http] {m} {p} {ms}ms");
+                    }
+                }
+                res
+            },
+        ))
 }
 
 /// 绑定地址并运行到永久（桌面 bin 入口）
