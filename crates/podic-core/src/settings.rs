@@ -51,6 +51,9 @@ pub fn default_languages() -> Vec<LanguageConfig> {
         LanguageConfig { code: "en".into(), name: "英语".into(), short: Some("英".into()) },
         LanguageConfig { code: "fr".into(), name: "法语".into(), short: Some("法".into()) },
         LanguageConfig { code: "ja".into(), name: "日语".into(), short: Some("日".into()) },
+        LanguageConfig { code: "de".into(), name: "德语".into(), short: Some("德".into()) },
+        LanguageConfig { code: "es".into(), name: "西班牙语".into(), short: Some("西".into()) },
+        LanguageConfig { code: "ru".into(), name: "俄语".into(), short: Some("俄".into()) },
     ]
 }
 

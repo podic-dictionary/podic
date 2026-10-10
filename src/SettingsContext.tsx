@@ -7,6 +7,9 @@ export const DEFAULT_LANGUAGES: LanguageConfig[] = [
   { code: "en", name: "英语", short: "英" },
   { code: "fr", name: "法语", short: "法" },
   { code: "ja", name: "日语", short: "日" },
+  { code: "de", name: "德语", short: "德" },
+  { code: "es", name: "西班牙语", short: "西" },
+  { code: "ru", name: "俄语", short: "俄" },
 ];
 
 export type ThemeMode = "light" | "dark" | "system";

@@ -19,6 +19,18 @@ WORK = ROOT / "data" / "work"
 
 # 数据源（URL 集中维护；cc: 构建时写入包 meta 的致谢信息）
 SOURCES = {
+    "freqwords": {
+        # OpenSubtitles 2018 词频表（de/es/ru 等语言的词头与频次来源）
+        "url": "https://github.com/hermitdave/FrequencyWords",
+        "file": "",
+        "cc": {"name": "FrequencyWords (OpenSubtitles 2018)", "url": "https://github.com/hermitdave/FrequencyWords", "license": "MIT"},
+    },
+    "llm_defs": {
+        # 词条释义由 LLM 生成（词头/频次来自开放语料，释义是模型产出）
+        "url": "",
+        "file": "",
+        "cc": {"name": "GLM 生成释义 (glm-5.3-flash)", "url": "https://open.bigmodel.cn", "license": ""},
+    },
     "ecdict": {
         "url": "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv",
         "file": "ecdict.csv",
