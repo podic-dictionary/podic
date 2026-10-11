@@ -19,6 +19,8 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -45,13 +47,22 @@ def gh(*args):
 
 
 def fetch_remote_meta(tag: str, lang: str) -> dict | None:
-    """读 release 上该语言现有的 metainfo（没有 = None）"""
+    """读 release 上该语言现有的 metainfo（没有 = None）。
+    偶发网络失败必须重试：静默返回 None 会让该语言悄悄缺席 manifest
+    （de/es/it 发布时各踩过一次，上传后核对才发现）"""
     url = f"https://github.com/{REPO}/releases/download/{tag}/{lang}-metainfo.json"
-    try:
-        with urllib.request.urlopen(url, timeout=30) as r:
-            return json.load(r)
-    except Exception:
-        return None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None  # 确定没有，不是网络问题
+            time.sleep(2 * (attempt + 1))
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+    common.log(f"[warn] {lang} metainfo 拉取 3 次失败（网络），该语言将缺席本次 manifest，发布后务必核对")
+    return None
 
 
 def slim(entry: dict) -> dict:
