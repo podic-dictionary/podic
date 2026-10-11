@@ -10,6 +10,8 @@ export const DEFAULT_LANGUAGES: LanguageConfig[] = [
   { code: "de", name: "德语", short: "德" },
   { code: "es", name: "西班牙语", short: "西" },
   { code: "ru", name: "俄语", short: "俄" },
+  { code: "it", name: "意大利语", short: "意" },
+  { code: "pt", name: "葡萄牙语", short: "葡" },
 ];
 
 export type ThemeMode = "light" | "dark" | "system";

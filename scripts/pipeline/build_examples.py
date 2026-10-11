@@ -16,9 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import common
 
-MAX_SENT_LEN = {"en": 120, "fr": 140, "ja": 60, "zh": 80, "de": 140, "es": 140, "ru": 140}
+MAX_SENT_LEN = {"en": 120, "fr": 140, "ja": 60, "zh": 80, "de": 140, "es": 140, "ru": 140, "it": 140, "pt": 140}
 # Tatoeba 导出用 ISO 639-3 三字码；译文里 cmn/yue 都算中文
-CODE_MAP = {"eng": "en", "fra": "fr", "jpn": "ja", "deu": "de", "spa": "es", "rus": "ru"}
+CODE_MAP = {"eng": "en", "fra": "fr", "jpn": "ja", "deu": "de", "spa": "es", "rus": "ru", "ita": "it", "por": "pt"}
 ZH_CODES = {"cmn", "yue", "zh"}
 # 拉丁：加德语 ß/西语 ñ；西里尔整体成词（ru 整词精确匹配）
 WORD_SPLIT = re.compile(r"[^a-zàâäéèêëîïôöùûüçñß'’Ѐ-ӿ-]+", re.IGNORECASE)
@@ -39,7 +39,7 @@ def main():
     # 读词表：各语种 freq 前 N 的 headword（entry 键 -> 索引数据）
     # en/fr 关联键用 casefold(headword) 保变音：norm 去变音会碰撞（élève/élevé 同 norm，例句互串）
     lang_entries: dict[str, dict[str, dict]] = {}
-    for lang in ["en", "fr", "ja", "de", "es", "ru"]:
+    for lang in ["en", "fr", "ja", "de", "es", "ru", "it", "pt"]:
         if not (common.WORK / lang / "entries.jsonl").exists():
             common.log(f"[{lang}] 无 entries.jsonl，跳过")
             continue
@@ -174,7 +174,7 @@ def main():
             tid_text[sid] = (lang, text)
 
     # 组装输出
-    for lang in ["en", "fr", "ja", "de", "es", "ru"]:
+    for lang in ["en", "fr", "ja", "de", "es", "ru", "it", "pt"]:
         if lang not in lang_entries:
             continue
         m = lang_entries[lang]
