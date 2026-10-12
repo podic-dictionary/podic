@@ -29,6 +29,7 @@ LOOKUP = {
     "bonjour|fr": load_pat("get-lookup_q_bonjour"),
     "食べる|ja": load_pat("get-lookup_q_") if not list(src.glob("*E9*")) else json.loads(list(src.glob("*E9*.json"))[0].read_text(encoding="utf-8")),
     "слово|ru": load_pat("get-lookup_q_") if not list(src.glob("*D1_81*")) else json.loads(list(src.glob("*D1_81*.json"))[0].read_text(encoding="utf-8")),
+    "saudade|pt": load_pat("get-lookup_q_saudade_pt"),
 }
 SETTINGS = load("get-settings.json")
 STATIC = {
@@ -41,13 +42,25 @@ STATIC = {
 }
 
 miss = {"items": [], "user": [], "matched_by": None}
-# 抓包 settings 可能含私有部署地址等真实配置，providers 一律替换成无害演示数据
+# 抓包 settings 可能含私有部署地址等真实配置，providers 一律替换成无害演示数据；
+# languages 固定八语（与 app 默认一致——深链接 lang 参数对未注册语言会被校验回退）
 if SETTINGS:
-    SETTINGS = {**SETTINGS, "providers": [
-        {"id": "demo-glm", "name": "GLM 演示", "protocol": "anthropic",
-         "base_url": "https://open.bigmodel.cn/api/anthropic", "models": ["glm-5.3-flash", "glm-5.3"],
-         "active_model": "glm-5.3-flash", "labels": {"glm-5.3-flash": "5.3-flash"}, "has_key": False},
-    ]}
+    SETTINGS = {**SETTINGS,
+        "languages": [
+            {"code": "en", "name": "英语", "short": "英"},
+            {"code": "fr", "name": "法语", "short": "法"},
+            {"code": "ja", "name": "日语", "short": "日"},
+            {"code": "de", "name": "德语", "short": "德"},
+            {"code": "es", "name": "西班牙语", "short": "西"},
+            {"code": "ru", "name": "俄语", "short": "俄"},
+            {"code": "it", "name": "意大利语", "short": "意"},
+            {"code": "pt", "name": "葡萄牙语", "short": "葡"},
+        ],
+        "providers": [
+            {"id": "demo-glm", "name": "GLM 演示", "protocol": "anthropic",
+             "base_url": "https://open.bigmodel.cn/api/anthropic", "models": ["glm-5.3-flash", "glm-5.3"],
+             "active_model": "glm-5.3-flash", "labels": {"glm-5.3-flash": "5.3-flash"}, "has_key": False},
+        ]}
 data = {
     "LOOKUP": LOOKUP,
     "SETTINGS": SETTINGS,
@@ -63,7 +76,7 @@ const SUGGEST_POOL = [
   {q:"食べる",lang:"ja"},{q:"たべる",lang:"ja"},
   {q:"слово",lang:"ru"},
 ];
-const AI_FALLBACK_ENTRY = {"headword":"saudade","ipa":"/saʊˈdadʒi/","pos":["n."],"lang":"pt","zh":["（葡）怀念；乡愁——一种因缺失而生的温柔眷恋"],"senses":[{"pos":"n.","zh":"（葡）怀念；乡愁（对缺失之人或物混合着爱意与惆怅的思念）","eg":"Tenho saudade de você.","eg_zh":"我很想你。"}],"source":"ai"};
+const AI_FALLBACK_ENTRY = {"headword":"Sehnsucht","ipa":"/ˈzeːnˌzʊxt/","pos":["n."],"lang":"de","zh":["（德）渴望；憧憬——对远方或不可得之物的深切向往"],"senses":[{"pos":"n.","zh":"（德）渴望，憧憬（对远方、往昔或不可得之物的深情向往，近于葡语 saudade）","eg":"Heimweh ist eine Form der Sehnsucht.","eg_zh":"乡愁是渴望的一种形式。"}],"source":"ai"};
 function jsonRes(obj, status){
   return new Response(JSON.stringify(obj), {status: status||200, headers:{"Content-Type":"application/json"}});
 }
@@ -142,8 +155,13 @@ window.fetch = async function(url, opts){
       return sseRes(streamText(zh, 2), 45);
     }
     if (t === "fallback" || t === "complete") {
+      // 只演示 Sehnsucht 一个词的 AI 补全；其他 miss 词返回空释义
+      // （真实 app 行为：由前端 FallbackCard 引导手动触发），避免错配词条污染词表
+      if ((body.text || "").trim() !== "Sehnsucht") {
+        return sseRes(streamText(JSON.stringify({headword: body.text || "", senses: []}), 8), 60);
+      }
       // 补全完成后写入词表（模拟真 app：AI 词条存 AI 词典，下次查询直接命中）
-      const lang = (body.context && body.context.lang) || "en";
+      const lang = (body.context && body.context.lang) || "de";
       const e = AI_FALLBACK_ENTRY;
       MOCK.LOOKUP[(body.text||"") + "|" + lang] = {
         items: [{entry_id: -1, headword: e.headword, ipa: e.ipa, pos: e.pos, lang: lang,
