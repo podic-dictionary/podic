@@ -36,6 +36,9 @@ pub struct SuggestItem {
     pub headword: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reading: Option<String>,
+    /// 首义摘要：候选列表直接可读（同历史项的 gloss 位）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gloss: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,6 +113,7 @@ pub fn lookup(
     langs: &[String],
     query: &str,
     limit: usize,
+    exact_only: bool,
 ) -> Result<Vec<Entry>> {
     let q = query.trim();
     if q.is_empty() {
@@ -199,8 +203,10 @@ pub fn lookup(
             continue; // ③④⑤ 全是包 SQL，无包语言到此为止
         }
 
+        // ③④⑤ 模糊扩散：候选词选定/历史点击的精确查询（exact_only）跳过，
+        // 只保留 ①exact ②form ②'user'——用户选了 danke 就只看 danke，不捎带 dankend/Dankeschön
         // ③ FTS 模糊（多词查询主要命中 zh_text / headword）
-        if q.chars().count() >= 2 {
+        if !exact_only && q.chars().count() >= 2 {
             let sql = format!(
                 "SELECT {SELECT_ENTRY} FROM \"{lang}\".entry_fts fts JOIN \"{lang}\".entry e ON e.id = fts.rowid \
                  WHERE entry_fts MATCH ?1 ORDER BY rank LIMIT ?2"
@@ -219,6 +225,9 @@ pub fn lookup(
         }
 
         // ④ 前缀（利用 idx_entry_norm 的索引范围扫描）
+        if exact_only {
+            continue; // 精确模式：①② 已完成，③④⑤ 跳过
+        }
         let upper = format!("{}\u{10FFFF}", crate::norm::norm(q, lang));
         let sql = format!(
             "SELECT {SELECT_ENTRY} FROM \"{lang}\".entry e WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
@@ -282,20 +291,20 @@ pub fn suggest(
         let upper = format!("{lower}\u{10FFFF}");
         if installed.iter().any(|l| l == lang) {
             let sql = format!(
-                "SELECT e.headword, e.reading FROM \"{lang}\".entry e \
+                "SELECT e.headword, e.reading, json_extract(e.senses, '$[0].zh') FROM \"{lang}\".entry e \
                  WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(rusqlite::params![lower, upper, limit as i64], |r| {
-                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
+                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)?, gloss: r.get(2)? })
             })?;
             out.extend(rows.flatten());
         }
         // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描；无包语言唯一来源）
-        let sql = "SELECT headword, reading FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
+        let sql = "SELECT headword, reading, json_extract(senses, '$[0].zh') FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
         if let Ok(mut stmt) = conn.prepare(sql) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![lang, lower, upper], |r| {
-                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)? })
+                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)?, gloss: r.get(2)? })
             }) {
                 out.extend(rows.flatten());
             }

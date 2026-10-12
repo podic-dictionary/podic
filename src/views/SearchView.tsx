@@ -25,7 +25,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
   }, [lang]);
 
   const onSearch = useCallback(
-    async (q: string, l?: Lang) => {
+    async (q: string, l?: Lang, exact = false) => {
       if (!q.trim()) return;
       // 点了别的语言的历史词条：切语言后由 [lang] effect 用新语言重查
       if (l && l !== lang) {
@@ -40,11 +40,14 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
       try {
         // 路由：日语及新注册语言先走正向（假名/汉字/user_dict 表记都在正向路径里，
         // 无包语言的 AI 补录词条只有正向能命中），空且含汉字再反查兜底；
-        // en/fr 保持旧行为：含汉字直接中文反查
+        // en/fr 保持旧行为：含汉字直接中文反查。
+        // exact（候选选定/历史点击）：只查该词，跳过前缀/模糊扩散
         const hasKanji = /[一-鿿]/.test(q);
         const forwardFirst = lang === "ja" || !["en", "fr"].includes(lang);
         let items: Entry[];
-        if (forwardFirst) {
+        if (exact) {
+          items = await lookup(q, lang, 20, true);
+        } else if (forwardFirst) {
           items = await lookup(q, lang);
           if (items.length === 0 && hasKanji) items = await reverse(q, lang);
         } else {

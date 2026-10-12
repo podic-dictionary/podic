@@ -308,6 +308,9 @@ pub struct QueryParams {
     langs: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
+    /// 精确模式（候选词选定/历史点击）：只走 exact/form/user，跳过 FTS/前缀/反查扩散
+    #[serde(default)]
+    exact: Option<String>,
 }
 
 pub async fn lookup(
@@ -317,7 +320,8 @@ pub async fn lookup(
     let core = lock(&state);
     let langs = langs_of(&core, p.langs);
     let installed = core.packs.langs();
-    let items = podic_core::lookup::lookup(&core.conn, &installed, &langs, &p.q, p.limit.unwrap_or(20))?;
+    let exact = p.exact.as_deref() == Some("1");
+    let items = podic_core::lookup::lookup(&core.conn, &installed, &langs, &p.q, p.limit.unwrap_or(20), exact)?;
     Ok(Json(json!({ "items": items })))
 }
 

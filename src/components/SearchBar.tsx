@@ -12,7 +12,8 @@ export default function SearchBar({
   onClear,
 }: {
   langs: string;
-  onSearch: (q: string, lang?: Lang) => void;
+  /** exact=true 精确查询（候选选定/历史点击）：只出该词词条，不做前缀/模糊扩散 */
+  onSearch: (q: string, lang?: Lang, exact?: boolean) => void;
   /** 一键清空后通知父级重置结果区（回到空态） */
   onClear?: () => void;
 }) {
@@ -70,12 +71,12 @@ export default function SearchBar({
     }, 200);
   };
 
-  const go = (q: string, lang?: Lang) => {
+  const go = (q: string, lang?: Lang, exact = false) => {
     window.clearTimeout(timer.current); // 取消未触发的联想请求，避免下拉在回车后又弹开
     setOpen(false);
     (document.activeElement as HTMLElement | null)?.blur(); // 收起手机键盘
     setQuery(q);
-    onSearch(q, lang);
+    onSearch(q, lang, exact);
   };
 
   // 一键清空：作废在途联想 + 复用 onChange("") 的五项重置 + 通知父级清结果区，焦点留在输入框
@@ -124,7 +125,7 @@ export default function SearchBar({
           {histShown.map((h) => (
             <li key={`h-${h.lang}-${h.q}`}>
               <button
-                onClick={() => go(h.headword, h.lang as Lang)}
+                onClick={() => go(h.headword, h.lang as Lang, true)}
                 title={h.gloss}
                 className="flex w-full items-center gap-2 px-5 py-2.5 text-left transition-colors hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40"
               >
@@ -142,11 +143,15 @@ export default function SearchBar({
           {sugShown.map((it) => (
             <li key={`s-${it.lang}-${it.headword}`}>
               <button
-                onClick={() => go(it.headword)}
+                onClick={() => go(it.headword, undefined, true)}
+                title={it.gloss}
                 className="flex w-full items-baseline gap-2 px-5 py-2.5 text-left transition-colors hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40"
               >
                 <span className="font-dict text-zinc-900 dark:text-zinc-100">{it.headword}</span>
-                {it.reading && <span className="text-sm text-zinc-400">{it.reading}</span>}
+                {it.reading && <span className="shrink-0 text-sm text-zinc-400">{it.reading}</span>}
+                {it.gloss && (
+                  <span className="ml-auto max-w-[45%] truncate text-sm text-zinc-400">{it.gloss}</span>
+                )}
               </button>
             </li>
           ))}

@@ -29,8 +29,8 @@ export const importPack = (file: File) => {
 export const removePack = (lang: string) =>
   api<{ ok: boolean }>(`/packs/${lang}`, { method: "DELETE" });
 
-export const lookup = (q: string, langs: string, limit = 20) =>
-  api<{ items: Entry[] }>(`/lookup?${qs({ q, langs, limit })}`).then((r) => r.items);
+export const lookup = (q: string, langs: string, limit = 20, exact = false) =>
+  api<{ items: Entry[] }>(`/lookup?${qs({ q, langs, limit, ...(exact ? { exact: 1 } : {}) })}`).then((r) => r.items);
 
 export const suggest = (q: string, langs: string, limit = 8) =>
   api<{ items: SuggestItem[] }>(`/suggest?${qs({ q, langs, limit })}`).then((r) => r.items);

@@ -282,23 +282,55 @@ def main():
     # 合并为一条词条——主词条用首个到达的（词单按频降序，首个即最高频，最接近词典形），
     # senses 用主词条的（变位词条的释义只是"某某的变位"说明，并进词典形是噪音），
     # pos 取并集；否则查 быть 会出十几张重复卡。所有输入词形仍记 form，按词形查询走归一映射。
-    merged: dict[str, dict] = {}
+    # 变位说明括号（"（danken 的第一人称单数形式）"）：作为独立词条的释义时要剥离
+    VARIANT_NOTE = re.compile(r"[（(][^）)]*(?:形式|变位|变格|变形|屈折)[^）)]*[）)]")
+
+    def clean_variant_senses(senses: list[dict]) -> list[dict]:
+        out = []
+        for s in senses:
+            zh = VARIANT_NOTE.sub("", s["zh"]).strip("，。, ")
+            if zh:
+                out.append({**s, "zh": zh})
+        return out or senses
+
+    # 两级结构：每 norm 一个合并组；组内词频远高于词典形的输入词（如 danke 39 倍于
+    # danken）是用户真实查询的主词形，保留为独立词条（查询该词形应 exact 命中它，
+    # 而不是绕 form 映射落到词典形上——后者词头与查询词不一致）
+    groups: dict[str, list[dict]] = {}
     for w, freq in words:
         d = done.get(w)
         if not d:
             continue
-        m = merged.get(d["norm"])
-        if m is None:
-            merged[d["norm"]] = {
-                "headword": d["headword"], "norm": d["norm"], "reading": d["reading"],
-                "pos": list(d["pos"]), "senses": d["senses"], "freq": freq, "forms": [w],
-            }
-        else:
-            m["freq"] = max(m["freq"], freq)
-            for pp in d["pos"]:
-                if pp not in m["pos"]:
-                    m["pos"].append(pp)
-            m["forms"].append(w)
+        groups.setdefault(d["norm"], []).append({**d, "input": w, "input_freq": freq})
+
+    merged: dict[str, dict] = {}          # 词典形主词条
+    independents: list[dict] = []          # 高频词形独立词条（danke 这类）
+    for norm, members in groups.items():
+        lemmas = [m for m in members if m["input"].lower() == m["headword"].lower()]
+        main_freq = max((m["input_freq"] for m in lemmas), default=0.0)
+        m0 = members[0]
+        # 主释义优先用词典形自己的输出（变位词的输出是"（h 的…形式）"说明，并进词典形是噪音）
+        sense_src = lemmas[0] if lemmas else max(members, key=lambda x: x["input_freq"])
+        merged[norm] = {
+            "headword": m0["headword"], "norm": m0["norm"], "reading": m0["reading"],
+            "pos": sorted({p for m in members for p in m["pos"]}, key=str),
+            "senses": sense_src["senses"], "freq": max(m["input_freq"] for m in members),
+            "forms": [],
+        }
+        for m in members:
+            is_lemma = m in lemmas
+            if not is_lemma and m["input_freq"] > main_freq * 2:
+                # 高频词形独立成条：释义用剥离变位括号后的（"感谢（…形式）"→"感谢"），
+                # 词典形无输出时回退到自己的；同时保留 form 映射——查询仍能关联到词典形
+                senses = clean_variant_senses(sense_src["senses"]) if lemmas else m["senses"]
+                independents.append({
+                    "headword": m["input"], "norm": common.norm(m["input"], args.lang),
+                    "reading": m["reading"], "pos": m["pos"], "senses": senses,
+                    "freq": m["input_freq"],
+                })
+            elif not is_lemma:
+                merged[norm]["forms"].append(m["input"])
+
     def split_zh(zh: str) -> list[str]:
         """释义切到反查粒度：去括号补充 -> 分号/逗号/顿号分段 -> 2-8 字短词。
         LLM 释义是流畅短语（"美丽的，漂亮的；好的"），整条做 term 反查永远 miss"""
@@ -313,6 +345,15 @@ def main():
 
     entries = []
     forms = []
+    for e in independents:
+        zh_terms = [[t, i, "llm"] for i, s in enumerate(e["senses"]) if s.get("zh")
+                    for t in split_zh(s["zh"])]
+        entries.append({
+            "headword": e["headword"], "norm": e["norm"], "reading": e["reading"] or None,
+            "ipa": None, "pos": e["pos"], "gender": None, "freq": e["freq"],
+            "senses": e["senses"], "zh_terms": zh_terms,
+            "extra": {"source": "llm", "model": args.model},
+        })
     for norm, m in merged.items():
         zh_terms = [[t, i, "llm"] for i, s in enumerate(m["senses"]) if s.get("zh")
                     for t in split_zh(s["zh"])]

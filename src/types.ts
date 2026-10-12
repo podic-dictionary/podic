@@ -48,6 +48,7 @@ export interface SuggestItem {
   lang: Lang;
   headword: string;
   reading?: string;
+  gloss?: string;
 }
 
 export interface Sentence {
