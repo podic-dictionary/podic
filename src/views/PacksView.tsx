@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { langDisplayName } from "../langNames";
 import ConfirmDialog from "../components/ConfirmDialog";
 import NoticeDialog from "../components/NoticeDialog";
 import { SpinnerIcon } from "../components/icons";
@@ -38,7 +39,7 @@ export default function PacksView() {
   };
 
   const { languages } = useSettings();
-  const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? code;
+  const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? langDisplayName(code);
   const [packs, setPacks] = useState<PackInfo[]>([]);
   // 下载进度走全局 store：切页面不丢，词典页外由 App 顶栏镜像显示
   const installState = useInstall();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listFavorites, removeFavorite, type Favorite } from "../api";
 import { useSettings } from "../SettingsContext";
+import { langDisplayName } from "../langNames";
 
 
 export default function FavoritesView({
@@ -13,7 +14,7 @@ export default function FavoritesView({
   const { languages } = useSettings();
   const langName = (code: string) => {
     const l = languages.find((x) => x.code === code);
-    return l?.short?.trim() || l?.name.slice(0, 1) || code;
+    return l?.short?.trim() || l?.name.slice(0, 1) || langDisplayName(code).slice(0, 1);
   };
   const [items, setItems] = useState<Favorite[]>([]);
   const [error, setError] = useState("");

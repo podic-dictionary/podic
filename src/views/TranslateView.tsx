@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "../SettingsContext";
+import { langDisplayName } from "../langNames";
 import { useAiStream } from "../hooks/useAiStream";
 import ModelPicker from "../components/ModelPicker";
 import Markdown from "../components/Markdown";
@@ -24,7 +25,7 @@ export default function TranslateView() {
       ...zh,
     ];
   }, [languages]);
-  const langLabel = (code: string) => langs.find((l) => l.id === code)?.label ?? code;
+  const langLabel = (code: string) => langs.find((l) => l.id === code)?.label ?? langDisplayName(code);
   const [from, setFrom] = useState<string>("auto");
   const [to, setTo] = useState<string>("zh");
   const [input, setInput] = useState("");
