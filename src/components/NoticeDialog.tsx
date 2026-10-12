@@ -1,15 +1,18 @@
 import { useEffect } from "react";
 
-/// 结果通知弹窗（单按钮）：操作结果必须弹在操作发生处，不能只写在页面顶端让用户错过
+/// 结果通知弹窗：操作结果必须弹在操作发生处，不能只写在页面顶端让用户错过。
+/// 可选 action 第二按钮（如「去安装」引导跳转），点击执行后关闭
 export default function NoticeDialog({
   open,
   title,
   message,
+  action,
   onClose,
 }: {
   open: boolean;
   title: string;
   message?: string;
+  action?: { label: string; run: () => void };
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -33,7 +36,18 @@ export default function NoticeDialog({
       >
         <h3 className="text-base font-medium">{title}</h3>
         {message && <p className="mt-1.5 text-sm text-zinc-500">{message}</p>}
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-end gap-2">
+          {action && (
+            <button
+              onClick={() => {
+                action.run();
+                onClose();
+              }}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+            >
+              {action.label}
+            </button>
+          )}
           <button
             onClick={onClose}
             className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"

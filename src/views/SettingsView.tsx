@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  attributions, deleteUserDict, listPacks, listUserDict, saveSettings, testProvider,
+  attributions, deleteUserDict, fetchCatalog, listPacks, listUserDict, saveSettings, testProvider,
 } from "../api";
 import type { LanguageConfig, PackInfo, UserDictEntry } from "../types";
 import ConfirmDialog from "../components/ConfirmDialog";
+import NoticeDialog from "../components/NoticeDialog";
 import {
   ChevronLeftIcon, EyeIcon, EyeOffIcon, GripIcon, PlusIcon, TrashIcon, XIcon, ZapIcon,
 } from "../components/icons";
@@ -213,6 +214,8 @@ function LanguagesPage({
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [short, setShort] = useState("");
+  // 添加成功后的离线词典提示（有已装包或更新源可装时引导跳转）
+  const [packHint, setPackHint] = useState<{ title: string; message: string; actionLabel: string; code: string } | null>(null);
 
   // distance:6px 的激活阈值——列表滚动不误触发拖拽（触摸/鼠标统一 PointerSensor）
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -286,7 +289,39 @@ function LanguagesPage({
       setCode("");
       setName("");
       setShort("");
+      void checkPackHint(c, n);
     });
+  };
+
+  // 添加语言后看有没有离线词典可用：已装→查看；更新源可装→去安装（跳词典列表定位到该语言）
+  const checkPackHint = async (c: string, n: string) => {
+    try {
+      const [installed, cat] = await Promise.all([
+        listPacks().then((r) => r.packs.find((p) => p.lang === c)).catch(() => null),
+        // catalog 可能 undefined（端点异常/旧后端）：?? [] 防 find 崩掉连累 installed 分支
+        fetchCatalog()
+          .then((cc) => cc ?? [])
+          .catch(() => [] as Awaited<ReturnType<typeof fetchCatalog>>),
+      ]);
+      if (installed) {
+        setPackHint({ title: "已添加", message: `「${n}」的离线词典已安装（v${installed.version}）。`, actionLabel: "查看", code: c });
+        return;
+      }
+      const item = cat.find((x) => x.lang === c);
+      if (item) {
+        const count = item.entry_count ? `${Math.round(item.entry_count / 10000)} 万词条、` : "";
+        const size = item.size ? `${Math.round(item.size / 1048576)}MB` : "体积未知";
+        setPackHint({
+          title: "发现离线词典",
+          message: `「${n}」有可安装的词典包 v${item.version}（${count}${size}）。安装后离线可查，不装也能由 AI 补全词条。`,
+          actionLabel: "去安装",
+          code: c,
+        });
+      }
+      // 两边都没有：不弹（页面说明已写明 AI 补全路径）
+    } catch {
+      // 更新源不可达：不弹
+    }
   };
 
   const inputCls =
@@ -486,6 +521,24 @@ function LanguagesPage({
           setConfirmRemove(null);
         }}
         onCancel={() => setConfirmRemove(null)}
+      />
+
+      <NoticeDialog
+        open={packHint !== null}
+        title={packHint?.title ?? ""}
+        message={packHint?.message}
+        action={
+          packHint
+            ? {
+                label: packHint.actionLabel,
+                run: () => {
+                  // 词典列表页按 ?lang= 定位到该语言的卡片（已装卡或占位卡）并高亮
+                  window.location.hash = `#/settings/packs?lang=${packHint.code}`;
+                },
+              }
+            : undefined
+        }
+        onClose={() => setPackHint(null)}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { langDisplayName } from "../langNames";
 import ConfirmDialog from "../components/ConfirmDialog";
 import NoticeDialog from "../components/NoticeDialog";
@@ -38,9 +38,42 @@ export default function PacksView() {
     window.location.hash = `#/settings/packs${t === "list" ? "" : `/${t}`}`;
   };
 
+  // 深链接定位：#/settings/packs?lang=de（语言页添加语言后引导跳转）——
+  // 滚到该语言的卡片（已装卡/无词典占位卡）居中 + 呼吸高亮。
+  // packs/languages 异步到位后卡片才渲染，effect 随数据变化重试直到命中
+  const focusedLang = useRef("");
+  const focusLangCard = () => {
+    const lang = parseHash().params.get("lang");
+    if (!lang || focusedLang.current === lang) return;
+    const el = document.querySelector<HTMLElement>(`[data-pack-lang="${lang}"]`);
+    if (!el) return; // 卡片未渲染：等下一轮数据
+    focusedLang.current = lang;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("search-flash");
+    void el.offsetWidth;
+    el.classList.add("search-flash");
+    window.setTimeout(() => el.classList.remove("search-flash"), 2000);
+  };
+  useEffect(() => {
+    const raf = requestAnimationFrame(focusLangCard);
+    const onHash = () => {
+      focusedLang.current = ""; // 同一 lang 链接再次进入也要重新定位
+      requestAnimationFrame(focusLangCard);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("hashchange", onHash);
+    };
+  });
+
   const { languages } = useSettings();
   const langName = (code: string) => languages.find((x) => x.code === code)?.name ?? langDisplayName(code);
   const [packs, setPacks] = useState<PackInfo[]>([]);
+
+  useEffect(() => {
+    focusLangCard();
+  }, [packs]);
   // 下载进度走全局 store：切页面不丢，词典页外由 App 顶栏镜像显示
   const installState = useInstall();
   const progress = installState ? { lang: installState.lang, p: installState.p } : null;
@@ -228,7 +261,7 @@ export default function PacksView() {
       {tab === "list" && (
       <div className="mt-3 space-y-2">
         {packs.map((p) => (
-          <div key={p.lang} className="podic-card rounded-2xl bg-white/85 p-3.5 dark:bg-zinc-900/80">
+          <div key={p.lang} data-pack-lang={p.lang} className="podic-card rounded-2xl bg-white/85 p-3.5 dark:bg-zinc-900/80">
             {/* 文案全宽；按钮挪到下一行，不再挤压词条信息 */}
             <div>
               <p className="font-medium">
@@ -287,6 +320,7 @@ export default function PacksView() {
         {noPackLangs.map((l) => (
           <div
             key={l.code}
+            data-pack-lang={l.code}
             className="rounded-2xl border border-dashed border-zinc-300 bg-transparent p-3.5 dark:border-zinc-700"
           >
             <div>
