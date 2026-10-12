@@ -29,7 +29,7 @@ SOURCES = {
         # 词条释义由 LLM 生成（词头/频次来自开放语料，释义是模型产出）
         "url": "",
         "file": "",
-        "cc": {"name": "GLM 生成释义 (glm-5.3-flash)", "url": "https://open.bigmodel.cn", "license": ""},
+        "cc": {"name": "GLM 生成释义（未经人工校验）", "url": "https://open.bigmodel.cn", "license": "AI 生成内容"},
     },
     "ecdict": {
         "url": "https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv",
