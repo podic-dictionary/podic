@@ -51,8 +51,8 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
     private var pendingHash: String?
 
     func openHash(_ hash: String) {
-        let js = "location.hash=\(JSONObject.quote(hash))"
-        webView.evaluateJavaScript(js) { [weak self] result in
+        let js = "location.hash=\(Self.jsJson(hash))"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
             if result == nil { self?.pendingHash = hash } // 页面未就绪：加载完重放
         }
     }
