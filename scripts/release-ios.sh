@@ -77,3 +77,15 @@ ssh "$MAC" "PODIC_ASC_KEY_ID='$PODIC_ASC_KEY_ID' PODIC_ASC_ISSUER_ID='$PODIC_ASC
 
 echo "[5/5] 完成。processing 状态稍后用 ASC API 查（VALID 后 TestFlight 可用）"
 echo "临时目录: $WORK"
+
+# 版本号 bump 随发布落盘：上传成功即提交，避免发了版 bump 还挂在 工作区（v1.1 的教训）
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+   && [ -n "$(git status --porcelain -- package.json ios/project.yml android/app/build.gradle.kts)" ]; then
+  IOS_VER=$(grep -oE 'MARKETING_VERSION: "[^"]+"' ios/project.yml | cut -d'"' -f2)
+  if git add package.json ios/project.yml android/app/build.gradle.kts \
+     && git commit -m "发布 v${IOS_VER} (build ${PODIC_IOS_BUILD})：版本号落盘"; then
+    echo "版本号 bump 已提交：$(git rev-parse --short HEAD)（push 请自行执行）"
+  else
+    echo "!! 版本号 bump 自动提交失败，请手动提交" >&2
+  fi
+fi
