@@ -291,7 +291,7 @@ pub fn suggest(
         let upper = format!("{lower}\u{10FFFF}");
         if installed.iter().any(|l| l == lang) {
             let sql = format!(
-                "SELECT e.headword, e.reading, json_extract(e.senses, '$[0].zh') FROM \"{lang}\".entry e \
+                "SELECT e.headword, e.reading, COALESCE(json_extract(e.senses, '$[0].zh'), json_extract(e.senses, '$[0].fr'), json_extract(e.senses, '$[1].zh')) FROM \"{lang}\".entry e \
                  WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
             );
             let mut stmt = conn.prepare(&sql)?;
@@ -301,7 +301,7 @@ pub fn suggest(
             out.extend(rows.flatten());
         }
         // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描；无包语言唯一来源）
-        let sql = "SELECT headword, reading, json_extract(senses, '$[0].zh') FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
+        let sql = "SELECT headword, reading, COALESCE(json_extract(senses, '$[0].zh'), json_extract(senses, '$[0].fr')) FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
         if let Ok(mut stmt) = conn.prepare(sql) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![lang, lower, upper], |r| {
                 Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)?, gloss: r.get(2)? })
