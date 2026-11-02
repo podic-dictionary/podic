@@ -32,8 +32,8 @@ TRACK = "alpha"  # 老版 API 轨道名，Console 里显示为「封闭测试」
 VERSION = json.load(open("package.json"))["version"]
 VC = int(re.search(r"versionCode\s*=\s*(\d+)", open("android/app/build.gradle.kts").read()).group(1))
 RELEASE_NOTES = [
-    {"language": "zh-CN", "text": "安装包只内置英文词典（体积减半），法语/日语/俄语在线安装且升级不丢；新增俄语 5000 高频词词典；深链接直达查词/翻译；词典页改版（列表/安装/更新源）；AI Provider 内置 29 家厂商预设（智谱/DeepSeek/Kimi/MiniMax/OpenAI 等，填 Key 即用）；设置页可搜索；修复后台卡死问题。"},
-    {"language": "en-US", "text": "Slimmer install (English dictionary only; French/Japanese/Russian install on demand and survive upgrades); new Russian 5k-word dictionary; deep links for lookup & translate; redesigned dictionary page; 29 built-in AI provider presets (Zhipu, DeepSeek, Kimi, MiniMax, OpenAI, ...); searchable settings; fixed background freeze."},
+    {"language": "zh-CN", "text": "多语言大版本：词典扩展到英/法/日/德/西/俄/意/葡八语（一键在线安装），支持注册任意语言与自定义词典包；查词候选直接显示释义，高频词形独立成词条；词典支持在线目录安装与更新源管理；大量交互与稳定性改进。"},
+    {"language": "en-US", "text": "Multilingual update: 8 dictionaries (EN/FR/JA/DE/ES/RU/IT/PT) with one-tap install; register any language and build custom packs; search suggestions now show glosses, frequent inflected forms get their own entries; online dictionary catalog with update sources; many UX and stability improvements."},
 ]
 
 sa = json.load(open(SA_PATH))
@@ -83,15 +83,15 @@ def api(method, path, body=None, raw=None, ctype="application/json"):
 # ---------- 0. Listing 文案 ----------
 L10N = {
     "zh-CN": {
-        "title": "Podic 词典：开源离线英法日语典",
-        "shortDescription": "干净清爽的开源词典，英法日与中文互查，离线可用，AI 增强自带 Key。",
+        "title": "Podic 词典：开源离线多语言词典",
+        "shortDescription": "干净清爽的开源词典，英法日德西俄意葡八语与中文互查，离线可用。",
         "fullDescription": (
-            "Podic 是一款干净清爽的开源词典应用，支持英 / 法 / 日三语与中文互查。\n"
+            "Podic 是一款干净清爽的开源词典应用，支持英 / 法 / 日 / 德 / 西 / 俄 / 意 / 葡八语与中文互查，还能注册任意语言。\n"
             "全部词典数据来自自由许可的开源语料（ECDICT、CFDICT、JMdict、Tatoeba 等），"
-            "安装即含全部离线数据，无需注册登录，无广告、无内置付费。\n\n"
+            "安装包内置英语词典，其余语言一键在线安装且升级不丢，无需注册登录，无广告、无内置付费。\n\n"
             "【功能】\n"
             "• 离线查词：词头、音标、词性、屈折变形、真实语料例句与中文翻译\n"
-            "• 三语支持：英语（77 万+ 词头）、法语（音标 + 词性 + 阴阳性 + 屈折）、日语（汉字 + 假名读音 + 变形还原）\n"
+            "• 八语支持：英语（77 万+ 词头，内置）、法语（音标 + 词性 + 阴阳性 + 屈折）、日语（汉字 + 假名读音 + 变形还原）、德 / 西 / 俄 / 意 / 葡（在线安装）；支持注册任意语言与自定义词典包\n"
             "• 中文反查：输入中文即可找到对应单词\n"
             "• 生词本：收藏单词、随手复习\n"
             "• 整句翻译：任意句子译成中文（可选）\n"
@@ -105,14 +105,17 @@ L10N = {
     },
     "en-US": {
         "title": "Podic - Open-source Dictionary",
-        "shortDescription": "Clean open-source offline dictionary: English, French, Japanese to Chinese.",
+        "shortDescription": "Open-source dictionary: 8 languages (EN/FR/JA/DE/ES/RU/IT/PT) to Chinese.",
         "fullDescription": (
-            "Podic is a clean, open-source dictionary app for English / French / Japanese <-> Chinese.\n"
+            "Podic is a clean, open-source dictionary app for 8 languages "
+            "(English / French / Japanese / German / Spanish / Russian / Italian / Portuguese) <-> Chinese, "
+            "and you can register any language.\n"
             "All dictionary data comes from freely-licensed open corpora (ECDICT, CFDict, JMdict, Tatoeba). "
-            "Everything is bundled for fully offline use - no account, no ads, no in-app purchases.\n\n"
+            "The English dictionary is built in; the others install on demand and survive upgrades. "
+            "No account, no ads, no in-app purchases.\n\n"
             "FEATURES\n"
             "- Offline lookups: headwords, IPA, senses, inflections and real-usage example sentences with Chinese translations\n"
-            "- Three languages: English (770k+ headwords), French (IPA + gender + inflections), Japanese (kanji + readings + deinflection)\n"
+            "- 8 languages: English (770k+ headwords, built in), French (IPA + gender + inflections), Japanese (kanji + readings + deinflection), German / Spanish / Russian / Italian / Portuguese (one-tap install); register any language and build custom dictionary packs\n"
             "- Reverse lookup: type Chinese to find the word\n"
             "- Favorites for vocabulary building\n"
             "- Full-sentence translation (optional)\n"
