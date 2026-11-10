@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { lookup, reverse } from "../api";
 import { addHistory } from "../history";
+import AiCompleteBar from "../components/AiCompleteBar";
 import EntryCard from "../components/EntryCard";
 import FallbackCard from "../components/FallbackCard";
 import SearchBar from "../components/SearchBar";
@@ -82,6 +83,10 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
     return () => window.removeEventListener("podic:search", onExternal);
   }, [onSearch]);
 
+  // 精确命中 = 包内 exact 词条或 AI 补录的 user 词条；form（屈折表指向词根）不算——
+  // 查询词本身没有独立词条时，模糊结果上方提供 AI 补全入口
+  const hasExact = results?.some((e) => e.matched_by === "exact" || e.matched_by === "user") ?? false;
+
   return (
     <div className="mx-auto max-w-2xl p-4">
       <SearchBar
@@ -119,6 +124,9 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         {error && <p className="text-sm text-red-500">{error}</p>}
         {results !== null && results.length === 0 && !loading && (
           <FallbackCard query={query} lang={lang} onSaved={() => onSearch(query)} />
+        )}
+        {!loading && !error && results !== null && results.length > 0 && !hasExact && (
+          <AiCompleteBar query={query} lang={lang} onSaved={() => onSearch(query)} />
         )}
         {results?.map((e, i) => (
           <div key={`${e.lang}-${e.entry_id}-${i}`} className="podic-enter" style={{ animationDelay: `${Math.min(i, 8) * 55}ms` }}>

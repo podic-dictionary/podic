@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../SettingsContext";
-import { completeAndSave, isFailedWord } from "../lib/aiComplete";
+import { completeAndSave, isFailedWord, wordish } from "../lib/aiComplete";
 import ModelPicker from "./ModelPicker";
-
-/** 自动补全资格：按语种的词形判定（Unicode 字母，容忍撇号/连字符与空格短语）。
- * \p{L}+\p{M} 覆盖拉丁扩展与组合标记（天城文等）；英/法的 CJK 查询走反查不自动补全。 */
-const WORDISH_LATIN = /^[\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*( [\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*)*$/u;
-const WORDISH_JA = /^[\p{L}\p{M}ー・]+$/u;
-const wordish = (q: string, lang: string) =>
-  (lang === "ja" ? WORDISH_JA : WORDISH_LATIN).test(q);
 
 /// 查词完全无结果时的 AI 兜底：自动生成结构化词条并存入用户词典（AI 词典），
 /// 父级重查后由带「✦ AI 词典」徽标的 EntryCard 接管；删除/覆盖走设置页 AI 词典

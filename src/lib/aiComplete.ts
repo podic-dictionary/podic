@@ -46,6 +46,13 @@ const failKey = (lang: string, word: string) =>
     .toLowerCase()}`;
 export const isFailedWord = (lang: string, word: string) => failedWords.has(failKey(lang, word));
 
+/** 补全资格：按语种的词形判定（Unicode 字母，容忍撇号/连字符与空格短语）。
+ * \p{L}+\p{M} 覆盖拉丁扩展与组合标记（天城文等）；英/法的 CJK 查询走反查不自动补全。 */
+const WORDISH_LATIN = /^[\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*( [\p{L}\p{M}]+(['’-][\p{L}\p{M}]+)*)*$/u;
+const WORDISH_JA = /^[\p{L}\p{M}ー・]+$/u;
+export const wordish = (q: string, lang: string) =>
+  (lang === "ja" ? WORDISH_JA : WORDISH_LATIN).test(q);
+
 export interface CompleteAndSaveOpts {
   lang: string;
   /** 查询原文（送 AI 的 text） */
