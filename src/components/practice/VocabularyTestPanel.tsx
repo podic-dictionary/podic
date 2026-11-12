@@ -97,6 +97,8 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
 
   const undo = () => {
     if (submitting || answers.length === 0) return;
+    // 撤销是明确意图：结束上一题的保护期，纠正后的首次作答不被吞（评审 T01）
+    lockUntilRef.current = 0;
     setAnswers(answers.slice(0, -1));
     setIdx(idx - 1);
   };

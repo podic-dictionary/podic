@@ -102,7 +102,7 @@ export default function App() {
 
   const switchView = (v: View) => {
     if (v === view) return;
-    userNavRef.current = true; // 用户主动导航（tab 点击 / hash 跳转 / 原生返回），记忆校正不再介入
+    markNav(); // 用户主动导航（tab 点击 / hash 跳转 / 原生返回），记忆校正不再介入
     if (mainRef.current) scrollPos.current[view] = mainRef.current.scrollTop;
     setView(v);
     if (v !== "settings") setSettingsSub(null);
@@ -183,8 +183,15 @@ export default function App() {
   // ---- tab 记忆（服务端为准，localStorage 兜底）----
   // 「用户是否已经主动导航」：switchView / popstate / hashchange 都算；
   // 服务端记忆校正不算（它走 setView 直写，绕过标记）。单调置位，
-  // 避免「当前值恰好等于启动值」被误判为未导航（评审 R04）
+  // 避免「当前值恰好等于启动值」被误判为未导航（评审 R04）。
+  // navCount 是同一事件的可观察版本：确认退出等不改变 view 的导航
+  // 也要触发保存 effect（评审 T02）
   const userNavRef = useRef(false);
+  const [navCount, setNavCount] = useState(0);
+  const markNav = () => {
+    userNavRef.current = true;
+    setNavCount((c) => c + 1);
+  };
   // 服务端设置到达后校正启动 tab：仅无明确 hash、且用户尚未导航时应用一次
   const viewCorrectedRef = useRef(false);
   useEffect(() => {
@@ -211,7 +218,7 @@ export default function App() {
     viewSaveChain.current = viewSaveChain.current
       .then(() => saveSettings({ last_view: view }))
       .catch(() => { /* 保存失败不影响使用，下次启动用上次成功值 */ });
-  }, [view, settingsLoaded]);
+  }, [view, settingsLoaded, navCount]);
   useEffect(() => {
     if (restoring.current) {
       restoring.current = false;
@@ -231,7 +238,7 @@ export default function App() {
     const onHash = () => {
       // 任何 hash 跳转（含同页 deeplink 如 #/search?q=…）都算用户导航：
       // 不设置的话，稍晚到达的服务端记忆会把用户从 deeplink 页面拽走（评审 R04）
-      userNavRef.current = true;
+      markNav();
       const r = parseHash();
       const v = viewOf(r.path[0]);
       const s = v === "settings" ? subOf(r.path[1]) : null;
@@ -329,16 +336,17 @@ export default function App() {
             ? "未提交的自测不会生成估计结果。"
             : "已答题目的熟练度变化已保存，剩余题目将丢弃。",
           onConfirm: () => {
-            // 这是用户导航：置位后保存 effect 才会记录落点，迟到的服务端
-            // 记忆也不会抢页面（评审 N03）。不置 restoring——让 history
-            // effect 自然把目标状态推入栈，条目与画面保持一致（评审 N02）
-            userNavRef.current = true;
+            // 这是用户导航：markNav 让保存 effect 观察到（同 tab 确认退出
+            // 也要落盘），迟到的服务端记忆也不会抢页面（评审 N03/T02）。
+            // 不置 restoring——让 history effect 自然把目标状态推入栈，
+            // 条目与画面保持一致（评审 N02）
+            markNav();
             if (!target) {
               // 落到应用外的匿名条目：只关会话，留在当前页
               setFavoritesSub(null);
               return;
             }
-            setView(target.view ?? "search");
+            setView(viewOf(target.view)); // viewOf 归一化：空串/未知值回查词（评审 T04）
             setSettingsSub(target.sub ?? null);
             setArticleId(target.article ?? null);
             setFavoritesSub(target.favSub ?? null);
@@ -355,7 +363,7 @@ export default function App() {
         const s0 = v0 === "settings" ? subOf(r.path[1]) : null;
         if (v0 !== view || s0 !== settingsSub) {
           restoring.current = true;
-          userNavRef.current = true;
+          markNav();
           setView(v0);
           setSettingsSub(s0);
           setFavoritesSub(null);
@@ -369,8 +377,8 @@ export default function App() {
         return;
       }
       restoring.current = true;
-      userNavRef.current = true; // 浏览器返回也是用户导航，记忆校正不再介入
-      setView(s.view ?? "search");
+      markNav(); // 浏览器返回也是用户导航，记忆校正不再介入
+      setView(viewOf(s.view));
       setSettingsSub(s.sub ?? null);
       setArticleId(s.article ?? null);
       // 旧条目无 favSub：内存里还有会话也不凭 state 复活面板（回到生词本列表）

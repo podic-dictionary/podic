@@ -313,6 +313,7 @@ export default function PracticePanel({
               <TypedInput
                 value={typed}
                 disabled={submitting}
+                overLimit={new TextEncoder().encode(typed.trim()).length > 128}
                 onSubmit={() => submit({ kind: "typed", text: typed.trim() })}
                 onChange={setTyped}
               />
@@ -533,10 +534,11 @@ function QuestionView({ q, revealed, selected, onSelect }: {
   );
 }
 
-/** 拼写题输入框：Enter 提交（IME 组合中不触发） */
-function TypedInput({ value, disabled, onSubmit, onChange }: {
+/** 拼写题输入框：Enter 提交（IME 组合中不触发）；超 128 UTF-8 字节禁提交并提示 */
+function TypedInput({ value, disabled, overLimit, onSubmit, onChange }: {
   value: string;
   disabled: boolean;
+  overLimit: boolean;
   onSubmit: () => void;
   onChange: (v: string) => void;
 }) {
@@ -546,7 +548,7 @@ function TypedInput({ value, disabled, onSubmit, onChange }: {
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && !composing && value.trim()) onSubmit();
+        if (e.key === "Enter" && !composing && value.trim() && !overLimit) onSubmit();
       }}
       onCompositionStart={() => setComposing(true)}
       onCompositionEnd={() => setComposing(false)}
@@ -555,8 +557,9 @@ function TypedInput({ value, disabled, onSubmit, onChange }: {
       autoCapitalize="off"
       autoCorrect="off"
       spellCheck={false}
-      maxLength={64}
-      placeholder="输入单词…"
+      maxLength={128}
+      aria-invalid={overLimit}
+      placeholder={overLimit ? "超长（上限 128 字节）" : "输入单词…"}
       className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base outline-none transition-colors focus:border-emerald-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-emerald-600"
     />
   );
