@@ -253,6 +253,7 @@ export default function ReadingView({
         setEditing(false);
         setArticleId(null);
         setGoneNotice("文章已被删除，本次编辑未能保存");
+        loadList(); // 列表里可能还挂着已删条目（外部删除），刷新掉
       } else {
         setEditErr(msg);
       }
