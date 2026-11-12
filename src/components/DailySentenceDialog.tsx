@@ -23,7 +23,6 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   const [data, setData] = useState<DailySentenceResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [showZh, setShowZh] = useState(false);
   // 难度选择（Seg 的 id："auto" | 层号字符串）；levelsByLang 是服务端整份偏好
   const [levelsByLang, setLevelsByLang] = useState<Record<string, { mode: string; band?: number }>>({});
   // 偏好读取完成前禁用难度选择：迟到的 GET 覆盖刚选的状态（复核 R8 单端竞态）
@@ -119,7 +118,6 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
       setAiError("");
       setLoading(true);
       setError("");
-      setShowZh(false);
       try {
         // level 显式传入（换层场景），否则读当前偏好
         const pref = opts?.level ?? levelsByLang[lang];
@@ -224,27 +222,22 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
                   {fmtIpa(word.ipa) && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{fmtIpa(word.ipa)}/</span>}
                   <SpeakButton text={word.headword} lang={lang} />
                 </div>
+                {word.gloss && <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">{word.gloss}</p>}
               </div>
               {data?.sentence ? (
                 <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
                   <p className="text-[15px] leading-relaxed text-zinc-800 dark:text-zinc-100">{data.sentence.text}</p>
                   {data.sentence.translation.length > 0 && (
-                    showZh ? (
-                      <p className="mt-2 border-t border-zinc-100 pt-2 text-sm leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                        {data.sentence.translation.join("；")}
-                      </p>
-                    ) : (
-                      <button
-                        onClick={() => setShowZh(true)}
-                        className="mt-2 text-xs text-emerald-600 hover:underline dark:text-emerald-400"
-                      >
-                        显示译文
-                      </button>
-                    )
+                    <p className="mt-2 border-t border-zinc-100 pt-2 text-sm leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                      {data.sentence.translation.join("；")}
+                    </p>
                   )}
-                  <p className="mt-2 text-[11px] text-zinc-400">
-                    {data.sentence.source === "pack" ? "词典例句" : `AI 生成${data.sentence.cached ? "（缓存）" : ""}`}
-                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <p className="text-[11px] text-zinc-400">
+                      {data.sentence.source === "pack" ? "词典例句" : `AI 生成${data.sentence.cached ? "（缓存）" : ""}`}
+                    </p>
+                    <SpeakButton text={data.sentence.text} lang={lang} />
+                  </div>
                 </div>
               ) : aiReq && !data.message ? (
                 /* 词先行：句子待生成。autoComplete=手动时不自动发起，按钮触发（验收反馈） */

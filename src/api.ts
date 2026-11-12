@@ -312,7 +312,7 @@ export const listVocabTests = (lang: string, limit = 20) =>
 // ---- 每日一句 ----
 
 export interface DailySentenceResult {
-  word: { headword: string; entry_id: number; ipa: string | null };
+  word: { headword: string; entry_id: number; ipa: string | null; gloss?: string | null };
   /** mode=auto 时 reason 是服务端生成的推荐说明（如「根据上次英语测试推荐…」）；
    * note 是非致命提示（如单词层换不出别的词），有值时优先展示 */
   level: { mode: "auto" | "manual"; band: number; reason: string; note?: string; known?: number; sample_size?: number };

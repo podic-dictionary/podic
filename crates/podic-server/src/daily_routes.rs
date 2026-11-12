@@ -308,6 +308,14 @@ pub async fn daily_sentence(
             .ok()
             .and_then(|v| v.into_iter().next())
             .and_then(|e| serde_json::to_value(e).ok());
+    // 词义直显（验收反馈）：取第一个非空中文释义
+    let gloss = entry_ctx
+        .as_ref()
+        .and_then(|v| v.get("senses"))
+        .and_then(|s| s.as_array())
+        .and_then(|arr| arr.iter().find_map(|s| s.get("zh").and_then(|z| z.as_str())))
+        .map(|z| z.trim().to_string())
+        .filter(|z| !z.is_empty());
 
     // AI 请求参数与缓存键：与 /api/ai/run 同款哈希（键含 prompt 版本）。
     // 无词典例句时词先行返回，AI 生成交给前端走 /api/ai/run（流式+可取消），
@@ -339,6 +347,7 @@ pub async fn daily_sentence(
         note: dup_note,
         headword: unit.headword,
         ipa: unit.ipa,
+        gloss,
         entry_id,
         band,
         reason,
@@ -372,7 +381,7 @@ pub async fn daily_sentence(
         level["known"] = json!(k);
         level["sample_size"] = json!(n);
     }
-    let word = json!({"headword": picked.headword, "entry_id": picked.entry_id, "ipa": picked.ipa});
+    let word = json!({"headword": picked.headword, "entry_id": picked.entry_id, "ipa": picked.ipa, "gloss": picked.gloss});
 
     // ---- 词典例句命中：直接返回，不碰 AI ----
     if let Some((text, translation, sid)) = picked.pack_sentence {
@@ -428,6 +437,8 @@ struct PickOutcome {
     note: Option<String>,
     headword: String,
     ipa: Option<String>,
+    /// 词义直显：第一个非空中文释义（lookup 失败/无释义时 None）
+    gloss: Option<String>,
     entry_id: i64,
     band: usize,
     reason: String,

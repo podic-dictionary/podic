@@ -62,6 +62,10 @@ export default function App() {
   // ref 镜像供 popstate 用：连续两次返回事件间 state 更新可能还没落，ref 是同步真相
   const [dailyOpen, setDailyOpen] = useState(false);
   const dailyOpenRef = useRef(false);
+  // 词条详情：openWord 压入 word 条目（URL 带 ?q= 刷新可恢复），返回键从词条退回上一页。
+  // 不占条目时，词条页按返回会直接落到底弹退出确认（验收反馈）
+  const [wordOpen, setWordOpen] = useState(false);
+  const wordOpenRef = useRef(false);
   // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
   // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章
   const [articleId, setArticleId] = useState<number | "new" | null>(() => {
@@ -137,6 +141,14 @@ export default function App() {
     setDailyOpen(false);
     history.back(); // popstate 早退分支只关弹层（此时已关，幂等）
   };
+  // 关词条详情：清查询（SearchView 监听 close-word）+ 退掉词条条目。
+  // ref 先置 false，popstate 早退分支看到"已关"直接走正常恢复
+  const closeWord = () => {
+    wordOpenRef.current = false;
+    setWordOpen(false);
+    window.dispatchEvent(new CustomEvent("podic:close-word"));
+    history.back();
+  };
 
   // ---- 返回语义（Android 返回键 / 浏览器返回）----
   // 栈结构: [进入前历史, base(查词根), sentinel(查词根哨兵), ...导航条目]
@@ -181,8 +193,12 @@ export default function App() {
     hashExplicitRef.current = explicit;
     setView(v);
     if (s) setSettingsSub(s);
-    history.replaceState({ podic: 1, view: v, sub: s }, "", hashUrl(v, s));
-    history.pushState({ podic: 1, view: v, sub: s, sentinel: true }, "", hashUrl(v, s));
+    // 字段必须与历史同步 effect 的标准状态一致（含 article/favSub）：曾经只带
+    // {podic,view,sub}，挂载时同步 effect 比较不相等又压了一个普通条目，
+    // 位置从此离开哨兵——「查看单词」退栈落在它上面，长得和 base 一样，
+    // base-check 误判直接弹退出确认（验收反馈：无返回操作却弹退出）
+    history.replaceState({ podic: 1, view: v, sub: s, article: articleId, favSub: favoritesSub, base: 1 }, "", hashUrl(v, s));
+    history.pushState({ podic: 1, view: v, sub: s, article: articleId, favSub: favoritesSub, sentinel: true }, "", hashUrl(v, s));
     // deeplink 查询参数：#/search?q=…&lang=… / #/translate?text=…
     // 延到下一帧：switchView 触发的渲染要先 commit，目标视图的事件监听器才注册好，
     // 同 tick dispatch 会丢（deeplink 直达翻译页时 TranslateView 还没挂载）
@@ -293,12 +309,16 @@ export default function App() {
     };
     // 返回语义与 __podicGoBack 动作从同一套规则推导（评审 R06）：
     // 查词根且无二级页才交给壳退出；生词本列表也能返回查词
-    const canGoBack = view !== "search" || settingsSub !== null || favoritesSub !== null || dailyOpen;
+    const canGoBack = view !== "search" || settingsSub !== null || favoritesSub !== null || dailyOpen || wordOpen;
     w.PodicAndroid?.setCanGoBack(canGoBack);
     w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
       if (dailyOpen) {
         closeDaily();
+        return;
+      }
+      if (wordOpen) {
+        closeWord();
         return;
       }
       if (settingsSub) setSettingsSub(null);
@@ -325,7 +345,7 @@ export default function App() {
         switchView("favorites");
       } else if (view !== "search") switchView("search");
     };
-  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen]);
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen, wordOpen]);
 
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
@@ -335,8 +355,12 @@ export default function App() {
         sub?: SettingsSub;
         article?: number | "new" | null;
         favSub?: FavoritesSub;
+        base?: number;
         sentinel?: boolean;
         daily?: number;
+        word?: number;
+        q?: string;
+        lang?: string;
       } | null;
       // 浏览器返回会切换/卸载进行中的练习/自测时（含回退到另一种子页）：
       // 先取消这次返回（推回当前条目），确认放弃后再应用目标状态——不能不吭
@@ -347,6 +371,15 @@ export default function App() {
         dailyOpenRef.current = false;
         setDailyOpen(false);
         return;
+      }
+      // 词条条目被返回：清查询，不落到底（否则词条页按返回直接弹退出）
+      if (wordOpenRef.current && !s?.word) {
+        wordOpenRef.current = false;
+        setWordOpen(false);
+        window.dispatchEvent(new CustomEvent("podic:close-word"));
+        // 落点是查词页（含查词发起的词条）就留在查词页；其他 tab 发起的
+        // 继续走 restoring 回原 tab
+        if (!s || viewOf(s.view) === "search") return;
       }
       const targetSub = s?.favSub ?? null;
       const unloadsSession =
@@ -404,9 +437,11 @@ export default function App() {
         }
         return;
       }
-      if (!s.sentinel && !s.daily && s.view === "search" && !s.sub) {
-        // 到达 base = 查词根再返回：推回哨兵，弹退出确认
-        history.pushState({ podic: 1, view: "search", sub: null, sentinel: true }, "");
+      if (s.base && s.view === "search" && !s.sub) {
+        // 到达 base（启动时正向标记的栈底）= 查词根再返回：推回哨兵，弹退出确认。
+        // 不能靠「长得像 base」（view=search 且无标记）猜：切 tab 回查词压的普通
+        // 条目与它同形，「查看单词」退栈落到上面就会误判弹退出（验收反馈）
+        history.pushState({ podic: 1, view: "search", sub: null, article: null, favSub: null, sentinel: true }, "");
         setExitAsk(true);
         return;
       }
@@ -417,11 +452,20 @@ export default function App() {
       setArticleId(s.article ?? null);
       // 旧条目无 favSub：内存里还有会话也不凭 state 复活面板（回到生词本列表）
       setFavoritesSub(s.favSub ?? null);
+      // 词条条目恢复（forward / 从上层条目返回）：词条还关着就重新打开；
+      // 开着就不动（跨条目返回路过时不打断当前内容）
+      if (s.word && !wordOpenRef.current) {
+        wordOpenRef.current = true;
+        setWordOpen(true);
+        const q = s.q ?? "";
+        const lang = s.lang ?? "";
+        if (q) requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("podic:search", { detail: { q, lang } })));
+      }
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
     // 兜底分支读 view/settingsSub/practiceActive/favoritesSub，需随状态更新监听闭包
-  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen]);
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen, wordOpen]);
 
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollPos.current[view] ?? 0;
@@ -436,6 +480,18 @@ export default function App() {
   const openWord = (w: string, l: string) => {
     switchView("search");
     window.dispatchEvent(new CustomEvent("podic:search", { detail: { q: w, lang: l } }));
+    // 词条详情占一个返回条目（URL 带 q/lang，刷新也能恢复）。article/favSub
+    // 快照当前值：切到查词页后历史同步 effect 的标准状态与它一致，不会再叠条目。
+    // 查词页发起时当前条目就是弹层条目（每日一句查看单词）或旧词条条目：原地
+    // replace 消费，不叠条目也不触发 popstate（back()+push 的组合会让迟到的
+    // popstate 竞态关掉刚开的词条）；其他 tab 发起则压入新条目，返回回原 tab
+    const entry = { podic: 1, view: "search" as View, sub: null, article: articleId, favSub: favoritesSub, word: 1, q: w, lang: l };
+    const url = `${hashUrl("search", null)}?q=${encodeURIComponent(w)}&lang=${encodeURIComponent(l)}`;
+    const hs = history.state as { daily?: number; word?: number } | null;
+    if (view === "search" && (hs?.daily || hs?.word)) history.replaceState(entry, "", url);
+    else history.pushState(entry, "", url);
+    wordOpenRef.current = true;
+    setWordOpen(true);
   };
 
   // App 壳深链接入口：podic://search?q=hi&lang=en -> 壳 evaluateJavaScript 调到这里。
@@ -566,11 +622,11 @@ export default function App() {
           lang={lang}
           onClose={closeDaily}
           onOpenWord={(w, l) => {
-            // 查看单词先关弹层（复核 R7）。在查词页时 switchView 同页不压栈，
-            // 弹层条目会残留栈顶——退栈消费掉，返回语义才连续
+            // 查看单词先关弹层（复核 R7）。词条条目由 openWord 处理：查词页时
+            // 弹层条目被原地 replace 消费（此前是 history.back() 退栈——落到
+            // 长得像 base 的普通条目上会误判弹退出确认，验收反馈）
             setDailyOpen(false);
             dailyOpenRef.current = false;
-            if (view === "search") history.back();
             openWord(w, l);
           }}
         />
@@ -582,7 +638,13 @@ export default function App() {
         onConfirm={() => {
           setExitAsk(false);
           exitAllowed.current = true;
-          history.go(-2); // 跨过 base+哨兵离开页面（App 壳不弹这个框）
+          // App 壳里 go(-2) 无处可去（验收反馈：点了退出没退出）——交给原生 finish；
+          // 浏览器场景跨过 base+哨兵离开页面
+          if ((window as unknown as { PodicAndroid?: { exitApp?: () => void } }).PodicAndroid?.exitApp) {
+            (window as unknown as { PodicAndroid: { exitApp: () => void } }).PodicAndroid.exitApp();
+          } else {
+            history.go(-2);
+          }
         }}
         onCancel={() => setExitAsk(false)}
       />

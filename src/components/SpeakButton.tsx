@@ -11,15 +11,35 @@ const LANG_TAGS: Record<string, string> = {
   fa: "fa-IR", hu: "hu-HU", cs: "cs-CZ", da: "da-DK", fi: "fi-FI", no: "nb-NO",
 };
 
-/// 系统 TTS 朗读按钮（Web Speech API）：空闲显示喇叭，播放中显示声波跳动动画
+/// Android WebView 不支持 Web Speech API：壳内经 PodicAndroid 桥走系统 TTS，
+/// 浏览器/HarmonyOS 场景回退 Web Speech。两通道都按「系统有没有该语言语音」隐藏按钮
+type NativeTts = {
+  ttsAvailable: (lang: string) => boolean;
+  ttsSpeak: (text: string, lang: string) => void;
+  ttsStop: () => void;
+};
+const nativeTts = (): NativeTts | null =>
+  (window as unknown as { PodicAndroid?: Partial<NativeTts> }).PodicAndroid?.ttsSpeak
+    ? ((window as unknown as { PodicAndroid: NativeTts }).PodicAndroid)
+    : null;
+
+/// 系统 TTS 朗读按钮（原生桥 / Web Speech）：空闲显示喇叭，播放中显示声波跳动动画
 export default function SpeakButton({ text, lang }: { text: string; lang: Lang }) {
   const [speaking, setSpeaking] = useState(false);
   // null = 系统没暴露语音清单，无从判断（默认展示）；false = 确认无该语言语音（隐藏）
   const [hasVoice, setHasVoice] = useState<boolean | null>(null);
-  const supported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const webSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const native = nativeTts();
+  const tag = LANG_TAGS[lang] ?? lang;
 
   useEffect(() => {
-    if (!supported) return;
+    if (native) {
+      // 原生 TTS 异步初始化：先查一次，稍后再查一次兜底（首次安装语音包慢时）
+      setHasVoice(native.ttsAvailable(tag));
+      const t = setTimeout(() => setHasVoice((v) => v || native.ttsAvailable(tag)), 800);
+      return () => clearTimeout(t);
+    }
+    if (!webSupported) return;
     const synth = window.speechSynthesis;
     const check = () => {
       const voices = synth.getVoices();
@@ -27,8 +47,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
         setHasVoice(null);
         return;
       }
-      const tag = (LANG_TAGS[lang] ?? lang).toLowerCase(); // 回退原码，按完整语言子标签匹配（三字码不被截断）
-      setHasVoice(voices.some((v) => v.lang.replace("_", "-").toLowerCase().startsWith(tag)));
+      setHasVoice(voices.some((v) => v.lang.replace("_", "-").toLowerCase().startsWith(tag.toLowerCase())));
     };
     check();
     synth.addEventListener?.("voiceschanged", check);
@@ -36,20 +55,37 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
       synth.removeEventListener?.("voiceschanged", check);
       synth.cancel();
     };
-  }, [lang, supported]);
+  }, [lang, webSupported, native, tag]);
 
-  if (!supported || !text || hasVoice === false) return null;
+  // 原生朗读结束：壳侧 dispatch podic:tts-end（QUEUE_FLUSH 打断也会触发）
+  useEffect(() => {
+    if (!native) return;
+    const onEnd = () => setSpeaking(false);
+    window.addEventListener("podic:tts-end", onEnd);
+    return () => {
+      window.removeEventListener("podic:tts-end", onEnd);
+      native.ttsStop();
+    };
+  }, [native]);
+
+  if (!text || hasVoice === false) return null;
 
   const speak = () => {
-    const synth = window.speechSynthesis;
     if (speaking) {
-      synth.cancel();
       setSpeaking(false);
+      if (native) native.ttsStop();
+      else window.speechSynthesis?.cancel();
       return;
     }
+    if (native) {
+      native.ttsSpeak(text, tag);
+      setSpeaking(true);
+      return;
+    }
+    const synth = window.speechSynthesis;
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = LANG_TAGS[lang] ?? lang;
+    u.lang = tag;
     u.rate = 0.9;
     u.onstart = () => setSpeaking(true);
     u.onend = () => setSpeaking(false);

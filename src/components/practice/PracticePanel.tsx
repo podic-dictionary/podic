@@ -38,7 +38,11 @@ const COUNT_OPTS: { id: "10" | "20"; label: string }[] = [
 const MODE_ORDER: PracticeMode[] = ["word_meaning", "meaning_word", "meaning_type", "audio_meaning"];
 
 // 听音题依赖系统 TTS：Android WebView 没有 speechSynthesis，该题型直接不出现
-const TTS_OK = typeof window !== "undefined" && "speechSynthesis" in window;
+// 系统 TTS 可用：Web Speech（浏览器/ohos）或壳内原生桥（Android WebView 无 Web Speech）
+const TTS_OK =
+  typeof window !== "undefined" &&
+  ("speechSynthesis" in window ||
+    !!(window as unknown as { PodicAndroid?: { ttsSpeak?: unknown } }).PodicAndroid?.ttsSpeak);
 
 export default function PracticePanel({
   items,

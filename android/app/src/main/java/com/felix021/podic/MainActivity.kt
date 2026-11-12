@@ -18,6 +18,9 @@ class MainActivity : Activity() {
     private var canGoBackInApp = false
     /// SPA 渲染用的隐藏 WebView（同屏只留一个，新请求会销毁旧的）
     private var renderView: WebView? = null
+    /// 系统 TTS：Android WebView 不支持 Web Speech API，喇叭按钮经桥接走原生合成
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ttsReady = false
 
     /// WebView 的 destroy 必须先从视图树 detach，attached 状态销毁会留下
     /// 半死的 Chromium surface/输入通道（日志刷 "destroy() called while still attached"）
@@ -34,6 +37,37 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun setCanGoBack(v: Boolean) {
             canGoBackInApp = v
+        }
+
+        /// JS 退出确认框在壳里调这里（history.go 离不开 WebView）
+        @JavascriptInterface
+        fun exitApp() {
+            runOnUiThread { finish() }
+        }
+
+        /// 指定语言（BCP47，如 en-US）是否有可用系统语音
+        @JavascriptInterface
+        fun ttsAvailable(lang: String): Boolean {
+            val t = tts ?: return false
+            if (!ttsReady) return false
+            val loc = java.util.Locale.forLanguageTag(lang)
+            return t.isLanguageAvailable(loc) >= android.speech.tts.TextToSpeech.LANG_AVAILABLE
+        }
+
+        /// 朗读（QUEUE_FLUSH：新请求打断旧朗读）；结束/出错发 podic:tts-end 事件给 JS
+        @JavascriptInterface
+        fun ttsSpeak(text: String, lang: String) {
+            val t = tts ?: return
+            runOnUiThread {
+                if (!ttsReady) return@runOnUiThread
+                t.language = java.util.Locale.forLanguageTag(lang)
+                t.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "podic")
+            }
+        }
+
+        @JavascriptInterface
+        fun ttsStop() {
+            runOnUiThread { tts?.stop() }
         }
 
         /// SPA 页面渲染：加载 url，onPageFinished 后再等 hydration，取 outerHTML 回传
@@ -144,6 +178,15 @@ class MainActivity : Activity() {
         }
 
         Thread {
+            // TTS 初始化是异步回调，App 启动即建好，点喇叭时 ttsReady 多半已为真
+            tts = android.speech.tts.TextToSpeech(this) { status ->
+                ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS
+            }
+            tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) = notifyTtsEnd()
+                override fun onError(utteranceId: String?) = notifyTtsEnd()
+            })
             val dataDir = File(filesDir, "data").apply { mkdirs() }
             try {
                 AssetsInstaller.install(this, dataDir)
@@ -160,6 +203,20 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    /// 朗读结束通知 JS（webView 可能未初始化/已销毁，判空防崩）
+    private fun notifyTtsEnd() {
+        if (this::webView.isInitialized) {
+            runOnUiThread {
+                webView.evaluateJavascript("window.dispatchEvent(new Event('podic:tts-end'))", null)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        tts?.shutdown()
+        super.onDestroy()
     }
 
     /// 后台暂停 WebView 的 JS/渲染：省电是其一，更重要的是让 Chromium 线程安静下来——

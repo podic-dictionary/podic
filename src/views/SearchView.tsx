@@ -80,7 +80,19 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
       if (q) onSearch(q, l);
     };
     window.addEventListener("podic:search", onExternal);
-    return () => window.removeEventListener("podic:search", onExternal);
+    // 返回键从词条详情退回：清查询回到空查词页（App 的词条条目被消费时派发）
+    const onClose = () => {
+      ++reqSeq.current; // 作废在途查询，旧结果不得在清空后回填
+      setLoading(false);
+      setResults(null);
+      setError("");
+      setQuery("");
+    };
+    window.addEventListener("podic:close-word", onClose);
+    return () => {
+      window.removeEventListener("podic:search", onExternal);
+      window.removeEventListener("podic:close-word", onClose);
+    };
   }, [onSearch]);
 
   // 精确命中 = 包内 exact 词条或 AI 补录的 user 词条；form（屈折表指向词根）不算——
