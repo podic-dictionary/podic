@@ -213,6 +213,8 @@ pub fn review_favorite(
     session_id: &str,
     favorite_id: i64,
     correct: bool,
+    // 答对时是否升级（用过提示的答对判对但不升级；答错时无意义）
+    promote: bool,
     retry: bool,
 ) -> Result<ReviewOutcome> {
     let before: i64 = conn.query_row(
@@ -248,7 +250,12 @@ pub fn review_favorite(
             duplicate: true,
         });
     }
-    let after = (before + if correct { 1 } else { -1 }).clamp(1, 4);
+    let delta = if correct {
+        if promote { 1 } else { 0 } // 提示后答对：判对但不升级
+    } else {
+        -1
+    };
+    let after = (before + delta).clamp(1, 4);
     tx.execute(
         "UPDATE favorite SET mastery = ?1 WHERE id = ?2",
         rusqlite::params![after, favorite_id],
@@ -721,7 +728,7 @@ mod tests {
         let conn = db();
         let (id1, created1, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
         assert!(created1);
-        review_favorite(&conn, "s1", id1, true, false).unwrap(); // 升到 2
+        review_favorite(&conn, "s1", id1, true, true, false).unwrap(); // 升到 2
         let (id2, created2, mastery) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
         assert!(!created2);
         assert_eq!(id2, id1); // INSERT OR IGNORE 后 last_insert_rowid 不可靠，必须回查
@@ -734,30 +741,30 @@ mod tests {
         let (id, _, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
 
         // 首答正确：1 -> 2
-        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        let o = review_favorite(&conn, "s1", id, true, true, false).unwrap();
         assert!(o.applied && !o.duplicate && o.correct);
         assert_eq!((o.mastery_before, o.mastery_after), (1, 2));
 
         // 同会话重复提交（响应丢失重试）：返回首次结果，不再升级
-        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        let o = review_favorite(&conn, "s1", id, true, true, false).unwrap();
         assert!(o.duplicate && !o.applied);
         assert_eq!((o.mastery_before, o.mastery_after), (1, 2));
 
         // 同会话换答案重放也拿不到不同结果（不允许刷级）
-        let o = review_favorite(&conn, "s1", id, false, false).unwrap();
+        let o = review_favorite(&conn, "s1", id, false, true, false).unwrap();
         assert!(o.duplicate);
         assert_eq!(o.mastery_after, 2);
 
         // 新会话答错：2 -> 1；错误重试幂等
-        let o = review_favorite(&conn, "s2", id, false, false).unwrap();
+        let o = review_favorite(&conn, "s2", id, false, true, false).unwrap();
         assert!(o.applied);
         assert_eq!((o.mastery_before, o.mastery_after), (2, 1));
-        let o = review_favorite(&conn, "s2", id, false, false).unwrap();
+        let o = review_favorite(&conn, "s2", id, false, true, false).unwrap();
         assert!(o.duplicate && o.mastery_after == 1);
 
         // 边界：等级 4 答对不上溢（每个会话答一次，共 9 个独立会话）
         for i in 0..9 {
-            review_favorite(&conn, &format!("up{}", i), id, true, false).unwrap();
+            review_favorite(&conn, &format!("up{}", i), id, true, true, false).unwrap();
         }
         let fav = favorite_get(&conn, id).unwrap().unwrap();
         assert_eq!(fav.mastery, 4);
@@ -767,11 +774,27 @@ mod tests {
     fn 重练只判分不动等级() {
         let conn = db();
         let (id, _, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
-        let o = review_favorite(&conn, "s1", id, true, true).unwrap();
+        let o = review_favorite(&conn, "s1", id, true, true, true).unwrap();
         assert!(o.correct && !o.applied && !o.duplicate);
         assert_eq!(o.mastery_after, 1); // 等级不动
         // 重练不落首答记录：随后真正首答照常生效
-        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        let o = review_favorite(&conn, "s1", id, true, true, false).unwrap();
         assert!(o.applied && o.mastery_after == 2);
+    }
+
+    #[test]
+    fn 提示后答对判对但不升级() {
+        let conn = db();
+        let (id, _, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
+        // 用提示答对：correct=true，等级不动
+        let o = review_favorite(&conn, "s1", id, true, false, false).unwrap();
+        assert!(o.correct && o.applied);
+        assert_eq!((o.mastery_before, o.mastery_after), (1, 1));
+        // 不用提示答对：正常升级
+        let o = review_favorite(&conn, "s2", id, true, true, false).unwrap();
+        assert_eq!((o.mastery_before, o.mastery_after), (1, 2));
+        // 提示后答错：照常降级
+        let o = review_favorite(&conn, "s3", id, false, false, false).unwrap();
+        assert_eq!((o.mastery_before, o.mastery_after), (2, 1));
     }
 }

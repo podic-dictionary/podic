@@ -610,6 +610,9 @@ pub struct ReviewAnswer {
     selected_key: Option<String>,
     #[serde(default)]
     text: Option<String>,
+    /// 用过提示（音标/首字母）：答对判对但熟练度不升级——看过提示不算回忆成功
+    #[serde(default)]
+    hinted: bool,
 }
 
 #[derive(Deserialize)]
@@ -659,7 +662,7 @@ pub async fn review_favorite(
         "surrender" => false,
         _ => return Err(bad_req("answer.kind 非法（choice/typed/surrender）")),
     };
-    let outcome = podic_core::store::review_favorite(&core.conn, session, id, correct, retry)?;
+    let outcome = podic_core::store::review_favorite(&core.conn, session, id, correct, !input.answer.hinted, retry)?;
     Ok(Json(json!({
         "correct": outcome.correct,
         "expected_headword": fav.headword,

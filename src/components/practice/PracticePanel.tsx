@@ -74,6 +74,8 @@ export default function PracticePanel({
   const [current, setCurrent] = useState<PracticeQuestion | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  // 拼写题提示（仅首轮）：用过即 hinted=true，答对判对但熟练度不升级（服务端裁决）
+  const [hints, setHints] = useState<{ ipa: boolean; letter: boolean }>({ ipa: false, letter: false });
   const [feedback, setFeedback] = useState<Outcome | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -133,6 +135,7 @@ export default function PracticePanel({
       setFeedback(null);
       setSelected(null);
       setTyped("");
+      setHints({ ipa: false, letter: false });
       setSubmitError("");
       setPhase("run");
     } catch (e) {
@@ -149,6 +152,7 @@ export default function PracticePanel({
     setFeedback(null);
     setSelected(null);
     setTyped("");
+    setHints({ ipa: false, letter: false });
     setSubmitError("");
     if (queue.length > 0) {
       setCurrent(queue[0]);
@@ -171,7 +175,7 @@ export default function PracticePanel({
   };
 
   /** 提交答案。重练轮判定 = 首轮已答满；提交失败留在本题可重试 */
-  const submit = async (answer: { kind: "choice"; selected_key: string } | { kind: "typed"; text: string } | { kind: "surrender" }) => {
+  const submit = async (answer: { kind: "choice"; selected_key: string } | { kind: "typed"; text: string; hinted?: boolean } | { kind: "surrender" }) => {
     if (!current || submitting || feedback) return;
     setSubmitting(true);
     setSubmitError("");
@@ -313,6 +317,36 @@ export default function PracticePanel({
           <Progress answered={answeredShown} total={totalShown} />
           {retryRound && <p className="mt-3 text-center text-xs text-amber-600 dark:text-amber-400">错词重练：只判分，熟练度不变</p>}
           <QuestionView q={current} revealed={feedback !== null} selected={selected} onSelect={setSelected} />
+          {/* 拼写提示（仅首轮）：音标 / 首字母，用过则答对判对但不升级 */}
+          {!feedback && current.mode === "meaning_type" && !retryRound && (current.ipa || current.headword.length > 0) && (
+            <div className="mt-3 flex items-center justify-center gap-2">
+              {current.ipa &&
+                (hints.ipa ? (
+                  <span className="rounded-lg bg-emerald-50 px-2.5 py-1 text-sm text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                    /{current.ipa}/
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setHints((h) => ({ ...h, ipa: true }))}
+                    className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                  >
+                    提示：音标
+                  </button>
+                ))}
+              {hints.letter ? (
+                <span className="font-dict rounded-lg bg-emerald-50 px-2.5 py-1 text-sm tracking-widest text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                  {maskWord(current.headword)}
+                </span>
+              ) : (
+                <button
+                  onClick={() => setHints((h) => ({ ...h, letter: true }))}
+                  className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                >
+                  提示：首字母
+                </button>
+              )}
+            </div>
+          )}
           {/* 拼写输入框放题面下方居中（验收反馈：塞在底栏里被 row-reverse 顶到右边贴边） */}
           {!feedback && current.mode === "meaning_type" && (
             <div className="mt-6 flex justify-center">
@@ -320,12 +354,12 @@ export default function PracticePanel({
                 value={typed}
                 disabled={submitting}
                 overLimit={new TextEncoder().encode(typed.trim()).length > 128}
-                onSubmit={() => submit({ kind: "typed", text: typed.trim() })}
+                onSubmit={() => submit({ kind: "typed", text: typed.trim(), hinted: hints.ipa || hints.letter })}
                 onChange={setTyped}
               />
             </div>
           )}
-          {feedback && <FeedbackNote o={feedback} q={current} />}
+          {feedback && <FeedbackNote o={feedback} q={current} hinted={hints.ipa || hints.letter} />}
           {submitError && (
             <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
               {submitError}
@@ -344,7 +378,7 @@ export default function PracticePanel({
           ) : current.mode === "meaning_type" ? (
             <>
               <button
-                onClick={() => submit({ kind: "typed", text: typed.trim() })}
+                onClick={() => submit({ kind: "typed", text: typed.trim(), hinted: hints.ipa || hints.letter })}
                 disabled={submitting || !typed.trim()}
                 className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
               >
@@ -487,6 +521,14 @@ function Progress({ answered, total }: { answered: number; total: number }) {
   );
 }
 
+/** 首字母提示的遮罩词形：保留首字符与空格/连字符，其余以 · 占位 */
+function maskWord(w: string) {
+  return w
+    .split("")
+    .map((c, i) => (i === 0 ? c : /[ -'’]/.test(c) ? c : "·"))
+    .join("");
+}
+
 /**
  * 题面 + 选项。
  * 词→义 / 听音：题面单词（听音只给发音按钮，答完或点「看词」才显示）；
@@ -599,7 +641,7 @@ function TypedInput({ value, disabled, overLimit, onSubmit, onChange }: {
 }
 
 /** 答题反馈：正误 + 正确答案（题面没展示词时揭晓）+ 熟练度变化 */
-function FeedbackNote({ o, q }: { o: Outcome; q: PracticeQuestion }) {
+function FeedbackNote({ o, q, hinted }: { o: Outcome; q: PracticeQuestion; hinted?: boolean }) {
   const lc =
     o.mastery_before === o.mastery_after
       ? null
@@ -621,6 +663,9 @@ function FeedbackNote({ o, q }: { o: Outcome; q: PracticeQuestion }) {
         </p>
       )}
       {!o.correct && <p className="mt-1">意思：{q.gloss}</p>}
+      {hinted && o.correct && (
+        <p className="mt-1 text-xs opacity-80">用了提示：判对，但熟练度不升级</p>
+      )}
       {lc ? (
         <p className="mt-1 text-xs opacity-80">熟练度 {lc}</p>
       ) : (

@@ -244,7 +244,10 @@ export const removeFavorite = (id: number) =>
 export const reviewFavorite = (id: number, o: {
   session_id: string;
   phase?: "first" | "retry";
-  answer: { kind: "choice"; selected_key: string } | { kind: "typed"; text: string } | { kind: "surrender" };
+  answer:
+    | { kind: "choice"; selected_key: string }
+    | { kind: "typed"; text: string; /** 用过提示（音标/首字母）：答对判对但不升级 */ hinted?: boolean }
+    | { kind: "surrender" };
 }) =>
   api<{
     correct: boolean;
