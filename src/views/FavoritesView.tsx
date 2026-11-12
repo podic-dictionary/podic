@@ -91,7 +91,7 @@ export default function FavoritesView({
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     langFilter === l
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   }`}
                 >
                   {l === "all" ? "全部" : (langName(l))}
@@ -106,7 +106,7 @@ export default function FavoritesView({
               className={`rounded-full px-3 py-1 text-xs transition-colors ${
                 masteryFilter === 0
                   ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                  : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                  : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
               }`}
             >
               全部等级
@@ -118,7 +118,7 @@ export default function FavoritesView({
                 className={`rounded-full px-3 py-1 text-xs transition-colors ${
                   masteryFilter === m
                     ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                    : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                    : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                 }`}
               >
                 {MASTERY_LABELS[m]} {masteryCounts[i]}

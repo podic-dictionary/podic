@@ -224,7 +224,7 @@ export default function PracticePanel({
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     lang === l
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   }`}
                 >
                   {langName(l)} · {items.filter((i) => i.lang === l).length} 词
@@ -249,7 +249,7 @@ export default function PracticePanel({
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     modes.includes(m)
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   }`}
                 >
                   {MODE_LABELS[m]}
@@ -392,7 +392,7 @@ export default function PracticePanel({
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">
-                  <span className={r.firstCorrect ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
+                  <span className={r.firstCorrect ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}>
                     {r.firstCorrect ? "✓" : "✗"}
                   </span>{" "}
                   {r.q.headword}
@@ -555,6 +555,7 @@ function TypedInput({ value, disabled, onSubmit, onChange }: {
       autoCapitalize="off"
       autoCorrect="off"
       spellCheck={false}
+      maxLength={64}
       placeholder="输入单词…"
       className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base outline-none transition-colors focus:border-emerald-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-emerald-600"
     />

@@ -738,10 +738,9 @@ mod tests {
         let o = review_favorite(&conn, "s2", id, false, false).unwrap();
         assert!(o.duplicate && o.mastery_after == 1);
 
-        // 边界：等级 4 答对不上溢
-        for _ in 0..9 {
-            let sid = format!("up{}", crate::norm::answer_key(&std::time::Instant::now().elapsed().as_nanos().to_string()));
-            review_favorite(&conn, &sid, id, true, false).unwrap();
+        // 边界：等级 4 答对不上溢（每个会话答一次，共 9 个独立会话）
+        for i in 0..9 {
+            review_favorite(&conn, &format!("up{}", i), id, true, false).unwrap();
         }
         let fav = favorite_get(&conn, id).unwrap().unwrap();
         assert_eq!(fav.mastery, 4);

@@ -37,7 +37,10 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   const [historyLoading, setHistoryLoading] = useState(false);
   const historyReqRef = useRef(0);
   const [exitAsk, setExitAsk] = useState(false);
-  const lockRef = useRef(false); // 防双击把同一答案记到下一题
+  // 输入保护期：答完一题后 600ms 内的后续 click（双击/连点）直接忽略——
+  // 布尔锁靠 idx effect 解锁挡不住跨事件的快速连点（评审 R14），时间窗与
+  // 题目切换解耦，末题提交失败也自然恢复可答（评审 N01）
+  const lockUntilRef = useRef(0);
   const langRef = useRef("");
 
   useEffect(() => {
@@ -68,14 +71,12 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   };
 
   const answer = async (known: boolean) => {
-    if (!plan || lockRef.current || submitting) return;
-    lockRef.current = true;
+    if (!plan || Date.now() < lockUntilRef.current || submitting) return;
+    lockUntilRef.current = Date.now() + 600;
     const next = [...answers, { item_id: plan.items[idx].id, known }];
     setAnswers(next);
     if (idx + 1 < plan.items.length) {
       setIdx(idx + 1);
-      // 锁不在这里解：等 idx 变化触发渲染后由下方 effect 解锁，
-      // 双击的第二个 click 会撞在还没解锁的新题上
       return;
     }
     // 最后一题：提交全部答案
@@ -85,8 +86,8 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
       setResult(r.result);
       setPhase("done");
     } catch (e) {
-      // 提交失败：回退最后一步让用户重按（答案仍在）
-      setIdx(idx);
+      // 提交失败：清保护期让用户立刻重按最后一题（答案仍在，服务端幂等）
+      lockUntilRef.current = 0;
       setAnswers(answers);
       setError(e instanceof Error ? `提交未确认：${e.message}` : "提交未确认，请重答最后一题");
     } finally {
@@ -94,13 +95,8 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
     }
   };
 
-  // 切题渲染完成后解锁输入（含 undo 回退的场景）
-  useEffect(() => {
-    lockRef.current = false;
-  }, [idx]);
-
   const undo = () => {
-    if (lockRef.current || submitting || answers.length === 0) return;
+    if (submitting || answers.length === 0) return;
     setAnswers(answers.slice(0, -1));
     setIdx(idx - 1);
   };
@@ -156,7 +152,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     lang === p.lang
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   }`}
                 >
                   {langName(p.lang)}
@@ -184,7 +180,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
           >
             {loading ? "正在抽样…" : lang ? `开始自测（${langName(lang)}）` : "先选语言"}
           </button>
-          {lang && history.length > 0 && (
+          {lang && (historyLoading || history.length > 0) && (
             <div>
               <p className="eyebrow text-zinc-400">历史结果（{langName(lang)}）</p>
               {historyLoading && <p className="mt-2 text-xs text-zinc-400">加载历史…</p>}
@@ -299,7 +295,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
         <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
           <p className="eyebrow text-zinc-400">按词频层的认识比例</p>
           <ul className="mt-3 space-y-2.5">
-            {result.bands.map((b) => {
+            {result.bands.filter((b) => b.sample_size > 0).map((b) => {
               const r = b.sample_size > 0 ? Math.round((b.known / b.sample_size) * 100) : 0;
               return (
                 <li key={b.id}>

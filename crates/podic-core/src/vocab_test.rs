@@ -219,7 +219,9 @@ pub fn allocate_samples(pops: &[i64], total: i64) -> Vec<i64> {
         alloc[i] += 1;
         rem -= 1;
     }
-    // 正向顺延：人口不足的层全取，差额转给下一层
+    // 正向顺延：人口不足的层全取，差额转给相邻下一层。设计取舍：相邻层与
+    // 普查层的词频最接近、答题率最相似，补采它对总估计的方差贡献最小；
+    // 不选「最大层优先」——最大层往往答题率差异最大，加样收益反而低
     let mut surplus = 0i64;
     for i in 0..h {
         let want = alloc[i] + surplus;

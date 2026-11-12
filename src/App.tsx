@@ -304,13 +304,15 @@ export default function App() {
         favSub?: FavoritesSub;
         sentinel?: boolean;
       } | null;
-      // 浏览器返回会卸载进行中的练习/自测时：先取消这次返回（推回当前条目），
-      // 确认放弃后再应用目标状态——不能不吭一声就把会话清了（评审 R07）
+      // 浏览器返回会切换/卸载进行中的练习/自测时（含回退到另一种子页）：
+      // 先取消这次返回（推回当前条目），确认放弃后再应用目标状态——不能不吭
+      // 一声就把会话清了（评审 R07）
       const targetSub = s?.favSub ?? null;
       const unloadsSession =
-        practiceActive && favoritesSub !== null && targetSub === null;
+        practiceActive && favoritesSub !== null && targetSub !== favoritesSub;
       const cancelPop = () => {
-        restoring.current = true;
+        // 只推回条目、不动 restoring：这里没有 React 状态变化，history effect
+        // 不会跑；误置 restoring 会吃掉下一次合法导航的 history 同步（评审 N02）
         history.pushState(
           { podic: 1, view, sub: settingsSub, article: articleId, favSub: favoritesSub },
           "",
@@ -320,12 +322,22 @@ export default function App() {
       if (unloadsSession) {
         cancelPop();
         const target = s;
+        const isVocab = favoritesSub === "vocab-test";
         setFavExitAsk({
-          title: "结束当前练习？",
-          message: "已答题目的熟练度变化已保存，剩余题目将丢弃。",
+          title: isVocab ? "放弃本次自测？" : "结束本次练习？",
+          message: isVocab
+            ? "未提交的自测不会生成估计结果。"
+            : "已答题目的熟练度变化已保存，剩余题目将丢弃。",
           onConfirm: () => {
-            if (!target) return;
-            restoring.current = true;
+            // 这是用户导航：置位后保存 effect 才会记录落点，迟到的服务端
+            // 记忆也不会抢页面（评审 N03）。不置 restoring——让 history
+            // effect 自然把目标状态推入栈，条目与画面保持一致（评审 N02）
+            userNavRef.current = true;
+            if (!target) {
+              // 落到应用外的匿名条目：只关会话，留在当前页
+              setFavoritesSub(null);
+              return;
+            }
             setView(target.view ?? "search");
             setSettingsSub(target.sub ?? null);
             setArticleId(target.article ?? null);
