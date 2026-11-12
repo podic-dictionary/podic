@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dailySentence, getSettings, saveSettings, type DailySentenceResult } from "../api";
+import { aiRun, dailySentence, getSettings, saveSettings, type DailySentenceResult } from "../api";
 import { useSettings } from "../SettingsContext";
 import Seg from "./SegmentedControl";
 import SpeakButton from "./SpeakButton";
+import { fmtIpa } from "../lib/ipa";
 import type { Lang } from "../types";
 
 /** 词频层显示名（与单词量测试结果页一致）；超出四层的层号兜底「层N」 */
@@ -32,6 +33,67 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   const reqSeq = useRef(0);
   // 保存串行链：快速换层时按发起顺序落盘，旧请求后到不会覆盖新选择
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  // AI 补句：词先行后句子区独立状态；autoComplete=false 时由用户点按钮触发
+  const { autoComplete } = useSettings();
+  const [aiState, setAiState] = useState<"idle" | "generating" | "error">("idle");
+  const [aiError, setAiError] = useState("");
+  const aiReqSeq = useRef(0);
+  const aiHandle = useRef<{ cancel: () => void } | null>(null);
+
+  useEffect(() => () => aiHandle.current?.cancel(), []);
+
+  /** 走 /api/ai/run 流式生成当前词的例句；服务端 done 前已统一落缓存，
+   * 完成后重拉一次快路径即可拿到干净句子（缓存键两侧一致，必命中） */
+  const generateSentence = useCallback(
+    (req: NonNullable<DailySentenceResult["ai_request"]>) => {
+      const seq = ++aiReqSeq.current;
+      setAiState("generating");
+      setAiError("");
+      const handle = aiRun(
+        { task: req.task as never, text: req.text, context: req.context, provider_id: aiChoice.providerId, model: req.model },
+        () => {}, // JSON 整体解析，不逐字上屏
+      );
+      aiHandle.current = handle;
+      handle.done.then(async (cacheKey) => {
+        if (aiReqSeq.current !== seq) return;
+        if (!cacheKey) {
+          setAiState("error");
+          setAiError("生成失败，请重试或换一句");
+          return;
+        }
+        try {
+          const r = await dailySentence({
+            lang,
+            level: levelsByLang[lang]
+              ? { mode: levelsByLang[lang].mode as "auto" | "manual", band: levelsByLang[lang].band }
+              : undefined,
+            provider_id: aiChoice.providerId || undefined,
+            model: aiChoice.model || undefined,
+          });
+          if (aiReqSeq.current !== seq) return;
+          if (r.sentence) {
+            setData((prev) => (prev && prev.word.headword === r.word.headword ? { ...prev, sentence: r.sentence } : prev));
+            setAiState("idle");
+          } else {
+            setAiState("error");
+            setAiError("生成结果无效，请重试或换一句");
+          }
+        } catch {
+          if (aiReqSeq.current === seq) {
+            setAiState("error");
+            setAiError("生成失败，请重试或换一句");
+          }
+        }
+      });
+    },
+    [lang, levelsByLang, aiChoice.providerId, aiChoice.model],
+  );
+
+  // 词先行：sentence=null 且带 ai_request 时，按「自动补全」设置决定是否立刻生成
+  useEffect(() => {
+    if (!data?.ai_request || data.sentence) return;
+    if (autoComplete) generateSentence(data.ai_request);
+  }, [data, autoComplete, generateSentence]);
 
   // 读按语言存的偏好（GET /api/settings 的 daily_sentence 字段）
   useEffect(() => {
@@ -46,6 +108,12 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   const fetchOne = useCallback(
     async (opts?: { exclude?: string; level?: { mode: "auto" | "manual"; band?: number } }) => {
       const seq = ++reqSeq.current;
+      // 换词作废进行中的补句请求
+      aiReqSeq.current++;
+      aiHandle.current?.cancel();
+      aiHandle.current = null;
+      setAiState("idle");
+      setAiError("");
       setLoading(true);
       setError("");
       setShowZh(false);
@@ -93,6 +161,7 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   const bands = data?.bands.filter((b) => b.count > 0) ?? [];
   const segValue = levelsByLang[lang]?.mode === "manual" ? String(levelsByLang[lang]?.band ?? 0) : "auto";
   const word = data?.word;
+  const aiReq = data?.ai_request;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="每日一句" onClick={onClose}>
@@ -149,7 +218,7 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
               <div className="text-center">
                 <p className="font-dict text-3xl leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">{word.headword}</p>
                 <div className="mt-2 flex items-center justify-center gap-2">
-                  {word.ipa && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{word.ipa}/</span>}
+                  {fmtIpa(word.ipa) && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{fmtIpa(word.ipa)}/</span>}
                   <SpeakButton text={word.headword} lang={lang} />
                 </div>
               </div>
@@ -174,6 +243,31 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
                     {data.sentence.source === "pack" ? "词典例句" : `AI 生成${data.sentence.cached ? "（缓存）" : ""}`}
                   </p>
                 </div>
+              ) : aiReq && !data.message ? (
+                /* 词先行：句子待生成。autoComplete=手动时不自动发起，按钮触发（验收反馈） */
+                aiState === "generating" ? (
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-4 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    AI 正在写例句…
+                  </div>
+                ) : aiState === "error" ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
+                    <p>{aiError}</p>
+                    <button
+                      onClick={() => generateSentence(aiReq)}
+                      className="mt-1.5 text-xs text-emerald-600 hover:underline dark:text-emerald-400"
+                    >
+                      重试本词
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => generateSentence(aiReq)}
+                    className="w-full rounded-xl border border-dashed border-zinc-300 px-4 py-3 text-sm text-zinc-500 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                  >
+                    用 AI 生成一句例句
+                  </button>
+                )
               ) : (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
                   {data?.message ?? "这个词暂无例句。"}

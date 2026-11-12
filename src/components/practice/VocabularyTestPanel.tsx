@@ -8,6 +8,7 @@ import Seg from "../SegmentedControl";
 import ConfirmDialog from "../ConfirmDialog";
 import SpeakButton from "../SpeakButton";
 import { setPracticeActive } from "../../lib/practiceStore";
+import { fmtIpa } from "../../lib/ipa";
 import type { Lang } from "../../types";
 
 /** 单词量测试：抽样问「认识/不认识」，服务端分层估计认识数（见 vocab_test 模块）。
@@ -225,7 +226,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
           <div className="flex flex-1 flex-col items-center justify-center px-2 py-6 text-center">
             <p className="font-dict text-4xl leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">{item.headword}</p>
             <div className="mt-3 flex items-center justify-center gap-2">
-              {item.ipa && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{item.ipa}/</span>}
+              {fmtIpa(item.ipa) && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{fmtIpa(item.ipa)}/</span>}
               <SpeakButton text={item.headword} lang={plan.lang as Lang} />
             </div>
             <p className="mt-2 text-sm text-zinc-400">能说出至少一个常见意思才算「认识」</p>

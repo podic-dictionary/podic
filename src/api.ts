@@ -318,9 +318,11 @@ export interface DailySentenceResult {
   level: { mode: "auto" | "manual"; band: number; reason: string; note?: string; known?: number; sample_size?: number };
   /** 可用层及词数（难度选择控件的数据源） */
   bands: { id: number; count: number }[];
-  /** null = 没取到例句（无词典例句且 AI 不可用），原因见 message */
+  /** null = 词典无例句且缓存未命中：拿 ai_request 走 /api/ai/run 生成（词先行，句子后补） */
   sentence: { text: string; translation: string[]; source: "pack" | "ai"; cached: boolean; id: number | null } | null;
   message?: string;
+  /** 有值 = 需要 AI 生成：原样传给 aiRun（model 已由服务端解析，缓存键与快路径一致） */
+  ai_request?: { task: string; text: string; context: unknown; model: string };
 }
 
 /** 随机抽词 + 例句（词典例句优先，AI 单句兜底并缓存）；level 省略 = 服务端偏好 */

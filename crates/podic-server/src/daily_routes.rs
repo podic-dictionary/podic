@@ -8,16 +8,15 @@ use crate::state::{AppState, SharedCore};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Json;
-use podic_core::ai::prompt;
-use podic_core::ai::{AnyClient, ChatRequest, Msg};
 use podic_core::vocab_test::{assign_bands, build_domain, recommend_band, sample_band, Unit};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::atomic::AtomicBool;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
-/// 每日一句 AI prompt 版本：缓存键含此值。改动 prompt.rs 的 daily 生成规则
-/// 或输出结构时必须递增，否则改版后仍会命中旧缓存拿到旧句子
+/// 每日一句 AI prompt 版本：编进 ai 请求的 context，参与缓存键哈希。
+/// 改动 prompt.rs 的 daily 生成规则或输出结构时必须递增，否则改版后
+/// 仍会命中旧缓存拿到旧句子
 const DAILY_PROMPT_VERSION: &str = "v1";
 
 #[derive(Clone, Deserialize)]
@@ -106,7 +105,9 @@ fn band_stats_of_last_test(
     Some((stats, row.id))
 }
 
-fn parse_daily_json(raw: &str) -> Option<(String, Vec<String>)> {
+/// 缓存内容解析（ai_run 存的是 LLM 原始输出，可能带围栏）：结构合法且
+/// 字段干净才当有效句子；坏缓存当未命中（下次前端重新生成覆盖）
+fn parse_cached_daily(raw: &str) -> Option<(String, Vec<String>)> {
     let mut s = raw.trim();
     if let Some(t) = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")) {
         s = t;
@@ -130,6 +131,22 @@ fn parse_daily_json(raw: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
     Some((text, translation))
+}
+
+/// 与 /api/ai/run 完全一致的缓存键算法：task\0model\0text\0context。
+/// 每日一句的「词先行」改造后，AI 生成交由前端走 /api/ai/run（流式+取消），
+/// 生成结果由该接口统一写入 ai_cache；本接口用同款键读缓存，保证
+/// 「前端刚生成过的句子，下次抽到同词直接命中」
+fn ai_run_cache_key(task: &str, model: &str, text: &str, context: &Value) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(task.as_bytes());
+    hasher.update([0]);
+    hasher.update(model.as_bytes());
+    hasher.update([0]);
+    hasher.update(text.as_bytes());
+    hasher.update([0]);
+    hasher.update(context.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 /// POST /api/daily-sentence
@@ -272,19 +289,31 @@ pub async fn daily_sentence(
             .and_then(|v| v.into_iter().next())
             .and_then(|e| serde_json::to_value(e).ok());
 
-    // AI 缓存（键含 prompt 版本：升级自动失效）与 Provider 配置
-    let ai_key = format!(
-        "daily:{DAILY_PROMPT_VERSION}:{}:{}:{}:{}",
-        lang, pack.pack_id, pack.version, norm
-    );
-    let cached_ai = chosen
-        .is_none()
-        .then(|| podic_core::store::ai_cache_get(&core.conn, &ai_key).and_then(|raw| parse_daily_json(&raw)))
-        .flatten();
+    // AI 请求参数与缓存键：与 /api/ai/run 同款哈希（键含 prompt 版本）。
+    // 无词典例句时词先行返回，AI 生成交给前端走 /api/ai/run（流式+可取消），
+    // 生成结果由 ai_run 统一落 ai_cache——下次抽到同词本接口直接命中
     let provider = input
         .provider_id
         .clone()
         .and_then(|pid| core.settings.providers.iter().find(|p| p.id == pid).cloned());
+    let resolved_model = provider.as_ref().map(|p| {
+        input
+            .model
+            .clone()
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| p.active_model.clone())
+    });
+    let ai_context = json!({"prompt_version": DAILY_PROMPT_VERSION, "entry": entry_ctx});
+    let ai_cache_key = resolved_model
+        .as_deref()
+        .map(|m| ai_run_cache_key("daily", m, &unit.headword, &ai_context))
+        .unwrap_or_default();
+    let cached_ai = chosen.is_none().then(|| {
+        resolved_model
+            .as_deref()
+            .and_then(|_| podic_core::store::ai_cache_get(&core.conn, &ai_cache_key))
+            .and_then(|raw| parse_cached_daily(&raw))
+    }).flatten();
 
     PickOutcome {
         note: dup_note,
@@ -297,11 +326,11 @@ pub async fn daily_sentence(
         manual,
         band_counts,
         pack_sentence: chosen.map(|s| (s.text.clone(), s.translation.clone(), s.id)),
-        entry_ctx,
-        ai_key,
+        ai_context,
+        ai_cache_key,
         cached_ai,
         provider,
-        model: input.model.clone(),
+        resolved_model,
     }
 };
 
@@ -345,68 +374,31 @@ pub async fn daily_sentence(
         })));
     }
 
-    // ---- AI 生成（锁外；30s 超时；失败不缓存） ----
-    let Some(provider) = picked.provider else {
+    // ---- 无句子无缓存：词先行返回，生成交给前端 ----
+    // 词头此时已在屏幕上；前端拿 ai_request 走 /api/ai/run 流式生成（可取消），
+    // 生成结果由 ai_run 落 ai_cache（键与本接口一致），下次同词直接命中快路径。
+    // 「设置→词典未命中时自动补全=手动」时前端不自动发起，由用户点「生成例句」
+    let message = if picked.provider.is_none() {
+        "这个词暂无词典例句。配置 AI 后可以自动生成一句。"
+    } else {
+        "该 AI Provider 未配置模型，无法生成例句。"
+    };
+    if picked.resolved_model.as_deref().unwrap_or("").is_empty() {
         return Ok(Json(json!({
             "word": word,
             "level": level,
             "bands": bands_json,
             "sentence": null,
-            "message": "这个词暂无词典例句。配置 AI 后可以自动生成一句。",
-        })));
-    };
-    let model = picked
-        .model
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| provider.active_model.clone());
-    if model.is_empty() {
-        return Ok(Json(json!({
-            "word": word,
-            "level": level,
-            "bands": bands_json,
-            "sentence": null,
-            "message": "该 AI Provider 未配置模型，无法生成例句。",
+            "message": message,
         })));
     }
-    let p = prompt::build("daily", &picked.headword, picked.entry_ctx.as_ref());
-    let chat = ChatRequest {
-        model: model.clone(),
-        system: Some(p.system),
-        messages: vec![Msg { role: "user".into(), content: p.user }],
-        max_tokens: p.max_tokens,
-        temperature: p.temperature,
-    };
-    let client = AnyClient::new(&provider).map_err(|e| {
-        ApiError(StatusCode::BAD_GATEWAY, format!("AI 配置有误：{e}"))
-    })?;
-    let stop = Arc::new(AtomicBool::new(false));
-    let collected = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        let mut full = String::new();
-        let mut on_delta = |delta: &str| full.push_str(delta);
-        client.stream(&chat, stop, &mut on_delta).await.map(|_| full)
-    })
-    .await;
-    let full = match collected {
-        Ok(Ok(text)) if !text.trim().is_empty() => text,
-        Ok(Ok(_)) => return Err(ApiError(StatusCode::BAD_GATEWAY, "AI 返回了空内容，请换一句试试".into())),
-        Ok(Err(e)) => return Err(ApiError(StatusCode::BAD_GATEWAY, format!("AI 生成失败：{e}"))),
-        Err(_) => return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "AI 生成超时，请换一句或重试".into())),
-    };
-    let Some((text, translation)) = parse_daily_json(&full) else {
-        return Err(ApiError(StatusCode::BAD_GATEWAY, "AI 输出格式异常，请换一句试试".into()));
-    };
-    // 校验通过才进缓存，且缓存规范化后的 JSON（混合类型等不合规原文不入库，
-    // 读回来二次解析也只会得到干净结构）；坏输出/超时不污染
-    {
-        let core = lock(&state);
-        let canonical = json!({"text": text, "translation": translation}).to_string();
-        let _ = podic_core::store::ai_cache_put(&core.conn, &picked.ai_key, "daily", &model, &canonical);
-    }
+    let model = picked.resolved_model.unwrap_or_default();
     Ok(Json(json!({
         "word": word,
         "level": level,
         "bands": bands_json,
-        "sentence": {"text": text, "translation": translation, "source": "ai", "cached": false, "id": null},
+        "sentence": null,
+        "ai_request": {"task": "daily", "text": picked.headword, "context": picked.ai_context, "model": model},
     })))
 }
 
@@ -423,9 +415,9 @@ struct PickOutcome {
     manual: bool,
     band_counts: Vec<usize>,
     pack_sentence: Option<(String, Value, i64)>,
-    entry_ctx: Option<Value>,
-    ai_key: String,
+    ai_context: Value,
+    ai_cache_key: String,
     cached_ai: Option<(String, Vec<String>)>,
     provider: Option<podic_core::settings::ProviderConfig>,
-    model: Option<String>,
+    resolved_model: Option<String>,
 }

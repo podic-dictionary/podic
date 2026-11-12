@@ -404,7 +404,7 @@ export default function App() {
         }
         return;
       }
-      if (!s.sentinel && s.view === "search" && !s.sub) {
+      if (!s.sentinel && !s.daily && s.view === "search" && !s.sub) {
         // 到达 base = 查词根再返回：推回哨兵，弹退出确认
         history.pushState({ podic: 1, view: "search", sub: null, sentinel: true }, "");
         setExitAsk(true);
@@ -566,10 +566,11 @@ export default function App() {
           lang={lang}
           onClose={closeDaily}
           onOpenWord={(w, l) => {
-            // 查看单词先关弹层（复核 R7）：不退栈——switchView 压入新查词条目，
-            // 返回时经 daily 条目自然回到打开弹层前的页面
+            // 查看单词先关弹层（复核 R7）。在查词页时 switchView 同页不压栈，
+            // 弹层条目会残留栈顶——退栈消费掉，返回语义才连续
             setDailyOpen(false);
             dailyOpenRef.current = false;
+            if (view === "search") history.back();
             openWord(w, l);
           }}
         />
