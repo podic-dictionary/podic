@@ -37,6 +37,9 @@ const COUNT_OPTS: { id: "10" | "20"; label: string }[] = [
 
 const MODE_ORDER: PracticeMode[] = ["word_meaning", "meaning_word", "meaning_type", "audio_meaning"];
 
+// 听音题依赖系统 TTS：Android WebView 没有 speechSynthesis，该题型直接不出现
+const TTS_OK = typeof window !== "undefined" && "speechSynthesis" in window;
+
 export default function PracticePanel({
   items,
   defaultLang,
@@ -80,6 +83,11 @@ export default function PracticePanel({
 
   const langs = useMemo(() => [...new Set(items.map((i) => i.lang))], [items]);
   const langCount = useMemo(() => (lang ? items.filter((i) => i.lang === lang).length : 0), [items, lang]);
+
+  // 只有一种语言的生词时默认选中，省一步；多语言仍需用户明确选（选完才出开始按钮）
+  useEffect(() => {
+    if (!lang && langs.length === 1) setLang(langs[0]);
+  }, [lang, langs]);
 
   // 会话进行中标记：App 返回键据此弹「结束练习」确认
   useEffect(() => {
@@ -215,24 +223,6 @@ export default function PracticePanel({
         <PanelHeader title="生词练习" onClose={requestClose} />
         <div className="mx-auto w-full max-w-xl flex-1 space-y-5 p-4">
           <div>
-            <p className="eyebrow text-zinc-400">语言</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {langs.map((l) => (
-                <button
-                  key={l}
-                  onClick={() => setLang(l)}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
-                    lang === l
-                      ? "bg-emerald-600 text-white dark:bg-emerald-500"
-                      : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
-                  }`}
-                >
-                  {langName(l)} · {items.filter((i) => i.lang === l).length} 词
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
             <p className="eyebrow text-zinc-400">题量</p>
             <div className="mt-2">
               <Seg value={count} options={COUNT_OPTS} onChange={setCount} />
@@ -241,7 +231,7 @@ export default function PracticePanel({
           <div>
             <p className="eyebrow text-zinc-400">题型（可多选，低熟练度优先出题）</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {MODE_ORDER.map((m) => (
+              {MODE_ORDER.filter((m) => m !== "audio_meaning" || TTS_OK).map((m) => (
                 <button
                   key={m}
                   onClick={() => toggleMode(m)}
@@ -257,21 +247,52 @@ export default function PracticePanel({
               ))}
             </div>
             <p className="mt-1.5 text-xs text-zinc-400">
-              词→义：给单词选意思 · 义→词：给意思选单词 · 拼写：给意思写单词 · 听音：只听发音选意思
+              词→义：给单词选意思 · 义→词：给意思选单词 · 拼写：给意思写单词
+              {TTS_OK && " · 听音：只听发音选意思"}
             </p>
           </div>
           {prepMsg && <p className="text-sm text-red-500 dark:text-red-400">{prepMsg}</p>}
-          <button
-            onClick={start}
-            disabled={!lang || modes.length === 0 || preparing}
-            className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
-          >
-            {preparing
-              ? "准备题目…"
-              : lang
-                ? `开始练习（${Math.min(langCount, Number(count))} 词）`
-                : "先选语言"}
-          </button>
+          {/* 语言选择放最后、用整行大卡片（验收反馈：小圆片感知太弱）；选完才出开始按钮 */}
+          <div>
+            <p className="eyebrow text-zinc-400">选择要练习的语言</p>
+            <div className="mt-2 space-y-2">
+              {langs.map((l) => {
+                const active = lang === l;
+                const n = items.filter((i) => i.lang === l).length;
+                return (
+                  <button
+                    key={l}
+                    onClick={() => setLang(l)}
+                    aria-pressed={active}
+                    className={`flex w-full items-center justify-between rounded-2xl border-2 px-4 py-3.5 text-base transition-colors ${
+                      active
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:border-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-200"
+                        : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                    }`}
+                  >
+                    <span className="font-medium">{langName(l)}</span>
+                    <span className={`flex items-center gap-1.5 text-sm ${active ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`}>
+                      {n} 词
+                      {active && (
+                        <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                          <path d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {lang && (
+            <button
+              onClick={start}
+              disabled={modes.length === 0 || preparing}
+              className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+            >
+              {preparing ? "准备题目…" : `开始练习（${Math.min(langCount, Number(count))} 词）`}
+            </button>
+          )}
         </div>
       </div>
     );
@@ -292,6 +313,18 @@ export default function PracticePanel({
           <Progress answered={answeredShown} total={totalShown} />
           {retryRound && <p className="mt-3 text-center text-xs text-amber-600 dark:text-amber-400">错词重练：只判分，熟练度不变</p>}
           <QuestionView q={current} revealed={feedback !== null} selected={selected} onSelect={setSelected} />
+          {/* 拼写输入框放题面下方居中（验收反馈：塞在底栏里被 row-reverse 顶到右边贴边） */}
+          {!feedback && current.mode === "meaning_type" && (
+            <div className="mt-6 flex justify-center">
+              <TypedInput
+                value={typed}
+                disabled={submitting}
+                overLimit={new TextEncoder().encode(typed.trim()).length > 128}
+                onSubmit={() => submit({ kind: "typed", text: typed.trim() })}
+                onChange={setTyped}
+              />
+            </div>
+          )}
           {feedback && <FeedbackNote o={feedback} q={current} />}
           {submitError && (
             <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
@@ -310,13 +343,6 @@ export default function PracticePanel({
             </button>
           ) : current.mode === "meaning_type" ? (
             <>
-              <TypedInput
-                value={typed}
-                disabled={submitting}
-                overLimit={new TextEncoder().encode(typed.trim()).length > 128}
-                onSubmit={() => submit({ kind: "typed", text: typed.trim() })}
-                onChange={setTyped}
-              />
               <button
                 onClick={() => submit({ kind: "typed", text: typed.trim() })}
                 disabled={submitting || !typed.trim()}
@@ -541,7 +567,7 @@ function QuestionView({ q, revealed, selected, onSelect }: {
   );
 }
 
-/** 拼写题输入框：Enter 提交（IME 组合中不触发）；超 128 UTF-8 字节禁提交并提示 */
+/** 拼写题输入框：居中放题面下方（16rem 宽、文字居中偏大）；Enter 提交（IME 组合中不触发）；超 128 UTF-8 字节禁提交并提示 */
 function TypedInput({ value, disabled, overLimit, onSubmit, onChange }: {
   value: string;
   disabled: boolean;
@@ -567,7 +593,7 @@ function TypedInput({ value, disabled, overLimit, onSubmit, onChange }: {
       maxLength={128}
       aria-invalid={overLimit}
       placeholder={overLimit ? "超长（上限 128 字节）" : "输入单词…"}
-      className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base outline-none transition-colors focus:border-emerald-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-emerald-600"
+      className="w-full max-w-[16rem] rounded-xl border border-zinc-300 bg-white px-4 py-3 text-center text-xl outline-none transition-colors focus:border-emerald-400 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:focus:border-emerald-600"
     />
   );
 }
