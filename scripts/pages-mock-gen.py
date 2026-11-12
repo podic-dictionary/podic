@@ -33,13 +33,18 @@ LOOKUP = {
 }
 SETTINGS = load("get-settings.json")
 STATIC = {
-    "/api/articles": load("get-articles.json"),
     "/api/packs": load("get-packs.json"),
     "/api/favorites": load("get-favorites.json"),
     "/api/attributions": load("get-attributions.json"),
     "/api/user-dict": load("get-user-dict.json"),
     "/api/word-status": load("get-word-status.json"),
 }
+# 抓包的收藏没有 mastery（新功能字段）：按序注入 3/2/4，让筛选和练习有真实感的分布
+_favs = STATIC.get("/api/favorites")
+if _favs and _favs.get("items"):
+    for i, it in enumerate(_favs["items"]):
+        it.setdefault("mastery", (3, 2, 4)[i % 3])
+        it.setdefault("note", None)
 
 miss = {"items": [], "user": [], "matched_by": None}
 # 抓包 settings 可能含私有部署地址等真实配置，providers 一律替换成无害演示数据；
@@ -101,6 +106,26 @@ function streamText(text, chunk){
   parts.forEach(p => events.push({type:"delta", text:p}));
   events.push({type:"done", cache_key:"demo-cache"});
   return events;
+}
+// finish 的分带统计：item_id → band 查 demo 题库（后端真实现见 vocab_test.rs）
+const DEMO_POOLS = [
+  ["the","be","to","of","and","a","in","that","have","it","for","not","on","with","he"],
+  ["say","do","can","will","would","make","like","just","over","take","than","them","well","only","come","also","back","after","work","good"],
+  ["provide","require","suggest","maintain","consider","establish","involve","contain","increase","reduce","describe","prepare","achieve","convince","reflect"],
+  ["perseverance","quintessence","obfuscate","ineffable","ephemeral","ubiquitous","juxtapose","vernacular","paradigm","ellipsis"],
+];
+function POP_CALC(answers) {
+  const stats = [0, 1, 2, 3].map(i => ({id: i, population: [2000,3000,5000,10000][i], sample_size: 0, known: 0}));
+  const plan = window.__demoPlanItems || null;
+  answers.forEach(a => {
+    const it = plan && plan.find(x => x.id === a.item_id);
+    const n = Number(String(a.item_id || "").replace("d", ""));
+    const band = it ? it.band : (Number.isFinite(n) ? Math.min(3, Math.floor(n / 15)) : null);
+    if (band == null) return;
+    stats[band].sample_size++;
+    if (a.known) stats[band].known++;
+  });
+  return stats;
 }
 const origFetch = window.fetch;
 window.fetch = async function(url, opts){
@@ -182,6 +207,117 @@ window.fetch = async function(url, opts){
     return sseRes(streamText("（演示）", 3), 60);
   }
   if (path === "/api/ai/cancel") return jsonRes({"ok": true});
+
+  // ---- 生词本：收藏 / 判分 / 移除（练习面板依赖完整判分回包） ----
+  const favs = MOCK.STATIC["/api/favorites"];
+  const favById = (id) => favs && favs.items.find(f => String(f.id) === String(id));
+  const m = path.match(/^\/api\/favorites\/(\d+)\/review$/);
+  if (m && method === "POST") {
+    const fav = favById(m[1]);
+    const word = fav ? fav.headword : "hello";
+    let body = {};
+    try { body = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const a = body.answer || {};
+    let correct = false;
+    if (a.kind === "choice") correct = a.selected_key === "favorite:" + m[1];
+    else if (a.kind === "typed") correct = (a.text || "").trim().toLowerCase() === word.toLowerCase();
+    const before = fav ? (fav.mastery || 1) : 1;
+    const after = correct ? Math.min(4, before + 1) : Math.max(1, before - 1);
+    if (fav) fav.mastery = after;
+    return jsonRes({correct, expected_headword: word, mastery_before: before,
+                    mastery_after: after, applied: true, duplicate: false});
+  }
+  const favDel = path.match(/^\/api\/favorites\/(\d+)$/);
+  if (favDel && method === "DELETE") {
+    if (favs) favs.items = favs.items.filter(f => String(f.id) !== String(favDel[1]));
+    return jsonRes({ok: true});
+  }
+  if (path === "/api/favorites" && method === "POST") {
+    let body = {};
+    try { body = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const id = favs ? Math.max(0, ...favs.items.map(f => f.id)) + 1 : 1;
+    if (favs) favs.items.push({id, lang: body.lang || "en", headword: body.headword || "word",
+      norm: body.norm || (body.headword || "word").toLowerCase(), snapshot: null, note: null,
+      mastery: 1, created_at: new Date().toISOString().slice(0, 19).replace("T", " ")});
+    return jsonRes({id, created: true, mastery: 1});
+  }
+
+  // ---- 单词量测试：英语提供 60/120 词演示题库，其他语言 422 提示 ----
+  if (path === "/api/vocab-tests" && method === "POST") {
+    let body = {};
+    try { body = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const lang = body.lang || "en";
+    if (lang !== "en") {
+      // 纯文本回包：api.ts 把 body 拼进错误消息，JSON 字面量会很难看
+      return new Response("演示环境只配了英语测试词库，装上词典包后其他语言也能测",
+        {status: 422, headers: {"Content-Type": "text/plain; charset=utf-8"}});
+    }
+    const n = body.question_count === 120 ? 120 : 60;
+    const items = [];
+    for (let i = 0; i < n; i++) {
+      const band = Math.min(3, Math.floor(i / (n / 4)));
+      const pool = DEMO_POOLS[band];
+      items.push({id: "d" + i, band, headword: pool[i %% pool.length], ipa: null});
+    }
+    window.__demoPlanItems = items;
+    return jsonRes({id: "demo-plan", lang, pack_id: "demo-en", pack_version: "1.0",
+      domain_rule: "demo", domain_label: "演示词库", population_size: 20000,
+      question_count: n,
+      bands: DEMO_POOLS.map((_, i) => ({id: i, population: [2000,3000,5000,10000][i], sample_size: items.filter(x => x.band === i).length})),
+      items});
+  }
+  if (/^\/api\/vocab-tests\/[^/]+\/finish$/.test(path) && method === "POST") {
+    let body = {};
+    try { body = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const answers = Array.isArray(body.answers) ? body.answers : [];
+    const known = answers.filter(a => a.known).length;
+    const est = Math.round(20000 * (answers.length ? known / answers.length : 0));
+    const bands = POP_CALC(answers);
+    return jsonRes({id: "demo-plan", finished: true, result: {
+      estimate: est, low: Math.max(0, est - 2200), high: Math.min(20000, est + 2200),
+      population_size: 20000, bands, method: "demo"}});
+  }
+  if (path === "/api/vocab-tests") return jsonRes({items: []});
+
+  // ---- 阅读：文章增改（空 paragraphs 渲染为纯文本，可保命不崩） ----
+  if (path === "/api/articles" && method === "POST") {
+    let b = {};
+    try { b = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const art = {id: 1, lang: b.lang || "en", title: b.title || "未命名",
+      char_count: (b.content || "").length,
+      token_count: (b.content || "").split(/\s+/).filter(Boolean).length,
+      created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      content: b.content || "", paragraphs: []};
+    window.__demoArticles = window.__demoArticles || {};
+    window.__demoArticles[1] = art;
+    return jsonRes({article: art});
+  }
+  const artPut = path.match(/^\/api\/articles\/(\d+)$/);
+  if (artPut && method === "PUT") {
+    let b = {};
+    try { b = JSON.parse((opts && opts.body) || "{}"); } catch (e) {}
+    const prev = (window.__demoArticles || {})[artPut[1]] || {id: Number(artPut[1])};
+    const art = {...prev, lang: b.lang || prev.lang, title: b.title || prev.title,
+      content: b.content ?? prev.content ?? "",
+      char_count: (b.content ?? prev.content ?? "").length,
+      token_count: (b.content ?? prev.content ?? "").split(/\s+/).filter(Boolean).length,
+      paragraphs: []};
+    window.__demoArticles = window.__demoArticles || {};
+    window.__demoArticles[artPut[1]] = art;
+    return jsonRes({article: art});
+  }
+  const artGet = path.match(/^\/api\/articles\/(\d+)$/);
+  if (path === "/api/articles" && method === "GET") {
+    const arts = Object.values(window.__demoArticles || {});
+    return jsonRes({articles: arts.map(a => ({id: a.id, lang: a.lang, title: a.title,
+      char_count: a.char_count, token_count: a.token_count, created_at: a.created_at}))});
+  }
+  if (artGet && method === "GET") {
+    const art = (window.__demoArticles || {})[artGet[1]];
+    if (art) return jsonRes({article: art});
+    return jsonRes({message: "文章不存在"}, 404);
+  }
+  if (/^\/api\/articles\/\d+$/.test(path) && method === "DELETE") return jsonRes({ok: true});
 
   // ---- 写操作：demo 只读，统一打回友好结果 ----
   if (method === "POST" || method === "PUT" || method === "DELETE") {
