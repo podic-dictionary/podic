@@ -137,20 +137,10 @@ export default function FavoritesView({
               ))}
             </div>
           )}
-          {/* 等级筛选：下拉（验收反馈：一排按钮窄屏会换行挤烂） */}
-          <div>
-            <select
-              value={masteryFilter}
-              onChange={(e) => setMasteryFilter(Number(e.target.value))}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 outline-none transition-colors focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-emerald-600"
-            >
-              <option value={0}>全部等级</option>
-              {[1, 2, 3, 4].map((m, i) => (
-                <option key={m} value={m}>
-                  {MASTERY_LABELS[m]}（{masteryCounts[i]}）
-                </option>
-              ))}
-            </select>
+          {/* 熟练度筛选：左 caption 右下拉（验收反馈：原生 select 样式不受控、「生」字看不懂） */}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">熟练度</span>
+            <MasteryDropdown value={masteryFilter} counts={masteryCounts} onChange={setMasteryFilter} />
           </div>
         </div>
       )}
@@ -218,6 +208,69 @@ export default function FavoritesView({
         />
       )}
       {sub === "vocab-test" && <VocabularyTestPanel onClose={() => setSub(null)} />}
+    </div>
+  );
+}
+
+/** 熟练度筛选下拉：自绘菜单（与「测验」下拉同款式）；0=全部等级，数量为 0 的等级置灰 */
+function MasteryDropdown({ value, counts, onChange }: {
+  value: number;
+  counts: number[];
+  onChange: (v: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const total = counts.reduce((a, b) => a + b, 0);
+  const itemCls = (active: boolean) =>
+    `block w-full px-4 py-2.5 text-left text-sm transition-colors ${
+      active
+        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+        : "text-zinc-700 hover:bg-emerald-50 dark:text-zinc-200 dark:hover:bg-emerald-950/40"
+    } disabled:cursor-not-allowed disabled:opacity-40`;
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3.5 py-1.5 text-sm text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+      >
+        {value === 0 ? `全部等级（${total}）` : `${MASTERY_LABELS[value]}（${counts[value - 1]}）`}
+        <svg
+          viewBox="0 0 24 24"
+          width={14}
+          height={14}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <button onClick={() => { setOpen(false); onChange(0); }} className={itemCls(value === 0)}>
+            全部等级（{total}）
+          </button>
+          {[1, 2, 3, 4].map((m) => (
+            <button
+              key={m}
+              disabled={counts[m - 1] === 0}
+              onClick={() => { setOpen(false); onChange(m); }}
+              className={itemCls(value === m)}
+            >
+              {MASTERY_LABELS[m]}（{counts[m - 1]}）
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

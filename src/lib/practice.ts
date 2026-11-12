@@ -10,8 +10,8 @@ export const MODE_LABELS: Record<PracticeMode, string> = {
   audio_meaning: "听音",
 };
 
-/** 熟练度 1-4 的显示文案（与后端语义一致） */
-export const MASTERY_LABELS = ["", "生", "模糊", "认识", "熟练"];
+/** 熟练度 1-4 的显示文案（与后端语义一致）；「生」单独一个字看不懂，用「陌生」 */
+export const MASTERY_LABELS = ["", "陌生", "模糊", "认识", "熟练"];
 
 /** 随机会话 id（首答去重键的前半，服务端 PRIMARY KEY(session_id, favorite_id)） */
 export const newSessionId = () =>
