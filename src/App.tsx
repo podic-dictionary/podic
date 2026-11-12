@@ -55,7 +55,7 @@ export default function App() {
   });
   // 设置页二级页状态提升：返回键/浏览器返回的导航语义需要感知它
   const [settingsSub, setSettingsSub] = useState<SettingsSub>(null);
-  // 生词本子页（练习/词汇自测）：同 settingsSub 进返回栈；会话数据由 FavoritesView 持有
+  // 生词本子页（练习/单词量测试）：同 settingsSub 进返回栈；会话数据由 FavoritesView 持有
   const [favoritesSub, setFavoritesSub] = useState<FavoritesSub>(null);
   // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
   // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章

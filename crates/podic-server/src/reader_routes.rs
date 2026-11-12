@@ -220,6 +220,26 @@ pub async fn create_article(
     Ok(Json(json!({ "article": article_payload(article, to_json(&paragraphs)) })))
 }
 
+/// 编辑已保存的文章：换标题/正文后重新切词（词数、字符数一并刷新）
+pub async fn update_article(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<ArticleReq>,
+) -> ApiResult<Json<Value>> {
+    check_size(&req.content)?;
+    let title = req.title.trim().to_string();
+    let mut core = lock(&state);
+    // 先确认存在，404 优先于切词开销
+    store::get_article(&core.conn, id)?.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "文章不存在".into()))?;
+    let paragraphs = tokenize_text(&mut core, &req.lang, &req.content)?;
+    let token_count: usize = paragraphs.iter().map(|p| p.len()).sum();
+    let char_count = req.content.chars().count();
+    let tokens_json = serde_json::to_string(&paragraphs).unwrap_or_else(|_| "[]".into());
+    store::update_article(&core.conn, id, &title, &req.content, &tokens_json, char_count as i64, token_count as i64)?;
+    let article = store::get_article(&core.conn, id)?.ok_or_else(|| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "文章保存失败".into()))?;
+    Ok(Json(json!({ "article": article_payload(article, to_json(&paragraphs)) })))
+}
+
 /// GET /api/articles：列表绝不带 content / tokens_json
 pub async fn list_articles(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let core = lock(&state);

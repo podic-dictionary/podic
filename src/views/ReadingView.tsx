@@ -8,6 +8,7 @@ import {
   getWordStatus,
   listArticles,
   setWordStatus,
+  updateArticle,
 } from "../api";
 import type { ArticleFull, ArticleMeta, Lang, WordStatus } from "../types";
 import { useSettings } from "../SettingsContext";
@@ -92,6 +93,11 @@ export default function ReadingView({
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const [saveErr, setSaveErr] = useState("");
   const [saving, setSaving] = useState(false);
+  // 编辑已保存文章（标题 + 正文；保存后服务端重新切词）
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState<{ title: string; content: string } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editErr, setEditErr] = useState("");
   // URL 导入
   const [url, setUrl] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -114,6 +120,8 @@ export default function ReadingView({
     }
     let alive = true;
     setArticle(null);
+    setEditing(false);
+    setEditForm(null);
     getArticle(articleId)
       .then((a) => alive && setArticle(a))
       .catch(() => alive && setArticleId(null));
@@ -223,6 +231,22 @@ export default function ReadingView({
     }
   };
 
+  const saveEdit = async () => {
+    if (!article || !editForm || editSaving) return;
+    setEditSaving(true);
+    setEditErr("");
+    try {
+      const updated = await updateArticle(article.id, article.lang, editForm.title.trim(), editForm.content);
+      setArticle(updated.article);
+      setEditing(false);
+      loadList(); // 列表里的标题/字数同步刷新
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const grabUrl = async () => {
     const u = url.trim();
     if (!u || fetching || !form) return;
@@ -319,13 +343,61 @@ export default function ReadingView({
     );
   }
 
+  // ---- 文章编辑表单 ----
+  if (typeof articleId === "number" && editing && editForm) {
+    return (
+      <div className="mx-auto flex h-full max-w-2xl flex-col p-4">
+        <input
+          value={editForm.title}
+          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+          placeholder="标题（可留空）"
+          className={`${inputCls} w-full`}
+        />
+        <textarea
+          value={editForm.content}
+          onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
+          className={`${inputCls} mt-2 min-h-0 w-full flex-1 resize-none leading-relaxed`}
+        />
+        <div className="action-row mt-3 shrink-0 flex-wrap">
+          <button
+            onClick={saveEdit}
+            disabled={!editForm.content.trim() || editSaving}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {editSaving ? "保存中…" : "保存"}
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="rounded-xl border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:border-zinc-400 dark:border-zinc-600 dark:text-zinc-300"
+          >
+            取消
+          </button>
+          <span className="text-xs text-zinc-400">{editForm.content.length} 字符 · 保存后重新分词</span>
+          {editErr && <span className="text-xs text-red-500 dark:text-red-400">{editErr}</span>}
+        </div>
+      </div>
+    );
+  }
+
   // ---- 阅读器 ----
   if (typeof articleId === "number") {
     return (
       <div ref={rootRef} className="mx-auto max-w-2xl p-4">
         {article ? (
           <>
-            <h1 className="mb-1 text-lg font-medium leading-snug">{article.title || "未命名"}</h1>
+            <div className="flex items-start justify-between gap-3">
+              <h1 className="mb-1 text-lg font-medium leading-snug">{article.title || "未命名"}</h1>
+              <button
+                onClick={() => {
+                  setEditForm({ title: article.title, content: article.content });
+                  setEditErr("");
+                  setEditing(true);
+                }}
+                className="shrink-0 rounded-xl border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+              >
+                编辑
+              </button>
+            </div>
             <p className="mb-1 text-xs text-zinc-400">
               {langLabel(article.lang)} · {article.token_count} 词 · 点词查词典，划选 AI 解析
             </p>

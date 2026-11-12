@@ -85,7 +85,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/reader/fetch", axum::routing::post(reader_routes::fetch_article))
         .route("/api/reader/extract", axum::routing::post(reader_routes::extract_article))
         .route("/api/articles", axum::routing::get(reader_routes::list_articles).post(reader_routes::create_article))
-        .route("/api/articles/{id}", axum::routing::get(reader_routes::get_article).delete(reader_routes::delete_article))
+        .route("/api/articles/{id}", axum::routing::get(reader_routes::get_article).delete(reader_routes::delete_article).put(reader_routes::update_article))
         .route("/api/user-dict", axum::routing::get(reader_routes::list_user_dict).post(reader_routes::save_user_dict))
         .route("/api/user-dict/{id}", axum::routing::delete(reader_routes::delete_user_dict))
         .route("/api/word-status", axum::routing::get(reader_routes::list_word_status).post(reader_routes::set_word_status))

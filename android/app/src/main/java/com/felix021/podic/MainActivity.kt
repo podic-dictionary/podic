@@ -128,8 +128,14 @@ class MainActivity : Activity() {
         setContentView(root)
         root.setOnApplyWindowInsetsListener { v, insets ->
             if (android.os.Build.VERSION.SDK_INT >= 30) {
-                val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
-                v.setPadding(0, bars.top, 0, bars.bottom)
+                // 底部 padding 取 systemBars 与 IME 的并集：键盘弹出时把 WebView
+                // 抬到键盘上方（只处理 systemBars 会把 IME inset 消费掉却不落地，
+                // 键盘直接盖住输入框）
+                val top = insets.getInsets(android.view.WindowInsets.Type.systemBars()).top
+                val bottom = insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.ime()
+                ).bottom
+                v.setPadding(0, top, 0, bottom)
             } else {
                 @Suppress("DEPRECATION")
                 v.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)

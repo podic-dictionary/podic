@@ -10,7 +10,7 @@ import SpeakButton from "../SpeakButton";
 import { setPracticeActive } from "../../lib/practiceStore";
 import type { Lang } from "../../types";
 
-/** 词汇自测：抽样问「认识/不认识」，服务端分层估计认识数（见 vocab_test 模块）。
+/** 单词量测试：抽样问「认识/不认识」，服务端分层估计认识数（见 vocab_test 模块）。
  * 与生词练习相互独立：不揭晓释义、不写熟练度，避免自报掌握度污染练习数据 */
 type Answer = { item_id: string; known: boolean };
 
@@ -130,7 +130,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   if (phase === "setup") {
     return (
       <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-zinc-50 dark:bg-zinc-950">
-        <PanelHeader title="词汇自测" onClose={requestClose} />
+        <PanelHeader title="单词量测试" onClose={requestClose} />
         <div className="mx-auto w-full max-w-xl flex-1 space-y-5 p-4">
           <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
             从当前词典抽样一批词，逐个问「认识 / 不认识」，按词频分层估算你大概认识多少词。
@@ -213,55 +213,55 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-zinc-50 dark:bg-zinc-950">
         <PanelHeader
-          title="词汇自测"
+          title="单词量测试"
           onClose={requestClose}
           right={<span className="text-xs text-zinc-400">{answers.length} / {plan.items.length}</span>}
         />
-        <div className="mx-auto w-full max-w-xl flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-          <div className="mt-3 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800" role="progressbar" aria-valuenow={answers.length} aria-valuemin={0} aria-valuemax={plan.items.length}>
+        {/* 单列布局：题面居中偏上，认识/不认识落在页面中下方（验收反馈：别贴死在底栏） */}
+        <div className="mx-auto flex w-full max-w-xl flex-1 flex-col px-4 pb-6">
+          <div className="mt-3 h-1.5 shrink-0 rounded-full bg-zinc-200 dark:bg-zinc-800" role="progressbar" aria-valuenow={answers.length} aria-valuemin={0} aria-valuemax={plan.items.length}>
             <div className="h-1.5 rounded-full bg-emerald-600 transition-all dark:bg-emerald-400" style={{ width: `${Math.round((answers.length / plan.items.length) * 100)}%` }} />
           </div>
-          <div className="mt-10 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 py-6 text-center">
             <p className="font-dict text-4xl leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">{item.headword}</p>
             <div className="mt-3 flex items-center justify-center gap-2">
               {item.ipa && <span className="text-sm text-emerald-700 dark:text-emerald-400">/{item.ipa}/</span>}
               <SpeakButton text={item.headword} lang={plan.lang as Lang} />
             </div>
             <p className="mt-2 text-sm text-zinc-400">能说出至少一个常见意思才算「认识」</p>
-          </div>
-          {answers.length > 0 && (
-            <div className="mt-6 text-center">
-              <button onClick={undo} className="text-xs text-zinc-400 underline-offset-2 hover:text-emerald-600 hover:underline dark:hover:text-emerald-400">
+            {answers.length > 0 && (
+              <button onClick={undo} className="mt-5 text-xs text-zinc-400 underline-offset-2 hover:text-emerald-600 hover:underline dark:hover:text-emerald-400">
                 上一题选错了，改一下
               </button>
-            </div>
-          )}
-          {error && (
-            <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
-              {error}
-            </p>
-          )}
-        </div>
-        <div className="action-row shrink-0 border-t border-zinc-200/70 bg-white/80 px-4 py-3 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/80">
-          <button
-            onClick={() => answer(false)}
-            disabled={submitting}
-            className="flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-400 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-500"
-          >
-            不认识 / 没把握
-          </button>
-          <button
-            onClick={() => answer(true)}
-            disabled={submitting}
-            className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
-          >
-            {submitting ? "计算中…" : "认识"}
-          </button>
+            )}
+            {error && (
+              <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
+                {error}
+              </p>
+            )}
+          </div>
+          {/* 中下方答题区 */}
+          <div className="flex shrink-0 items-center justify-center gap-3 pb-[16vh]">
+            <button
+              onClick={() => answer(false)}
+              disabled={submitting}
+              className="w-40 rounded-2xl border border-zinc-300 bg-white px-4 py-4 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-400 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-500"
+            >
+              不认识 / 没把握
+            </button>
+            <button
+              onClick={() => answer(true)}
+              disabled={submitting}
+              className="w-40 rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+            >
+              {submitting ? "计算中…" : "认识"}
+            </button>
+          </div>
         </div>
         <ConfirmDialog
           open={exitAsk}
-          title="放弃本次自测？"
-          message="未提交的自测不会生成估计结果。"
+          title="放弃本次测试？"
+          message="未提交的测试不会生成估计结果。"
           confirmText="放弃"
           onCancel={() => setExitAsk(false)}
           onConfirm={() => {

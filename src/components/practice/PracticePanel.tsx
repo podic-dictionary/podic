@@ -318,6 +318,13 @@ export default function PracticePanel({
                 onChange={setTyped}
               />
               <button
+                onClick={() => submit({ kind: "typed", text: typed.trim() })}
+                disabled={submitting || !typed.trim()}
+                className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+              >
+                {submitting ? "判分中…" : "提交"}
+              </button>
+              <button
                 onClick={() => submit({ kind: "surrender" })}
                 disabled={submitting}
                 className="rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-600 transition-colors hover:border-zinc-400 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500"

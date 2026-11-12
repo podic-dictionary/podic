@@ -334,6 +334,14 @@ export const createArticle = (lang: string, title: string, content: string) =>
     body: JSON.stringify({ lang, title, content }),
   }).then((r) => r.article);
 
+/** 编辑已保存文章：换标题/正文，服务端重新切词 */
+export const updateArticle = (id: number, lang: string, title: string, content: string) =>
+  api<{ article: ArticleFull }>(`/articles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ lang, title, content }),
+    headers: { "Content-Type": "application/json" },
+  });
+
 export const deleteArticle = (id: number) =>
   api<{ ok: boolean }>(`/articles/${id}`, { method: "DELETE" });
 

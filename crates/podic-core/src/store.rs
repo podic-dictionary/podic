@@ -409,6 +409,23 @@ pub fn delete_article(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// 编辑文章：更新标题与正文，并落新的切词结果（由调用方 tokenize 后传入）
+pub fn update_article(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    content: &str,
+    tokens_json: &str,
+    char_count: i64,
+    token_count: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE article SET title = ?2, content = ?3, tokens_json = ?4, char_count = ?5, token_count = ?6 WHERE id = ?1",
+        rusqlite::params![id, title, content, tokens_json, char_count, token_count],
+    )?;
+    Ok(())
+}
+
 // ---------------- 阅读：用户词典（AI 补录，词典扩充源） ----------------
 
 #[derive(Debug, Clone, Serialize)]
