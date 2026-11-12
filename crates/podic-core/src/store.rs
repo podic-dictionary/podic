@@ -658,7 +658,7 @@ pub fn vocab_test_latest_for_pack(
     let mut stmt = conn.prepare(&format!(
         "SELECT {VT_COLS} FROM vocabulary_test
          WHERE lang = ?1 AND pack_id = ?2 AND pack_version = ?3 AND finished_at IS NOT NULL
-         ORDER BY finished_at DESC LIMIT 1"
+         ORDER BY finished_at DESC, rowid DESC LIMIT 1"
     ))?;
     let mut rows = stmt.query_map([lang, pack_id, pack_version], row_to_vt)?;
     Ok(rows.next().transpose()?)
@@ -798,6 +798,31 @@ mod tests {
         // 重练不落首答记录：随后真正首答照常生效
         let o = review_favorite(&conn, "s1", id, true, true, false).unwrap();
         assert!(o.applied && o.mastery_after == 2);
+    }
+
+    #[test]
+    fn 按词典版本取最近完成测试() {
+        let conn = db();
+        let mk = |id: &str, ver: &str| VocabTestRow {
+            id: id.into(), lang: "en".into(), pack_id: "ecdict".into(), pack_version: ver.into(),
+            domain_rule: "headword-domain-v1".into(), population_size: 20000, question_count: 60,
+            plan_json: "{}".into(), answers_json: None, result_json: Some(r#"{"bands":[{"sample_size":30,"known":9}]}"#.into()),
+            created_at: String::new(), finished_at: None,
+        };
+        // 旧版本完成 → 新版本开始（未完成）→ 同版本再完成一次
+        vocab_test_insert(&conn, &mk("t1", "0.2.4")).unwrap();
+        vocab_test_finish(&conn, "t1", "[]", r#"{"bands":[{"sample_size":30,"known":15}]}"#).unwrap();
+        vocab_test_insert(&conn, &mk("t2", "0.3.0")).unwrap();
+        vocab_test_insert(&conn, &mk("t3", "0.2.4")).unwrap();
+        vocab_test_finish(&conn, "t3", "[]", r#"{"bands":[{"sample_size":30,"known":9}]}"#).unwrap();
+        // 只认指定版本；未完成的 t2 不掺和
+        let row = vocab_test_latest_for_pack(&conn, "en", "ecdict", "0.2.4").unwrap().unwrap();
+        assert_eq!(row.id, "t3");
+        let row = vocab_test_latest_for_pack(&conn, "en", "ecdict", "0.3.0").unwrap();
+        assert!(row.is_none()); // t2 未完成
+        // 完全没有的版本
+        let row = vocab_test_latest_for_pack(&conn, "en", "ecdict", "9.9.9").unwrap();
+        assert!(row.is_none());
     }
 
     #[test]
