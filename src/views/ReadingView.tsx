@@ -98,6 +98,8 @@ export default function ReadingView({
   const [editForm, setEditForm] = useState<{ title: string; content: string } | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editErr, setEditErr] = useState("");
+  // 保存时文章已在别处被删除：回列表并说明（编辑器里没有可存的对象了）
+  const [goneNotice, setGoneNotice] = useState("");
   // URL 导入
   const [url, setUrl] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -111,6 +113,11 @@ export default function ReadingView({
   }, []);
 
   useEffect(loadList, [loadList]);
+
+  // 打开文章/新建时清掉「文章已删除」提示（提示只在列表页有意义）
+  useEffect(() => {
+    if (articleId !== null) setGoneNotice("");
+  }, [articleId]);
 
   // 文章载入（列表 → 点开）
   useEffect(() => {
@@ -241,7 +248,14 @@ export default function ReadingView({
       setEditing(false);
       loadList(); // 列表里的标题/字数同步刷新
     } catch (e) {
-      setEditErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.startsWith("404")) {
+        setEditing(false);
+        setArticleId(null);
+        setGoneNotice("文章已被删除，本次编辑未能保存");
+      } else {
+        setEditErr(msg);
+      }
     } finally {
       setEditSaving(false);
     }
@@ -439,6 +453,11 @@ export default function ReadingView({
         <span className="text-xs text-zinc-400">粘一段外文，逐词点读；缺词让 AI 补进词典</span>
       </div>
 
+      {goneNotice && (
+        <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400">
+          {goneNotice}
+        </p>
+      )}
       {articles === null && <p className="py-10 text-center text-sm text-zinc-400">加载中…</p>}
       {articles !== null && articles.length === 0 && (
         <p className="py-10 text-center text-sm text-zinc-400">还没有文章</p>
