@@ -10,6 +10,7 @@ pub mod reader;
 pub mod settings;
 pub mod store;
 pub mod update;
+pub mod vocab_test;
 
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;

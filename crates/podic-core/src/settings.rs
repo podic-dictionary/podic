@@ -70,6 +70,10 @@ pub struct Settings {
     /// 无包语言靠 LLM 查询时补全进 user_dict。
     #[serde(default = "default_languages")]
     pub languages: Vec<LanguageConfig>,
+    /// 上次停留的页面（前端 View 名）：原生壳冷启动端口随机 → origin 变化，
+    /// localStorage 不可靠，tab 记忆以服务端为准。值由前端白名单校验，后端只透传
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_view: Option<String>,
 }
 
 impl Default for Settings {
@@ -78,6 +82,7 @@ impl Default for Settings {
             providers: Vec::new(),
             manifest_url: String::new(),
             languages: default_languages(),
+            last_view: None,
         }
     }
 }

@@ -33,6 +33,8 @@ interface SettingsState {
   setLanguages: (next: LanguageConfig[]) => Promise<void>;
   languagesFailed: boolean;
   loaded: boolean;
+  /** 上次停留页面（服务端记忆，启动时恢复 tab 用；App 是唯一写入方） */
+  lastView: string | null;
   reload: () => Promise<void>;
   theme: ThemeMode;
   setTheme: (t: ThemeMode) => void;
@@ -56,6 +58,7 @@ const Ctx = createContext<SettingsState>({
   setLanguages: async () => {},
   languagesFailed: false,
   loaded: false,
+  lastView: null,
   reload: async () => {},
   theme: "system",
   setTheme: () => {},
@@ -96,6 +99,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [languages, setLanguagesState] = useState<LanguageConfig[]>(DEFAULT_LANGUAGES);
   const [languagesFailed, setLanguagesFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [lastView, setLastView] = useState<string | null>(null);
   const [theme, setThemeState] = useState<ThemeMode>(() => readPref("podic.theme", "system", ["light", "dark", "system"]));
   const [fontScale, setFontScaleState] = useState<FontScale>(() => readPref("podic.font", "default", ["small", "default", "large"]));
   const [hand, setHandState] = useState<Hand>(() => readPref("podic.hand", "right", ["right", "left"]));
@@ -109,6 +113,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const s = await getSettings();
       setProviders(s.providers);
       setManifestUrl(s.manifest_url);
+      setLastView(s.last_view ?? null);
       if (Array.isArray(s.languages) && s.languages.length > 0) {
         setLanguagesState(s.languages);
         setLanguagesFailed(false);
@@ -206,14 +211,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   // value 是内联对象会让任一设置变化重渲染全部消费者（含每张词条卡的 AI 面板），memo 掉
   const value = useMemo(
     () => ({
-      providers, manifestUrl, loaded, reload,
+      providers, manifestUrl, loaded, reload, lastView,
       languages, setLanguages, languagesFailed,
       theme, setTheme, fontScale, setFontScale,
       hand, setHand,
       autoComplete, setAutoComplete,
       aiChoice, setAiChoice,
     }),
-    [providers, manifestUrl, loaded, reload, languages, setLanguages, languagesFailed, theme, setTheme, fontScale, setFontScale, hand, setHand, autoComplete, setAutoComplete, aiChoice, setAiChoice],
+    [providers, manifestUrl, loaded, reload, lastView, languages, setLanguages, languagesFailed, theme, setTheme, fontScale, setFontScale, hand, setHand, autoComplete, setAutoComplete, aiChoice, setAiChoice],
   );
 
   return (

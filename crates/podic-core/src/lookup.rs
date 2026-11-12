@@ -72,7 +72,7 @@ fn row_to_entry(lang: &str, matched_by: &str, rule: Option<String>, row: &rusqli
     })
 }
 
-fn check_lang(lang: &str) -> Result<()> {
+pub(crate) fn check_lang(lang: &str) -> Result<()> {
     if lang.is_empty() || !lang.chars().all(|c| c.is_ascii_lowercase()) {
         return Err(Error::Other(format!("非法 lang: {lang}")));
     }
@@ -432,7 +432,7 @@ mod tests {
         insert_entry(&conn, "blorpish", "blorpish", 50.0);
         let langs = vec!["en".to_string()];
 
-        let items = lookup(&conn, &["en".to_string()], &langs, "blorp", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "blorp", 20, false).unwrap();
         assert_eq!(items[0].matched_by, "user");
         assert!(items[0].entry_id < 0);
         assert_eq!(items[0].senses.as_ref().unwrap()[0]["zh"], "测试词");
@@ -452,12 +452,12 @@ mod tests {
         let langs = vec!["en".to_string()];
 
         // surface 原形：包 exact 命中，user 平行弱词条被去重
-        let items = lookup(&conn, &["en".to_string()], &langs, "manger", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "manger", 20, false).unwrap();
         assert_eq!(items.len(), 1);
         assert!(items[0].entry_id > 0);
 
         // 包缺 mangeait 这条屈折形：user 词条（form 镜像）应保留——AI 补全的价值所在
-        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "user");
         assert_eq!(items[0].headword, "manger");
@@ -465,7 +465,7 @@ mod tests {
         // 包补上该屈折形后：user 被去重，只剩包词条
         conn.execute("INSERT INTO en.form(form_norm, entry_id, rule) VALUES ('mangeait', 1, 'impf')", [])
             .unwrap();
-        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20).unwrap();
+        let items = lookup(&conn, &["en".to_string()], &langs, "mangeait", 20, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "form");
     }
@@ -483,7 +483,7 @@ mod tests {
         let installed: Vec<String> = vec![];
         let langs = vec!["de".to_string()];
 
-        let items = lookup(&conn, &installed, &langs, "Haus", 20).unwrap();
+        let items = lookup(&conn, &installed, &langs, "Haus", 20, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "user");
         assert_eq!(items[0].headword, "Haus");
@@ -497,7 +497,7 @@ mod tests {
         assert!(examples(&conn, &installed, "de", -1, 5).unwrap().is_empty());
 
         // 完全 miss 不报错（前端 FallbackCard 依赖空结果触发 AI 补全）
-        assert!(lookup(&conn, &installed, &langs, "nichtda", 20).unwrap().is_empty());
+        assert!(lookup(&conn, &installed, &langs, "nichtda", 20, false).unwrap().is_empty());
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
         conn.execute("INSERT INTO \"is\".entry(norm, headword, freq) VALUES ('hús', 'hús', 1.0)", [])
             .unwrap();
         let installed = vec!["is".to_string()];
-        let items = lookup(&conn, &installed, &installed, "hús", 20).unwrap();
+        let items = lookup(&conn, &installed, &installed, "hús", 20, false).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].matched_by, "exact");
     }

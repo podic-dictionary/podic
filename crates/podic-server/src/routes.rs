@@ -434,6 +434,7 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
         "providers": providers,
         "manifest_url": core.settings.manifest_url,
         "languages": core.settings.languages,
+        "last_view": core.settings.last_view,
     })))
 }
 
@@ -472,6 +473,9 @@ pub struct SettingsIn {
     manifest_url: Option<String>,
     #[serde(default)]
     languages: Option<Vec<LanguageIn>>,
+    /// 上次停留页面（tab 记忆）；合法性由前端白名单把关，这里只透传存储
+    #[serde(default)]
+    last_view: Option<String>,
 }
 
 fn bad_req(msg: &str) -> ApiError {
@@ -553,6 +557,9 @@ pub async fn save_settings(
     if let Some(langs) = &input.languages {
         candidate.languages = validate_languages(langs)?;
     }
+    if let Some(v) = &input.last_view {
+        candidate.last_view = Some(v.trim().to_string());
+    }
     core.settings = candidate;
     core.save_settings()?;
     Ok(Json(json!({ "ok": true })))
@@ -581,8 +588,9 @@ pub async fn add_favorite(
 ) -> ApiResult<Json<Value>> {
     let core = lock(&state);
     let snapshot = f.snapshot.and_then(|v| serde_json::to_string(&v).ok());
-    let id = podic_core::store::add_favorite(&core.conn, &f.lang, &f.headword, &f.norm, snapshot.as_deref())?;
-    Ok(Json(json!({ "id": id })))
+    let (id, created, mastery) =
+        podic_core::store::add_favorite(&core.conn, &f.lang, &f.headword, &f.norm, snapshot.as_deref())?;
+    Ok(Json(json!({ "id": id, "created": created, "mastery": mastery })))
 }
 
 pub async fn remove_favorite(
@@ -592,6 +600,62 @@ pub async fn remove_favorite(
     let core = lock(&state);
     podic_core::store::remove_favorite(&core.conn, id)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct ReviewAnswer {
+    /// choice（选择题 selected_key）| typed（填词 text）| surrender（不会）
+    kind: String,
+    #[serde(default)]
+    selected_key: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ReviewIn {
+    /// 练习会话 id（前端随机生成；首答去重键的一半）
+    session_id: String,
+    /// 缺省 first；retry = 错词重练，只判分不动等级
+    #[serde(default)]
+    phase: Option<String>,
+    answer: ReviewAnswer,
+}
+
+/// 练习答题判分 + 熟练度首答更新。选择题比 key（favorite:<id>），填词走
+/// answer_key（保留重音的拼写判分，与查询 norm 分开——élevé 不能写成 eleve）
+pub async fn review_favorite(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(input): Json<ReviewIn>,
+) -> ApiResult<Json<Value>> {
+    let session = input.session_id.trim();
+    if session.is_empty() || session.len() > 64 {
+        return Err(bad_req("session_id 非法"));
+    }
+    let retry = input.phase.as_deref() == Some("retry");
+    let core = lock(&state);
+    let fav = podic_core::store::favorite_get(&core.conn, id)?
+        .ok_or_else(|| ApiError(axum::http::StatusCode::NOT_FOUND, "生词不存在或已被移除".to_string()))?;
+    let correct = match input.answer.kind.as_str() {
+        "choice" => input.answer.selected_key.as_deref() == Some(&format!("favorite:{id}")),
+        "typed" => input
+            .answer
+            .text
+            .as_deref()
+            .is_some_and(|t| podic_core::norm::answer_key(t) == podic_core::norm::answer_key(&fav.headword)),
+        "surrender" => false,
+        _ => return Err(bad_req("answer.kind 非法（choice/typed/surrender）")),
+    };
+    let outcome = podic_core::store::review_favorite(&core.conn, session, id, correct, retry)?;
+    Ok(Json(json!({
+        "correct": outcome.correct,
+        "expected_headword": fav.headword,
+        "mastery_before": outcome.mastery_before,
+        "mastery_after": outcome.mastery_after,
+        "applied": outcome.applied,
+        "duplicate": outcome.duplicate,
+    })))
 }
 
 // ---------------- AI ----------------

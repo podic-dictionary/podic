@@ -13,6 +13,7 @@ pub fn init_app_db(conn: &Connection) -> Result<()> {
             norm TEXT NOT NULL,
             snapshot TEXT,
             note TEXT,
+            mastery INTEGER NOT NULL DEFAULT 1 CHECK (mastery BETWEEN 1 AND 4),
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(lang, norm)
         );
@@ -68,11 +69,48 @@ pub fn init_app_db(conn: &Connection) -> Result<()> {
             status TEXT NOT NULL CHECK (status IN ('known', 'new')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (lang, norm)
-        );",
+        );
+        CREATE TABLE IF NOT EXISTS favorite_review (
+            session_id TEXT NOT NULL,
+            favorite_id INTEGER NOT NULL,
+            correct INTEGER NOT NULL,
+            mastery_before INTEGER NOT NULL,
+            mastery_after INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (session_id, favorite_id)
+        );
+        CREATE TABLE IF NOT EXISTS vocabulary_test (
+            id TEXT PRIMARY KEY,
+            lang TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            pack_version TEXT NOT NULL,
+            domain_rule TEXT NOT NULL,
+            population_size INTEGER NOT NULL,
+            question_count INTEGER NOT NULL,
+            plan_json TEXT NOT NULL,
+            answers_json TEXT,
+            result_json TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            finished_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_vocabulary_test_lang_time
+            ON vocabulary_test(lang, created_at DESC);",
     )?;
     // 迁移：v0.2.3 user_dict 加 cache_key（AI 词典词条记下生成它的缓存行，删词条连带清缓存）。
     // 新库上面 batch 里那条 ALTER 已生效，这里吞掉 duplicate column 错误即可
     let _ = conn.execute("ALTER TABLE user_dict ADD COLUMN cache_key TEXT", []);
+    // 迁移：favorite 加 mastery（练习熟练度 1-4）。旧库走 ALTER，按 table_info 判断
+    // 而不是吞一切错误（锁库/只读等真故障要向上抛）
+    let has_mastery = conn
+        .prepare("PRAGMA table_info(favorite)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .any(|c| c.as_deref() == Ok("mastery"));
+    if !has_mastery {
+        conn.execute(
+            "ALTER TABLE favorite ADD COLUMN mastery INTEGER NOT NULL DEFAULT 1 CHECK (mastery BETWEEN 1 AND 4)",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -86,12 +124,14 @@ pub struct Favorite {
     pub norm: String,
     pub snapshot: Option<String>,
     pub note: Option<String>,
+    /// 练习熟练度 1生 2模糊 3认识 4熟练（首答对错升降，见 favorite_review）
+    pub mastery: i64,
     pub created_at: String,
 }
 
 pub fn list_favorites(conn: &Connection) -> Result<Vec<Favorite>> {
     let mut stmt = conn.prepare(
-        "SELECT id, lang, headword, norm, snapshot, note, created_at FROM favorite ORDER BY id DESC",
+        "SELECT id, lang, headword, norm, snapshot, note, mastery, created_at FROM favorite ORDER BY id DESC",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(Favorite {
@@ -101,29 +141,130 @@ pub fn list_favorites(conn: &Connection) -> Result<Vec<Favorite>> {
             norm: r.get(3)?,
             snapshot: r.get(4)?,
             note: r.get(5)?,
-            created_at: r.get(6)?,
+            mastery: r.get(6)?,
+            created_at: r.get(7)?,
         })
     })?;
     Ok(rows.flatten().collect())
 }
 
+/// 收藏并返回 (id, created, mastery)。INSERT OR IGNORE 命中已有行时
+/// last_insert_rowid 不可靠，按唯一键回查真实 id——重复收藏不重置等级
 pub fn add_favorite(
     conn: &Connection,
     lang: &str,
     headword: &str,
     norm: &str,
     snapshot: Option<&str>,
-) -> Result<i64> {
-    conn.execute(
+) -> Result<(i64, bool, i64)> {
+    let inserted = conn.execute(
         "INSERT OR IGNORE INTO favorite(lang, headword, norm, snapshot) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![lang, headword, norm, snapshot],
     )?;
-    Ok(conn.last_insert_rowid())
+    let (id, mastery): (i64, i64) = conn.query_row(
+        "SELECT id, mastery FROM favorite WHERE lang = ?1 AND norm = ?2",
+        [lang, norm],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok((id, inserted == 1, mastery))
 }
 
 pub fn remove_favorite(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM favorite WHERE id = ?1", [id])?;
     Ok(())
+}
+
+pub fn favorite_get(conn: &Connection, id: i64) -> Result<Option<Favorite>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, lang, headword, norm, snapshot, note, mastery, created_at FROM favorite WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query_map([id], |r| {
+        Ok(Favorite {
+            id: r.get(0)?,
+            lang: r.get(1)?,
+            headword: r.get(2)?,
+            norm: r.get(3)?,
+            snapshot: r.get(4)?,
+            note: r.get(5)?,
+            mastery: r.get(6)?,
+            created_at: r.get(7)?,
+        })
+    })?;
+    Ok(rows.next().transpose()?)
+}
+
+/// 练习首答事务结果
+#[derive(Debug)]
+pub struct ReviewOutcome {
+    pub correct: bool,
+    pub mastery_before: i64,
+    pub mastery_after: i64,
+    /// 是否实际更新了等级（重练/重复提交 = false）
+    pub applied: bool,
+    /// 同 (session_id, favorite_id) 的首答重复提交：返回首次保存的结果
+    pub duplicate: bool,
+}
+
+/// 练习首答判分事务：查重 →（新首答才）升降级 → 记录，防「已保存但响应丢失后
+/// 重试再次升降」。retry（错词重练）只判分，不更新等级、不落记录。
+/// 判分（correct）由调用方完成；这里只负责等级变更的一致性
+pub fn review_favorite(
+    conn: &Connection,
+    session_id: &str,
+    favorite_id: i64,
+    correct: bool,
+    retry: bool,
+) -> Result<ReviewOutcome> {
+    let before: i64 = conn.query_row(
+        "SELECT mastery FROM favorite WHERE id = ?1",
+        [favorite_id],
+        |r| r.get(0),
+    )?;
+    // 重练：等级不动
+    if retry {
+        return Ok(ReviewOutcome {
+            correct,
+            mastery_before: before,
+            mastery_after: before,
+            applied: false,
+            duplicate: false,
+        });
+    }
+    let tx = conn.unchecked_transaction()?;
+    let existing: Option<(bool, i64, i64)> = tx
+        .query_row(
+            "SELECT correct, mastery_before, mastery_after FROM favorite_review WHERE session_id = ?1 AND favorite_id = ?2",
+            rusqlite::params![session_id, favorite_id],
+            |r| Ok((r.get::<_, bool>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        )
+        .ok();
+    if let Some((c, b, a)) = existing {
+        // 重复提交（重试/换答案重放）：原样返回首次保存的结果，不给第二次变化的机会
+        return Ok(ReviewOutcome {
+            correct: c,
+            mastery_before: b,
+            mastery_after: a,
+            applied: false,
+            duplicate: true,
+        });
+    }
+    let after = (before + if correct { 1 } else { -1 }).clamp(1, 4);
+    tx.execute(
+        "UPDATE favorite SET mastery = ?1 WHERE id = ?2",
+        rusqlite::params![after, favorite_id],
+    )?;
+    tx.execute(
+        "INSERT INTO favorite_review(session_id, favorite_id, correct, mastery_before, mastery_after) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![session_id, favorite_id, correct, before, after],
+    )?;
+    tx.commit()?;
+    Ok(ReviewOutcome {
+        correct,
+        mastery_before: before,
+        mastery_after: after,
+        applied: true,
+        duplicate: false,
+    })
 }
 
 // ---------------- AI 缓存 ----------------
@@ -407,6 +548,98 @@ pub fn delete_user_dict(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+// ---------------- 词汇自测 ----------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VocabTestRow {
+    pub id: String,
+    pub lang: String,
+    pub pack_id: String,
+    pub pack_version: String,
+    pub domain_rule: String,
+    pub population_size: i64,
+    pub question_count: i64,
+    pub plan_json: String,
+    pub answers_json: Option<String>,
+    pub result_json: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+const VT_COLS: &str = "id, lang, pack_id, pack_version, domain_rule, population_size, question_count, plan_json, answers_json, result_json, created_at, finished_at";
+
+fn row_to_vt(r: &rusqlite::Row) -> rusqlite::Result<VocabTestRow> {
+    Ok(VocabTestRow {
+        id: r.get(0)?,
+        lang: r.get(1)?,
+        pack_id: r.get(2)?,
+        pack_version: r.get(3)?,
+        domain_rule: r.get(4)?,
+        population_size: r.get(5)?,
+        question_count: r.get(6)?,
+        plan_json: r.get(7)?,
+        answers_json: r.get(8)?,
+        result_json: r.get(9)?,
+        created_at: r.get(10)?,
+        finished_at: r.get(11)?,
+    })
+}
+
+pub fn vocab_test_insert(
+    conn: &Connection,
+    row: &VocabTestRow,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO vocabulary_test(id, lang, pack_id, pack_version, domain_rule, population_size, question_count, plan_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            row.id, row.lang, row.pack_id, row.pack_version, row.domain_rule,
+            row.population_size, row.question_count, row.plan_json
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn vocab_test_get(conn: &Connection, id: &str) -> Result<Option<VocabTestRow>> {
+    let mut stmt = conn.prepare(&format!("SELECT {VT_COLS} FROM vocabulary_test WHERE id = ?1"))?;
+    let mut rows = stmt.query_map([id], row_to_vt)?;
+    Ok(rows.next().transpose()?)
+}
+
+/// 完成：写入答案与结果（幂等——已完成的行不再改写，由调用方比对后返回 409）
+pub fn vocab_test_finish(
+    conn: &Connection,
+    id: &str,
+    answers_json: &str,
+    result_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE vocabulary_test SET answers_json = ?2, result_json = ?3, finished_at = datetime('now')
+         WHERE id = ?1 AND finished_at IS NULL",
+        rusqlite::params![id, answers_json, result_json],
+    )?;
+    Ok(())
+}
+
+/// 已完成的结果列表（按时间倒序）
+pub fn vocab_test_history(conn: &Connection, lang: &str, limit: i64) -> Result<Vec<VocabTestRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {VT_COLS} FROM vocabulary_test
+         WHERE lang = ?1 AND finished_at IS NOT NULL ORDER BY created_at DESC LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map([lang, &limit.to_string()], row_to_vt)?;
+    Ok(rows.flatten().collect())
+}
+
+/// 清理一天前的未完成记录（下次同语言开测时顺手调，防积累）
+pub fn vocab_test_prune(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "DELETE FROM vocabulary_test WHERE finished_at IS NULL AND created_at < datetime('now', '-1 day')",
+        [],
+    )?;
+    Ok(())
+}
+
 // ---------------- 阅读：生词/认识标记（键 = token 的 surface norm，全局按 lang+norm 生效） ----------------
 
 pub fn word_status_list(conn: &Connection, lang: &str) -> Result<Vec<(String, String)>> {
@@ -433,4 +666,96 @@ pub fn word_status_set(conn: &Connection, lang: &str, norm: &str, status: Option
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_app_db(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn 收藏迁移_mastery_旧库补列默认1() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 造一个没有 mastery 列的「旧库」，再跑迁移
+        conn.execute_batch(
+            "CREATE TABLE favorite (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lang TEXT NOT NULL, headword TEXT NOT NULL, norm TEXT NOT NULL,
+                snapshot TEXT, note TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(lang, norm)
+            );",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO favorite(lang, headword, norm) VALUES ('en', 'apple', 'apple')", [])
+            .unwrap();
+        init_app_db(&conn).unwrap();
+        let fav = favorite_get(&conn, 1).unwrap().unwrap();
+        assert_eq!(fav.mastery, 1);
+    }
+
+    #[test]
+    fn 重复收藏返回真实id且不重置等级() {
+        let conn = db();
+        let (id1, created1, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
+        assert!(created1);
+        review_favorite(&conn, "s1", id1, true, false).unwrap(); // 升到 2
+        let (id2, created2, mastery) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
+        assert!(!created2);
+        assert_eq!(id2, id1); // INSERT OR IGNORE 后 last_insert_rowid 不可靠，必须回查
+        assert_eq!(mastery, 2); // 重复收藏不重置等级
+    }
+
+    #[test]
+    fn 首答升降级且重复提交幂等() {
+        let conn = db();
+        let (id, _, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
+
+        // 首答正确：1 -> 2
+        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        assert!(o.applied && !o.duplicate && o.correct);
+        assert_eq!((o.mastery_before, o.mastery_after), (1, 2));
+
+        // 同会话重复提交（响应丢失重试）：返回首次结果，不再升级
+        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        assert!(o.duplicate && !o.applied);
+        assert_eq!((o.mastery_before, o.mastery_after), (1, 2));
+
+        // 同会话换答案重放也拿不到不同结果（不允许刷级）
+        let o = review_favorite(&conn, "s1", id, false, false).unwrap();
+        assert!(o.duplicate);
+        assert_eq!(o.mastery_after, 2);
+
+        // 新会话答错：2 -> 1；错误重试幂等
+        let o = review_favorite(&conn, "s2", id, false, false).unwrap();
+        assert!(o.applied);
+        assert_eq!((o.mastery_before, o.mastery_after), (2, 1));
+        let o = review_favorite(&conn, "s2", id, false, false).unwrap();
+        assert!(o.duplicate && o.mastery_after == 1);
+
+        // 边界：等级 4 答对不上溢
+        for _ in 0..9 {
+            let sid = format!("up{}", crate::norm::answer_key(&std::time::Instant::now().elapsed().as_nanos().to_string()));
+            review_favorite(&conn, &sid, id, true, false).unwrap();
+        }
+        let fav = favorite_get(&conn, id).unwrap().unwrap();
+        assert_eq!(fav.mastery, 4);
+    }
+
+    #[test]
+    fn 重练只判分不动等级() {
+        let conn = db();
+        let (id, _, _) = add_favorite(&conn, "en", "apple", "apple", None).unwrap();
+        let o = review_favorite(&conn, "s1", id, true, true).unwrap();
+        assert!(o.correct && !o.applied && !o.duplicate);
+        assert_eq!(o.mastery_after, 1); // 等级不动
+        // 重练不落首答记录：随后真正首答照常生效
+        let o = review_favorite(&conn, "s1", id, true, false).unwrap();
+        assert!(o.applied && o.mastery_after == 2);
+    }
 }

@@ -2,14 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import { listFavorites, removeFavorite, type Favorite } from "../api";
 import { useSettings } from "../SettingsContext";
 import { langDisplayName } from "../langNames";
+import PracticePanel from "../components/practice/PracticePanel";
+import VocabularyTestPanel from "../components/practice/VocabularyTestPanel";
+import { MASTERY_LABELS } from "../lib/practice";
 
+export type FavoritesSub = "practice" | "vocab-test" | null;
 
 export default function FavoritesView({
   active,
   onOpenWord,
+  sub,
+  setSub,
 }: {
   active: boolean;
   onOpenWord: (word: string, lang: string) => void;
+  sub: FavoritesSub;
+  setSub: (s: FavoritesSub) => void;
 }) {
   const { languages } = useSettings();
   const langName = (code: string) => {
@@ -20,6 +28,7 @@ export default function FavoritesView({
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [langFilter, setLangFilter] = useState<string>("all");
+  const [masteryFilter, setMasteryFilter] = useState<number>(0); // 0 = 全部等级
 
   const refresh = useCallback(async () => {
     try {
@@ -43,12 +52,21 @@ export default function FavoritesView({
     await refresh();
   };
 
+  // 练习判分回调：就地更新该词熟练度（列表不整页刷新，避免答题页背后跳动）
+  const onLevelChange = useCallback((id: number, mastery: number) => {
+    setItems((prev) => prev.map((f) => (f.id === id ? { ...f, mastery } : f)));
+  }, []);
+
   // 变音折叠匹配：éleveur 也能被 "elev" 搜到
   const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const langs = [...new Set(items.map((i) => i.lang))];
+  const masteryCounts = [1, 2, 3, 4].map(
+    (m) => items.filter((f) => f.mastery === m && (langFilter === "all" || f.lang === langFilter)).length,
+  );
   const shown = items.filter(
     (f) =>
       (langFilter === "all" || f.lang === langFilter) &&
+      (masteryFilter === 0 || f.mastery === masteryFilter) &&
       (!q.trim() || fold(f.headword).includes(fold(q))),
   );
 
@@ -81,6 +99,48 @@ export default function FavoritesView({
               ))}
             </div>
           )}
+          {/* 等级筛选：数量按当前语言统计（不含等级），切级不掉数 */}
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setMasteryFilter(0)}
+              className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                masteryFilter === 0
+                  ? "bg-emerald-600 text-white dark:bg-emerald-500"
+                  : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+              }`}
+            >
+              全部等级
+            </button>
+            {[1, 2, 3, 4].map((m, i) => (
+              <button
+                key={m}
+                onClick={() => setMasteryFilter(m)}
+                className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                  masteryFilter === m
+                    ? "bg-emerald-600 text-white dark:bg-emerald-500"
+                    : "border border-zinc-200 text-zinc-500 hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-700 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                }`}
+              >
+                {MASTERY_LABELS[m]} {masteryCounts[i]}
+              </button>
+            ))}
+          </div>
+          {/* 练习 / 词汇自测入口 */}
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={() => setSub("practice")}
+              disabled={langs.length === 0}
+              className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+            >
+              练习生词
+            </button>
+            <button
+              onClick={() => setSub("vocab-test")}
+              className="flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+            >
+              词汇自测
+            </button>
+          </div>
         </div>
       )}
 
@@ -113,6 +173,16 @@ export default function FavoritesView({
                   {langName(f.lang)}
                 </span>
                 {f.headword}
+                <span
+                  title={`熟练度：${MASTERY_LABELS[f.mastery]}`}
+                  className={`ml-2 rounded px-1.5 py-0.5 text-xs ${
+                    f.mastery >= 3
+                      ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+                      : "bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+                  }`}
+                >
+                  {MASTERY_LABELS[f.mastery]}
+                </span>
               </p>
               <p className="mt-0.5 text-xs text-zinc-400">收藏于 {f.created_at.slice(0, 10)}</p>
               </div>
@@ -126,6 +196,17 @@ export default function FavoritesView({
           </div>
         ))}
       </div>
+
+      {/* 练习 / 词汇自测全屏面板（active 由 App 的 display 切换控制显隐） */}
+      {sub === "practice" && (
+        <PracticePanel
+          items={items}
+          defaultLang={langFilter === "all" ? "" : langFilter}
+          onLevelChange={onLevelChange}
+          onClose={() => setSub(null)}
+        />
+      )}
+      {sub === "vocab-test" && <VocabularyTestPanel onClose={() => setSub(null)} />}
     </div>
   );
 }

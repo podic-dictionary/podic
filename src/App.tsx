@@ -6,12 +6,18 @@ import { BookOpenIcon, ChevronLeftIcon, GearIcon, LanguagesIcon, SearchIcon, Sta
 import ReadingView from "./views/ReadingView";
 import SearchView from "./views/SearchView";
 import TranslateView from "./views/TranslateView";
-import FavoritesView from "./views/FavoritesView";
+import FavoritesView, { type FavoritesSub } from "./views/FavoritesView";
 import SettingsView, { type SettingsSub } from "./views/SettingsView";
 import type { Lang, View } from "./types";
 import { parseHash } from "./lib/router";
 import { useInstall } from "./lib/installStore";
 import { useSettingsDirty } from "./lib/dirtyStore";
+import { usePracticeActive } from "./lib/practiceStore";
+import { saveSettings } from "./api";
+
+/** tab 记忆的本地缓存键；持久化主来源是服务端设置（原生壳冷启动端口随机 →
+ * origin 变化后 localStorage 不可靠），这里只做即时恢复与兜底 */
+const VIEW_PREF_KEY = "podic.view";
 
 /** URL 驱动的页面定位：每个页面有自己的 hash（#/search、#/settings/packs），
  * 刷新不回首页；App 壳 deeplink（podic://search?q=…）统一转成 hash 跳转 */
@@ -38,9 +44,19 @@ const VIEWS: {
 ];
 
 export default function App() {
-  const [view, setView] = useState<View>("search");
+  // 启动恢复上次停留的 tab（白名单校验，脏值回退查词页）；
+  // 无 hash 的冷启动先按缓存值渲染，服务端记忆到达后再校正（见下方 effect）
+  const [view, setView] = useState<View>(() => {
+    try {
+      const v = localStorage.getItem(VIEW_PREF_KEY);
+      if (v && VIEWS.some((x) => x.id === v)) return v as View;
+    } catch { /* 静默 */ }
+    return "search";
+  });
   // 设置页二级页状态提升：返回键/浏览器返回的导航语义需要感知它
   const [settingsSub, setSettingsSub] = useState<SettingsSub>(null);
+  // 生词本子页（练习/词汇自测）：同 settingsSub 进返回栈；会话数据由 FavoritesView 持有
+  const [favoritesSub, setFavoritesSub] = useState<FavoritesSub>(null);
   // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
   // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章
   const [articleId, setArticleId] = useState<number | "new" | null>(() => {
@@ -69,7 +85,7 @@ export default function App() {
       localStorage.setItem("podic.lang", l);
     } catch { /* 静默 */ }
   }, []);
-  const { fontScale, hand, languages } = useSettings();
+  const { fontScale, hand, languages, loaded: settingsLoaded, lastView } = useSettings();
 
   // 注册表校验：当前语言被移出列表（多端同步/重置）后回退首项并持久化；每次列表变化重跑
   useEffect(() => {
@@ -109,6 +125,9 @@ export default function App() {
   // 离开拦截：词典下载进行中 / 设置有未保存修改时，切 tab 前确认
   const installState = useInstall();
   const settingsDirty = useSettingsDirty();
+  const practiceActive = usePracticeActive();
+  // 练习/自测进行中按返回键的确认丢弃
+  const [favExitAsk, setFavExitAsk] = useState(false);
   const [leaveAsk, setLeaveAsk] = useState<{ view: View; reason: "install" | "dirty" } | null>(null);
   const guardView = (v: View) => {
     if (v === view) return;
@@ -116,12 +135,18 @@ export default function App() {
     else if (installState) setLeaveAsk({ view: v, reason: "install" });
     else switchView(v);
   };
-  // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上
+  // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上。
+  // 无路径的冷启动（裸 URL）保持缓存恢复的 tab；带明确路径（含 #/search）则 hash 优先
+  const bootViewRef = useRef<View>("search");
+  const hashExplicitRef = useRef(false);
   useEffect(() => {
     const r = parseHash();
-    const v = viewOf(r.path[0]);
+    const explicit = r.path.length > 0;
+    const v = explicit ? viewOf(r.path[0]) : view;
     const s = v === "settings" ? subOf(r.path[1]) : null;
-    if (v !== "search") setView(v);
+    bootViewRef.current = v;
+    hashExplicitRef.current = explicit;
+    setView(v);
     if (s) setSettingsSub(s);
     history.replaceState({ podic: 1, view: v, sub: s }, "", hashUrl(v, s));
     history.pushState({ podic: 1, view: v, sub: s, sentinel: true }, "", hashUrl(v, s));
@@ -143,19 +168,44 @@ export default function App() {
       );
     }
   }, []);
+
+  // ---- tab 记忆（服务端为准，localStorage 兜底）----
+  // 服务端设置到达后校正启动 tab：仅无明确 hash、且用户尚未导航时应用一次
+  const viewCorrectedRef = useRef(false);
+  useEffect(() => {
+    if (viewCorrectedRef.current || !settingsLoaded) return;
+    viewCorrectedRef.current = true;
+    if (hashExplicitRef.current) return; // deeplink/刷新带明确路径：hash 优先
+    if (view !== bootViewRef.current) return; // 用户已导航，不抢当前页
+    if (lastView && lastView !== view && VIEWS.some((x) => x.id === lastView)) {
+      switchView(lastView as View);
+    }
+  }, [settingsLoaded, lastView, view]);
+
+  // 每次 tab 变化持久化：localStorage 即时 + 服务端设置。串行链防乱序落盘
+  // （本地请求通常按序返回，但不做保证）；失败静默——只是偏好，不值得打扰
+  const viewSaveChain = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_PREF_KEY, view);
+    } catch { /* 静默 */ }
+    viewSaveChain.current = viewSaveChain.current
+      .then(() => saveSettings({ last_view: view }))
+      .catch(() => { /* 保存失败不影响使用，下次启动用上次成功值 */ });
+  }, [view]);
   useEffect(() => {
     if (restoring.current) {
       restoring.current = false;
       return;
     }
-    const state = { podic: 1, view, sub: settingsSub, article: articleId };
+    const state = { podic: 1, view, sub: settingsSub, article: articleId, favSub: favoritesSub };
     const hs = { ...(history.state ?? {}) } as Record<string, unknown>;
     delete hs.sentinel;
     if (JSON.stringify(hs) !== JSON.stringify(state)) {
       // pushState 携带 hash URL：返回栈条目自带页面地址，popstate 恢复时地址栏同步
       history.pushState(state, "", hashUrl(view, settingsSub));
     }
-  }, [view, settingsSub, articleId]);
+  }, [view, settingsSub, articleId, favoritesSub]);
 
   // hash 跳转（deeplink / 手动改地址）：派生页面状态并按需触发查询
   useEffect(() => {
@@ -190,16 +240,24 @@ export default function App() {
       PodicHarmony?: { setCanGoBack: (v: boolean) => void };
       __podicGoBack?: () => void;
     };
-    // 查词根且无二级页才交给壳直接退出；阅读文章内返回（回列表）走 __podicGoBack
-    const canGoBack = view !== "search" || settingsSub !== null;
+    // 查词根且无二级页才交给壳直接退出；阅读文章/生词本子页内返回走 __podicGoBack。
+    // 切走生词本时子页保留（回来继续会话），但返回键不跨 tab 借道
+    const canGoBack =
+      settingsSub !== null ||
+      (view === "favorites" && favoritesSub !== null) ||
+      (view !== "search" && view !== "favorites");
     w.PodicAndroid?.setCanGoBack(canGoBack);
     w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
       if (settingsSub) setSettingsSub(null);
       else if (view === "reading" && articleId !== null) setArticleId(null);
-      else if (view !== "search") switchView("search");
+      else if (view === "favorites" && favoritesSub !== null) {
+        // 会话进行中先确认丢弃（首答等级已在服务端，丢的是剩余题目）
+        if (practiceActive) setFavExitAsk(true);
+        else setFavoritesSub(null);
+      } else if (view !== "search") switchView("search");
     };
-  }, [view, settingsSub, articleId]);
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive]);
 
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
@@ -208,6 +266,7 @@ export default function App() {
         view?: View;
         sub?: SettingsSub;
         article?: number | "new" | null;
+        favSub?: FavoritesSub;
         sentinel?: boolean;
       } | null;
       if (!s?.podic) {
@@ -221,6 +280,7 @@ export default function App() {
           restoring.current = true;
           setView(v0);
           setSettingsSub(s0);
+          setFavoritesSub(null);
         }
         return;
       }
@@ -234,6 +294,8 @@ export default function App() {
       setView(s.view ?? "search");
       setSettingsSub(s.sub ?? null);
       setArticleId(s.article ?? null);
+      // 旧条目无 favSub：内存里还有会话也不凭 state 复活面板（回到生词本列表）
+      setFavoritesSub(s.favSub ?? null);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -341,7 +403,14 @@ export default function App() {
               {v.id === "reading" && (
                 <ReadingView lang={lang} articleId={articleId} setArticleId={setArticleId} />
               )}
-              {v.id === "favorites" && <FavoritesView active={view === "favorites"} onOpenWord={openWord} />}
+              {v.id === "favorites" && (
+                <FavoritesView
+                  active={view === "favorites"}
+                  onOpenWord={openWord}
+                  sub={favoritesSub}
+                  setSub={setFavoritesSub}
+                />
+              )}
               {v.id === "settings" && <SettingsView sub={settingsSub} setSub={setSettingsSub} curLang={lang} />}
             </div>
           ))}
@@ -400,6 +469,19 @@ export default function App() {
           if (v) switchView(v);
         }}
         onCancel={() => setLeaveAsk(null)}
+      />
+
+      {/* 练习/自测进行中按返回键：确认丢弃剩余题目（面板内返回按钮走它自己的确认框） */}
+      <ConfirmDialog
+        open={favExitAsk}
+        title="结束当前练习？"
+        message="已答题目的熟练度变化已保存，剩余题目将丢弃。"
+        confirmText="结束练习"
+        onConfirm={() => {
+          setFavExitAsk(false);
+          setFavoritesSub(null);
+        }}
+        onCancel={() => setFavExitAsk(false)}
       />
     </div>
   );

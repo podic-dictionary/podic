@@ -5,6 +5,7 @@ import {
 import type { LanguageConfig, PackInfo, UserDictEntry } from "../types";
 import ConfirmDialog from "../components/ConfirmDialog";
 import NoticeDialog from "../components/NoticeDialog";
+import Seg from "../components/SegmentedControl";
 import {
   ChevronLeftIcon, EyeIcon, EyeOffIcon, GripIcon, PlusIcon, TrashIcon, XIcon, ZapIcon,
 } from "../components/icons";
@@ -70,34 +71,6 @@ const HAND_OPTS: { id: Hand; label: string }[] = [
   { id: "left", label: "左手" },
 ];
 
-function Seg<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { id: T; label: string }[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          aria-pressed={value === o.id}
-          className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-            value === o.id
-              ? "bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-400"
-              : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function Row({ label, hint, onClick }: { label: string; hint?: string; onClick: () => void }) {
   return (

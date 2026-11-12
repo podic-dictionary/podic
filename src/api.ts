@@ -187,6 +187,8 @@ export interface SettingsView {
   providers: ProviderView[];
   manifest_url: string;
   languages?: LanguageConfig[];
+  /** 上次停留的页面（tab 记忆的服务端来源；原生壳冷启动换端口后 localStorage 不可靠） */
+  last_view?: string | null;
 }
 
 export const getSettings = () => api<SettingsView>("/settings");
@@ -196,6 +198,7 @@ export const saveSettings = (settings: {
   providers?: (Partial<ProviderView> & { id: string; name: string; protocol: string })[];
   manifest_url?: string;
   languages?: LanguageConfig[];
+  last_view?: string;
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 
 export const testProvider = (
@@ -219,6 +222,8 @@ export interface Favorite {
   norm: string;
   snapshot: string | null;
   note: string | null;
+  /** 练习熟练度 1生 2模糊 3认识 4熟练（练习首答升降，见 reviewFavorite） */
+  mastery: number;
   created_at: string;
 }
 
@@ -229,10 +234,74 @@ export const addFavorite = (f: {
   headword: string;
   norm: string;
   snapshot?: unknown;
-}) => api<{ id: number }>("/favorites", { method: "POST", body: JSON.stringify(f), headers: { "Content-Type": "application/json" } });
+}) => api<{ id: number; created: boolean; mastery: number }>("/favorites", { method: "POST", body: JSON.stringify(f), headers: { "Content-Type": "application/json" } });
 
 export const removeFavorite = (id: number) =>
   api<{ ok: boolean }>(`/favorites/${id}`, { method: "DELETE" });
+
+/** 练习答题判分 + 熟练度更新（first 首答升降级；retry 错词重练只判分）。
+ * choice 题用 selected_key（"favorite:<id>"），typed 填词文本，不会则 surrender */
+export const reviewFavorite = (id: number, o: {
+  session_id: string;
+  phase?: "first" | "retry";
+  answer: { kind: "choice"; selected_key: string } | { kind: "typed"; text: string } | { kind: "surrender" };
+}) =>
+  api<{
+    correct: boolean;
+    expected_headword: string;
+    mastery_before: number;
+    mastery_after: number;
+    applied: boolean;
+    duplicate: boolean;
+  }>(`/favorites/${id}/review`, { method: "POST", body: JSON.stringify(o), headers: { "Content-Type": "application/json" } });
+
+// ---- 词汇自测 ----
+
+export interface VocabTestPlan {
+  id: string;
+  lang: string;
+  pack_id: string;
+  pack_version: string;
+  domain_rule: string;
+  domain_label: string;
+  population_size: number;
+  question_count: number;
+  bands: { id: number; population: number; sample_size: number }[];
+  items: { id: string; band: number; headword: string; ipa: string | null }[];
+}
+
+export interface VocabTestResult {
+  estimate: number;
+  low: number;
+  high: number;
+  population_size: number;
+  bands: { id: number; population: number; sample_size: number; known: number }[];
+  method: string;
+}
+
+export interface VocabTestHistoryItem {
+  id: string;
+  lang: string;
+  pack_version: string;
+  domain_rule: string;
+  population_size: number;
+  question_count: number;
+  created_at: string;
+  finished_at: string;
+  result: VocabTestResult | null;
+}
+
+/** 生成一次不可变抽样计划（出题）。词典无词频数据时 422 提示不可测 */
+export const createVocabTest = (lang: string, question_count: 60 | 120) =>
+  api<VocabTestPlan>("/vocab-tests", { method: "POST", body: JSON.stringify({ lang, question_count }), headers: { "Content-Type": "application/json" } });
+
+/** 提交全部答案，服务端按计划计算并保存结果 */
+export const finishVocabTest = (id: string, answers: { item_id: string; known: boolean }[]) =>
+  api<{ id: string; finished: boolean; result: VocabTestResult }>(`/vocab-tests/${id}/finish`, { method: "POST", body: JSON.stringify({ answers }), headers: { "Content-Type": "application/json" } });
+
+/** 某语言已完成的历史结果 */
+export const listVocabTests = (lang: string, limit = 20) =>
+  api<{ items: VocabTestHistoryItem[] }>(`/vocab-tests?${qs({ lang, limit })}`).then((r) => r.items);
 
 // ---- 阅读：文章 / 用户词典 / 生词标记 ----
 

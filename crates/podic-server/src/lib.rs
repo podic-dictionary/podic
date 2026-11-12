@@ -5,6 +5,7 @@ pub mod log;
 pub mod reader_routes;
 pub mod routes;
 pub mod state;
+pub mod vocab_routes;
 
 pub use state::{AppState, Core};
 
@@ -71,6 +72,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/settings/test-provider", axum::routing::post(routes::test_provider))
         .route("/api/favorites", axum::routing::get(routes::list_favorites).post(routes::add_favorite))
         .route("/api/favorites/{id}", axum::routing::delete(routes::remove_favorite))
+        .route("/api/favorites/{id}/review", axum::routing::post(routes::review_favorite))
         .route("/api/ai/run", axum::routing::post(routes::ai_run))
         .route("/api/ai/cancel", axum::routing::post(routes::ai_cancel))
         .route("/api/ai/overlay", axum::routing::get(routes::get_overlay).post(routes::save_overlay).delete(routes::delete_overlay))
@@ -82,6 +84,11 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/user-dict", axum::routing::get(reader_routes::list_user_dict).post(reader_routes::save_user_dict))
         .route("/api/user-dict/{id}", axum::routing::delete(reader_routes::delete_user_dict))
         .route("/api/word-status", axum::routing::get(reader_routes::list_word_status).post(reader_routes::set_word_status))
+        .route(
+            "/api/vocab-tests",
+            axum::routing::get(vocab_routes::list_vocab_tests).post(vocab_routes::create_vocab_test),
+        )
+        .route("/api/vocab-tests/{id}/finish", axum::routing::post(vocab_routes::finish_vocab_test))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))
