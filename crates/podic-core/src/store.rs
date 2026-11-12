@@ -646,6 +646,24 @@ pub fn vocab_test_finish(
 }
 
 /// 已完成的结果列表（按时间倒序）
+/// 某语言 + 指定词典版本最近一次已完成测试（每日一句推荐层的证据源）。
+/// 不复用 vocab_test_history：那里先 LIMIT 后无版本过滤，回退词典版本时同版本
+/// 结果可能落在窗口外；完成时间排序也比创建时间更贴近"最近一次"
+pub fn vocab_test_latest_for_pack(
+    conn: &Connection,
+    lang: &str,
+    pack_id: &str,
+    pack_version: &str,
+) -> Result<Option<VocabTestRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {VT_COLS} FROM vocabulary_test
+         WHERE lang = ?1 AND pack_id = ?2 AND pack_version = ?3 AND finished_at IS NOT NULL
+         ORDER BY finished_at DESC LIMIT 1"
+    ))?;
+    let mut rows = stmt.query_map([lang, pack_id, pack_version], row_to_vt)?;
+    Ok(rows.next().transpose()?)
+}
+
 pub fn vocab_test_history(conn: &Connection, lang: &str, limit: i64) -> Result<Vec<VocabTestRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {VT_COLS} FROM vocabulary_test

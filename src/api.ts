@@ -313,8 +313,9 @@ export const listVocabTests = (lang: string, limit = 20) =>
 
 export interface DailySentenceResult {
   word: { headword: string; entry_id: number; ipa: string | null };
-  /** mode=auto 时 reason 是服务端生成的推荐说明（如「根据上次英语测试推荐…」） */
-  level: { mode: "auto" | "manual"; band: number; reason: string; known?: number; sample_size?: number };
+  /** mode=auto 时 reason 是服务端生成的推荐说明（如「根据上次英语测试推荐…」）；
+   * note 是非致命提示（如单词层换不出别的词），有值时优先展示 */
+  level: { mode: "auto" | "manual"; band: number; reason: string; note?: string; known?: number; sample_size?: number };
   /** 可用层及词数（难度选择控件的数据源） */
   bands: { id: number; count: number }[];
   /** null = 没取到例句（无词典例句且 AI 不可用），原因见 message */

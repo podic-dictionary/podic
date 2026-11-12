@@ -58,8 +58,10 @@ export default function App() {
   const [settingsSub, setSettingsSub] = useState<SettingsSub>(null);
   // 生词本子页（练习/单词量测试）：同 settingsSub 进返回栈；会话数据由 FavoritesView 持有
   const [favoritesSub, setFavoritesSub] = useState<FavoritesSub>(null);
-  // 每日一句弹层：占一个临时 history 条目（携带当前视图状态），返回键只关弹层
+  // 每日一句弹层：占一个临时 history 条目（携带当前视图状态），返回键只关弹层。
+  // ref 镜像供 popstate 用：连续两次返回事件间 state 更新可能还没落，ref 是同步真相
   const [dailyOpen, setDailyOpen] = useState(false);
+  const dailyOpenRef = useRef(false);
   // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
   // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章
   const [articleId, setArticleId] = useState<number | "new" | null>(() => {
@@ -127,9 +129,11 @@ export default function App() {
       "",
       hashUrl(view, settingsSub),
     );
+    dailyOpenRef.current = true;
     setDailyOpen(true);
   };
   const closeDaily = () => {
+    dailyOpenRef.current = false;
     setDailyOpen(false);
     history.back(); // popstate 早退分支只关弹层（此时已关，幂等）
   };
@@ -339,7 +343,8 @@ export default function App() {
       // 一声就把会话清了（评审 R07）
       // 每日一句的临时条目被返回：只关弹层（底下视图状态与压入时相同）。
       // X/遮罩/查看单词走的 closeDaily 已退栈，这里处理的是返回键场景
-      if (dailyOpen && !s?.daily) {
+      if (dailyOpenRef.current && !s?.daily) {
+        dailyOpenRef.current = false;
         setDailyOpen(false);
         return;
       }
@@ -557,7 +562,17 @@ export default function App() {
 
       {/* 浏览器场景：查词栈底再按返回的退出确认 */}
       {dailyOpen && (
-        <DailySentenceDialog lang={lang} onClose={closeDaily} onOpenWord={openWord} />
+        <DailySentenceDialog
+          lang={lang}
+          onClose={closeDaily}
+          onOpenWord={(w, l) => {
+            // 查看单词先关弹层（复核 R7）：不退栈——switchView 压入新查词条目，
+            // 返回时经 daily 条目自然回到打开弹层前的页面
+            setDailyOpen(false);
+            dailyOpenRef.current = false;
+            openWord(w, l);
+          }}
+        />
       )}
       <ConfirmDialog
         open={exitAsk}

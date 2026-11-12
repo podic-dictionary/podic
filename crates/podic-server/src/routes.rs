@@ -438,6 +438,8 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
         "manifest_url": core.settings.manifest_url,
         "languages": core.settings.languages,
         "last_view": core.settings.last_view,
+        // 每日一句偏好必须回传：前端整份读改写 levels_by_lang，缺了会把其他语言的选择冲掉
+        "daily_sentence": core.settings.daily_sentence,
     })))
 }
 

@@ -16,7 +16,8 @@ use serde_json::{json, Value};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-/// 每日一句 AI prompt 版本：变化时旧缓存自然失效（缓存键含此版本）
+/// 每日一句 AI prompt 版本：缓存键含此值。改动 prompt.rs 的 daily 生成规则
+/// 或输出结构时必须递增，否则改版后仍会命中旧缓存拿到旧句子
 const DAILY_PROMPT_VERSION: &str = "v1";
 
 #[derive(Clone, Deserialize)]
@@ -86,28 +87,23 @@ fn band_stats_of_last_test(
     version: &str,
 ) -> Option<(Vec<(i64, i64)>, String)> {
     let core = lock(state);
-    let rows = podic_core::store::vocab_test_history(&core.conn, lang, 5).ok()?;
-    for row in rows {
-        if row.finished_at.is_none() || row.pack_id != pack_id || row.pack_version != version {
-            continue;
-        }
-        let result: Value = serde_json::from_str(row.result_json.as_deref()?).ok()?;
-        let bands = result.get("bands")?.as_array()?;
-        let stats: Vec<(i64, i64)> = bands
-            .iter()
-            .map(|b| {
-                (
-                    b.get("sample_size").and_then(|v| v.as_i64()).unwrap_or(0),
-                    b.get("known").and_then(|v| v.as_i64()).unwrap_or(0),
-                )
-            })
-            .collect();
-        if stats.is_empty() {
-            continue;
-        }
-        return Some((stats, row.id));
+    // 按词典版本精确取最近完成的一次；创建时间排序会把交错完成的旧版本结果误当最新
+    let row = podic_core::store::vocab_test_latest_for_pack(&core.conn, lang, pack_id, version).ok()??;
+    let result: Value = serde_json::from_str(row.result_json.as_deref()?).ok()?;
+    let bands = result.get("bands")?.as_array()?;
+    let stats: Vec<(i64, i64)> = bands
+        .iter()
+        .map(|b| {
+            (
+                b.get("sample_size").and_then(|v| v.as_i64()).unwrap_or(0),
+                b.get("known").and_then(|v| v.as_i64()).unwrap_or(0),
+            )
+        })
+        .collect();
+    if stats.is_empty() {
+        return None;
     }
-    None
+    Some((stats, row.id))
 }
 
 fn parse_daily_json(raw: &str) -> Option<(String, Vec<String>)> {
@@ -221,26 +217,33 @@ pub async fn daily_sentence(
         },
     };
 
-    // 抽词：带排除重抽（同层两个候选，排除词命中就取另一个）
+    // 抽词：带排除重抽（同层两个候选，排除词命中就取另一个）。
+    // 层里唯一词恰好是被排除的（换一句但没有第二个词）：原样返回并给 note 说明
     let exclude = input
         .exclude_headword
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let mut unit = {
+    let (mut unit, mut dup_note) = {
         let two = sample_band(&units, band, 2);
-        two.into_iter()
-            .find(|u| Some(u.headword.as_str()) != exclude)
-            .unwrap_or_else(|| sample_band(&units, band, 1).into_iter().next().unwrap())
+        match two.iter().find(|u| Some(u.headword.as_str()) != exclude) {
+            Some(u) => (u.clone(), None),
+            None => (
+                two.first().cloned().unwrap_or_else(|| sample_band(&units, band, 1).into_iter().next().unwrap()),
+                exclude.map(|_| "本层只有这一个词，没有别的可换".to_string()),
+            ),
+        }
     };
 
     // ---- 再拿锁：词条定位 + 例句 + AI 缓存/Provider（一次 guard 用到底） ----
+    // norm 必须在最终词条确定后再算：定位失败重抽换词后，缓存键/词条要跟新词走，
+    // 否则词 A 的键会存进词 B 的句子（复核 R3）
     let core = lock(&state);
-    let norm = podic_core::norm::norm(&unit.headword, &lang);
     let find_entry = |norm: &str| -> Option<i64> {
         let sql = format!("SELECT id FROM \"{lang}\".entry WHERE norm = ?1 LIMIT 1");
         core.conn.query_row(&sql, [norm], |r| r.get(0)).ok()
     };
+    let mut norm = podic_core::norm::norm(&unit.headword, &lang);
     let mut entry_id = find_entry(&norm);
     if entry_id.is_none() {
         // 防御：域缓存与词条表版本错位（词典刚更新）——换一个候选再试
@@ -248,8 +251,8 @@ pub async fn daily_sentence(
             .into_iter()
             .find(|u| Some(u.headword.as_str()) != exclude)
             .unwrap_or(unit);
-        let norm2 = podic_core::norm::norm(&unit.headword, &lang);
-        entry_id = find_entry(&norm2);
+        norm = podic_core::norm::norm(&unit.headword, &lang);
+        entry_id = find_entry(&norm);
     }
     let entry_id = entry_id
         .ok_or_else(|| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "词条定位失败，请重试".into()))?;
@@ -284,6 +287,7 @@ pub async fn daily_sentence(
         .and_then(|pid| core.settings.providers.iter().find(|p| p.id == pid).cloned());
 
     PickOutcome {
+        note: dup_note,
         headword: unit.headword,
         ipa: unit.ipa,
         entry_id,
@@ -312,6 +316,9 @@ pub async fn daily_sentence(
         "band": picked.band,
         "reason": picked.reason,
     });
+    if let Some(note) = &picked.note {
+        level["note"] = json!(note);
+    }
     if let Some((k, n)) = picked.known_sample {
         level["known"] = json!(k);
         level["sample_size"] = json!(n);
@@ -388,10 +395,12 @@ pub async fn daily_sentence(
     let Some((text, translation)) = parse_daily_json(&full) else {
         return Err(ApiError(StatusCode::BAD_GATEWAY, "AI 输出格式异常，请换一句试试".into()));
     };
-    // 校验通过才进缓存（坏输出不污染）
+    // 校验通过才进缓存，且缓存规范化后的 JSON（混合类型等不合规原文不入库，
+    // 读回来二次解析也只会得到干净结构）；坏输出/超时不污染
     {
         let core = lock(&state);
-        let _ = podic_core::store::ai_cache_put(&core.conn, &picked.ai_key, "daily", &model, &full);
+        let canonical = json!({"text": text, "translation": translation}).to_string();
+        let _ = podic_core::store::ai_cache_put(&core.conn, &picked.ai_key, "daily", &model, &canonical);
     }
     Ok(Json(json!({
         "word": word,
@@ -403,6 +412,8 @@ pub async fn daily_sentence(
 
 /// 持锁段一次性取齐的全部信息（锁释放后只用 owned 数据）
 struct PickOutcome {
+    /// 单词层换不出别的词等非致命提示；前端展示在推荐说明旁
+    note: Option<String>,
     headword: String,
     ipa: Option<String>,
     entry_id: i64,

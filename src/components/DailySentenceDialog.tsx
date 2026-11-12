@@ -25,28 +25,37 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   const [showZh, setShowZh] = useState(false);
   // 难度选择（Seg 的 id："auto" | 层号字符串）；levelsByLang 是服务端整份偏好
   const [levelsByLang, setLevelsByLang] = useState<Record<string, { mode: string; band?: number }>>({});
-  const [prefSaved, setPrefSaved] = useState(true);
+  // 偏好读取完成前禁用难度选择：迟到的 GET 覆盖刚选的状态（复核 R8 单端竞态）
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  // 偏好保存状态："ok" | "pending" | "error"——pending 不能显示成失败
+  const [prefSaveState, setPrefSaveState] = useState<"ok" | "pending" | "error">("ok");
   const reqSeq = useRef(0);
+  // 保存串行链：快速换层时按发起顺序落盘，旧请求后到不会覆盖新选择
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
 
-  // 读按语言存的偏好
+  // 读按语言存的偏好（GET /api/settings 的 daily_sentence 字段）
   useEffect(() => {
     getSettings()
-      .then((s) => setLevelsByLang(s.daily_sentence?.levels_by_lang ?? {}))
-      .catch(() => {});
+      .then((s) => {
+        setLevelsByLang(s.daily_sentence?.levels_by_lang ?? {});
+        setPrefsLoaded(true);
+      })
+      .catch(() => setPrefsLoaded(true));
   }, []);
 
   const fetchOne = useCallback(
-    async (exclude?: string) => {
+    async (opts?: { exclude?: string; level?: { mode: "auto" | "manual"; band?: number } }) => {
       const seq = ++reqSeq.current;
       setLoading(true);
       setError("");
       setShowZh(false);
       try {
-        const pref = levelsByLang[lang];
+        // level 显式传入（换层场景），否则读当前偏好
+        const pref = opts?.level ?? levelsByLang[lang];
         const r = await dailySentence({
           lang,
           level: pref ? { mode: pref.mode as "auto" | "manual", band: pref.band } : undefined,
-          exclude_headword: exclude,
+          exclude_headword: opts?.exclude,
           provider_id: aiChoice.providerId || undefined,
           model: aiChoice.model || undefined,
         });
@@ -66,19 +75,19 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang]);
 
-  const pickLevel = async (id: string) => {
+  const pickLevel = (id: string) => {
     const pref = id === "auto" ? { mode: "auto" } : { mode: "manual", band: Number(id) };
     const next = { ...levelsByLang, [lang]: pref };
     setLevelsByLang(next);
-    setPrefSaved(false);
-    // 换层立刻换词（排除当前词），偏好并行落盘；失败只提示不打断
-    fetchOne(data?.word.headword);
-    try {
-      await saveSettings({ daily_sentence: { levels_by_lang: next } });
-      setPrefSaved(true);
-    } catch {
-      setPrefSaved(false);
-    }
+    // 换层立刻换词（排除当前词），显式传新偏好——此时 fetchOne 闭包里的
+    // levelsByLang 还是旧值（复核 R6）
+    fetchOne({ exclude: data?.word.headword, level: pref as { mode: "auto" | "manual"; band?: number } });
+    // 保存走串行链：快速连点换层按发起顺序落盘；pending 不显示成失败
+    setPrefSaveState("pending");
+    saveChain.current = saveChain.current
+      .then(() => saveSettings({ daily_sentence: { levels_by_lang: next } }))
+      .then(() => setPrefSaveState("ok"))
+      .catch(() => setPrefSaveState("error"));
   };
 
   const bands = data?.bands.filter((b) => b.count > 0) ?? [];
@@ -115,10 +124,12 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
                 value={segValue}
                 options={[{ id: "auto", label: "推荐" }, ...bands.map((b) => ({ id: String(b.id), label: bandLabel(b.id) }))]}
                 onChange={pickLevel}
+                disabled={!prefsLoaded}
               />
               <p className="mt-1.5 text-xs text-zinc-400">
-                {loading ? "…" : data?.level.reason || "按你选的层随机抽词"}
-                {!prefSaved && <span className="ml-1 text-amber-500">（偏好保存失败，本次仍生效）</span>}
+                {loading ? "…" : data?.level.note || data?.level.reason || "按你选的层随机抽词"}
+                {prefSaveState === "pending" && <span className="ml-1 text-zinc-400">（保存偏好中…）</span>}
+                {prefSaveState === "error" && <span className="ml-1 text-amber-500">（偏好保存失败，本次仍生效）</span>}
               </p>
             </div>
           )}
@@ -175,7 +186,7 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
         {/* 底部动作 */}
         <div className="flex gap-3 border-t border-zinc-200/70 px-4 py-3 dark:border-zinc-800/70">
           <button
-            onClick={() => fetchOne(word?.headword)}
+            onClick={() => fetchOne({ exclude: word?.headword })}
             disabled={loading}
             className="flex-1 rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
           >

@@ -328,7 +328,8 @@ export default function PracticePanel({
                 ) : (
                   <button
                     onClick={() => setHints((h) => ({ ...h, ipa: true }))}
-                    className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                    disabled={submitting}
+                    className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-40 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                   >
                     提示：音标
                   </button>
@@ -340,7 +341,8 @@ export default function PracticePanel({
               ) : (
                 <button
                   onClick={() => setHints((h) => ({ ...h, letter: true }))}
-                  className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
+                  disabled={submitting}
+                  className="rounded-lg border border-dashed border-zinc-300 px-2.5 py-1 text-xs text-zinc-400 transition-colors hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-40 dark:border-zinc-600 dark:hover:border-emerald-700 dark:hover:text-emerald-400"
                 >
                   提示：首字母
                 </button>
