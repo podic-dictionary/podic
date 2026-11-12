@@ -151,10 +151,7 @@ pub async fn daily_sentence(
     let picked = {
     let (pref, lang_name) = {
         let core = lock(&state);
-        let pack = core
-            .packs
-            .get(&lang)
-            .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "该语言没有已安装的词典".into()))?;
+        // 404 校验在这里只看已装列表；pack 详情由下一段锁统一取
         if !core.packs.langs().iter().any(|l| l == &lang) {
             return Err(ApiError(StatusCode::NOT_FOUND, "该语言没有已安装的词典".into()));
         }
@@ -166,7 +163,6 @@ pub async fn daily_sentence(
             .find(|l| l.code == lang)
             .map(|l| l.name.clone())
             .unwrap_or_else(|| lang.clone());
-        let _ = pack;
         (pref, lang_name)
     };
     let core = lock(&state);
