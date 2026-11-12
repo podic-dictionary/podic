@@ -502,3 +502,71 @@ mod tests {
         assert!(lo <= v && v <= hi);
     }
 }
+
+/// 每日一句的难度层推荐：按最近一次同词典版本的测试结果挑「大概率不熟悉」的层。
+/// 入参按层序给 (sample_size, known)。规则（保守门槛，非统计保证）：
+/// ① 样本数 <10 的层不参与（整层被测完的除外——不会发生，抽测上限 120）；
+/// ② 优先取认识率 20%~70% 且最接近 35% 的层（并列取更常用层，stable sort 保证）；
+/// ③ 全部 >70% → 最高可用层；全部 <20% → 最低可用层；无合格证据 → None（调用方兜底最易层）
+pub fn recommend_band(bands: &[(i64, i64)]) -> Option<usize> {
+    let eligible: Vec<usize> = bands
+        .iter()
+        .enumerate()
+        .filter(|(_, (n, known))| *n >= 10 && *known >= 0 && known <= n)
+        .map(|(i, _)| i)
+        .collect();
+    if eligible.is_empty() {
+        return None;
+    }
+    let p = |i: usize| bands[i].1 as f64 / bands[i].0 as f64;
+    let mut in_range: Vec<usize> = eligible
+        .iter()
+        .copied()
+        .filter(|i| (0.20..=0.70).contains(&p(*i)))
+        .collect();
+    if !in_range.is_empty() {
+        in_range.sort_by_key(|i| ((p(*i) - 0.35).abs() * 1000.0).round() as i64);
+        return Some(in_range[0]);
+    }
+    if eligible.iter().all(|i| p(*i) > 0.70) {
+        return eligible.iter().copied().max();
+    }
+    if eligible.iter().all(|i| p(*i) < 0.20) {
+        return eligible.iter().copied().min();
+    }
+    // 防御：混合态但都不在区间（数学上不可能）——取最接近 35%
+    let mut all = eligible;
+    all.sort_by_key(|i| ((p(*i) - 0.35).abs() * 1000.0).round() as i64);
+    Some(all[0])
+}
+
+#[cfg(test)]
+mod recommend_tests {
+    use super::recommend_band;
+
+    #[test]
+    fn 无证据返回none() {
+        assert_eq!(recommend_band(&[]), None);
+        assert_eq!(recommend_band(&[(5, 1), (8, 3)]), None); // 样本不足
+    }
+
+    #[test]
+    fn 区间内取最接近三成五() {
+        // 42% vs 36%：36% 距 35% 更近 → 层1
+        assert_eq!(recommend_band(&[(50, 21), (50, 18)]), Some(1));
+        // 34% vs 36%：并列距离 1% → 取更常用层 0
+        assert_eq!(recommend_band(&[(50, 17), (50, 18)]), Some(0));
+    }
+
+    #[test]
+    fn 全认识取最高层_全不认识取最低层() {
+        assert_eq!(recommend_band(&[(50, 45), (50, 48)]), Some(1));
+        assert_eq!(recommend_band(&[(50, 3), (50, 5)]), Some(0));
+    }
+
+    #[test]
+    fn 零样本层被跳过() {
+        // 层1 没抽到样本，只在层0（40%）与层2（20%）之间选 → 40% 更近 35%
+        assert_eq!(recommend_band(&[(50, 20), (0, 0), (50, 10)]), Some(0));
+    }
+}

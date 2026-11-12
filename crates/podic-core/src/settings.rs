@@ -59,6 +59,20 @@ pub fn default_languages() -> Vec<LanguageConfig> {
     ]
 }
 
+/// 每日一句的难度层偏好（按语言存）：auto = 按最近单词量测试推荐；manual = 用户手选层
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyLevelPref {
+    pub mode: String, // "auto" | "manual"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band: Option<usize>, // mode=manual 时有效
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DailySentencePrefs {
+    #[serde(default)]
+    pub levels_by_lang: std::collections::HashMap<String, DailyLevelPref>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
@@ -74,6 +88,9 @@ pub struct Settings {
     /// localStorage 不可靠，tab 记忆以服务端为准。值由前端白名单校验，后端只透传
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_view: Option<String>,
+    /// 每日一句偏好（缺省 = 各语言 auto）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_sentence: Option<DailySentencePrefs>,
 }
 
 impl Default for Settings {
@@ -83,6 +100,7 @@ impl Default for Settings {
             manifest_url: String::new(),
             languages: default_languages(),
             last_view: None,
+            daily_sentence: None,
         }
     }
 }

@@ -189,6 +189,8 @@ export interface SettingsView {
   languages?: LanguageConfig[];
   /** 上次停留的页面（tab 记忆的服务端来源；原生壳冷启动换端口后 localStorage 不可靠） */
   last_view?: string | null;
+  /** 每日一句按语言存的难度层偏好 */
+  daily_sentence?: { levels_by_lang: Record<string, { mode: string; band?: number }> } | null;
 }
 
 export const getSettings = () => api<SettingsView>("/settings");
@@ -199,6 +201,7 @@ export const saveSettings = (settings: {
   manifest_url?: string;
   languages?: LanguageConfig[];
   last_view?: string;
+  daily_sentence?: { levels_by_lang: Record<string, { mode: string; band?: number }> };
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 
 export const testProvider = (
@@ -305,6 +308,33 @@ export const finishVocabTest = (id: string, answers: { item_id: string; known: b
 /** 某语言已完成的历史结果 */
 export const listVocabTests = (lang: string, limit = 20) =>
   api<{ items: VocabTestHistoryItem[] }>(`/vocab-tests?${qs({ lang, limit })}`).then((r) => r.items);
+
+// ---- 每日一句 ----
+
+export interface DailySentenceResult {
+  word: { headword: string; entry_id: number; ipa: string | null };
+  /** mode=auto 时 reason 是服务端生成的推荐说明（如「根据上次英语测试推荐…」） */
+  level: { mode: "auto" | "manual"; band: number; reason: string; known?: number; sample_size?: number };
+  /** 可用层及词数（难度选择控件的数据源） */
+  bands: { id: number; count: number }[];
+  /** null = 没取到例句（无词典例句且 AI 不可用），原因见 message */
+  sentence: { text: string; translation: string[]; source: "pack" | "ai"; cached: boolean; id: number | null } | null;
+  message?: string;
+}
+
+/** 随机抽词 + 例句（词典例句优先，AI 单句兜底并缓存）；level 省略 = 服务端偏好 */
+export const dailySentence = (body: {
+  lang: string;
+  level?: { mode: "auto" | "manual"; band?: number };
+  exclude_headword?: string;
+  provider_id?: string;
+  model?: string;
+}) =>
+  api<DailySentenceResult>("/daily-sentence", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  });
 
 // ---- 阅读：文章 / 用户词典 / 生词标记 ----
 

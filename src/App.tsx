@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { FONT_ZOOM, useSettings } from "./SettingsContext";
 import ConfirmDialog from "./components/ConfirmDialog";
+import DailySentenceDialog from "./components/DailySentenceDialog";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import { BookOpenIcon, ChevronLeftIcon, GearIcon, LanguagesIcon, SearchIcon, StarIcon } from "./components/icons";
 import ReadingView from "./views/ReadingView";
@@ -57,6 +58,8 @@ export default function App() {
   const [settingsSub, setSettingsSub] = useState<SettingsSub>(null);
   // 生词本子页（练习/单词量测试）：同 settingsSub 进返回栈；会话数据由 FavoritesView 持有
   const [favoritesSub, setFavoritesSub] = useState<FavoritesSub>(null);
+  // 每日一句弹层：占一个临时 history 条目（携带当前视图状态），返回键只关弹层
+  const [dailyOpen, setDailyOpen] = useState(false);
   // 阅读态：文章 id | "new"(粘贴) | null(列表)；进返回栈与 settingsSub 同路径。
   // 持久化到 localStorage：切 tab / 重启 app 都恢复上次读到的文章
   const [articleId, setArticleId] = useState<number | "new" | null>(() => {
@@ -115,6 +118,21 @@ export default function App() {
       else localStorage.removeItem("podic.reading.article"); // null / "new" 都不跨启动保留
     } catch { /* 静默 */ }
   }, [articleId]);
+
+  // 每日一句开/关：开 = 压入临时条目（复制当前视图状态）；关 = 退栈消费该条目。
+  // 「查看单词」不退栈——它压入新的查词条目，返回时自然回到弹层之前的页面
+  const openDaily = () => {
+    history.pushState(
+      { podic: 1, daily: 1, view, sub: settingsSub, article: articleId, favSub: favoritesSub },
+      "",
+      hashUrl(view, settingsSub),
+    );
+    setDailyOpen(true);
+  };
+  const closeDaily = () => {
+    setDailyOpen(false);
+    history.back(); // popstate 早退分支只关弹层（此时已关，幂等）
+  };
 
   // ---- 返回语义（Android 返回键 / 浏览器返回）----
   // 栈结构: [进入前历史, base(查词根), sentinel(查词根哨兵), ...导航条目]
@@ -271,10 +289,14 @@ export default function App() {
     };
     // 返回语义与 __podicGoBack 动作从同一套规则推导（评审 R06）：
     // 查词根且无二级页才交给壳退出；生词本列表也能返回查词
-    const canGoBack = view !== "search" || settingsSub !== null || favoritesSub !== null;
+    const canGoBack = view !== "search" || settingsSub !== null || favoritesSub !== null || dailyOpen;
     w.PodicAndroid?.setCanGoBack(canGoBack);
     w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
+      if (dailyOpen) {
+        closeDaily();
+        return;
+      }
       if (settingsSub) setSettingsSub(null);
       else if (view === "reading" && articleId !== null) setArticleId(null);
       else if (view === "favorites" && favoritesSub !== null) {
@@ -299,7 +321,7 @@ export default function App() {
         switchView("favorites");
       } else if (view !== "search") switchView("search");
     };
-  }, [view, settingsSub, articleId, favoritesSub, practiceActive]);
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen]);
 
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
@@ -310,10 +332,17 @@ export default function App() {
         article?: number | "new" | null;
         favSub?: FavoritesSub;
         sentinel?: boolean;
+        daily?: number;
       } | null;
       // 浏览器返回会切换/卸载进行中的练习/自测时（含回退到另一种子页）：
       // 先取消这次返回（推回当前条目），确认放弃后再应用目标状态——不能不吭
       // 一声就把会话清了（评审 R07）
+      // 每日一句的临时条目被返回：只关弹层（底下视图状态与压入时相同）。
+      // X/遮罩/查看单词走的 closeDaily 已退栈，这里处理的是返回键场景
+      if (dailyOpen && !s?.daily) {
+        setDailyOpen(false);
+        return;
+      }
       const targetSub = s?.favSub ?? null;
       const unloadsSession =
         practiceActive && favoritesSub !== null && targetSub !== favoritesSub;
@@ -387,7 +416,7 @@ export default function App() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
     // 兜底分支读 view/settingsSub/practiceActive/favoritesSub，需随状态更新监听闭包
-  }, [view, settingsSub, articleId, favoritesSub, practiceActive]);
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive, dailyOpen]);
 
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollPos.current[view] ?? 0;
@@ -446,7 +475,7 @@ export default function App() {
           }`}
         >
           {/* 印章 / 语言切换 / 返回 是独立子元素，justify-between 才能把控件推到拇指侧 */}
-          <div className="seal" aria-label="Podic">典</div>
+          <button className="seal" aria-label="每日一句" title="每日一句" onClick={openDaily}>典</button>
           {view !== "reading" && (
             <LanguageSwitcher value={lang} onChange={setLang} languages={languages} />
           )}
@@ -527,6 +556,9 @@ export default function App() {
       </nav>
 
       {/* 浏览器场景：查词栈底再按返回的退出确认 */}
+      {dailyOpen && (
+        <DailySentenceDialog lang={lang} onClose={closeDaily} onOpenWord={openWord} />
+      )}
       <ConfirmDialog
         open={exitAsk}
         title="退出 Podic？"

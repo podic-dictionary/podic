@@ -1,5 +1,6 @@
 //! podic-server 库入口：装配 AppState / 路由，供桌面 bin 与移动端壳（podic-mobile）复用。
 
+pub mod daily_routes;
 pub mod error;
 pub mod log;
 pub mod reader_routes;
@@ -49,6 +50,7 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
         core: Arc::new(Mutex::new(core)),
         ai_tasks: Arc::new(Mutex::new(HashMap::new())),
         task_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        daily_domains: Arc::new(Mutex::new(HashMap::new())),
     })
 }
 
@@ -94,6 +96,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
             axum::routing::get(vocab_routes::list_vocab_tests).post(vocab_routes::create_vocab_test),
         )
         .route("/api/vocab-tests/{id}/finish", axum::routing::post(vocab_routes::finish_vocab_test))
+        .route("/api/daily-sentence", axum::routing::post(daily_routes::daily_sentence))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))

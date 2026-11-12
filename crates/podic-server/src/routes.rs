@@ -59,6 +59,7 @@ pub async fn import_pack(
     let Core { conn, packs, .. } = &mut *core;
     let info = packs.import(conn, &bytes)?;
     core.invalidate_vocab(&info.lang);
+    crate::daily_routes::invalidate_domain_cache(&state, &info.lang);
     Ok(Json(json!(info)))
 }
 
@@ -70,6 +71,7 @@ pub async fn remove_pack(
     let Core { conn, packs, .. } = &mut *core;
     packs.remove(conn, &lang)?;
     core.invalidate_vocab(&lang);
+    crate::daily_routes::invalidate_domain_cache(&state, &lang);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -276,6 +278,7 @@ pub async fn install_pack(
                         match renamed.and_then(|_| packs.attach(conn, &dest)) {
                             Ok(info) => {
                                 core.invalidate_vocab(&info.lang);
+                                crate::daily_routes::invalidate_domain_cache(&state, &info.lang);
                                 let _ = tx.send(sse_event(json!({ "type": "done", "pack": info })));
                             }
                             Err(e) => {
@@ -476,6 +479,9 @@ pub struct SettingsIn {
     /// 上次停留页面（tab 记忆）；合法性由前端白名单把关，这里只透传存储
     #[serde(default)]
     last_view: Option<String>,
+    /// 每日一句偏好（按语言存难度层选择）；整段替换，前端发完整 levels_by_lang
+    #[serde(default)]
+    daily_sentence: Option<podic_core::settings::DailySentencePrefs>,
 }
 
 fn bad_req(msg: &str) -> ApiError {
@@ -559,6 +565,9 @@ pub async fn save_settings(
     }
     if let Some(v) = &input.last_view {
         candidate.last_view = Some(v.trim().to_string());
+    }
+    if let Some(d) = &input.daily_sentence {
+        candidate.daily_sentence = Some(d.clone());
     }
     core.settings = candidate;
     core.save_settings()?;
