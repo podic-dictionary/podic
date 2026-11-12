@@ -30,6 +30,10 @@ pub struct DailyLevelIn {
 #[derive(Deserialize)]
 pub struct DailySentenceIn {
     pub lang: String,
+    /// 指定词头：AI 生成完成后前端回捞快路径用（跳过随机抽样直接定位该词）。
+    /// 不指定 = 随机抽词。词头找不到时（词典刚更新）退回随机抽样
+    #[serde(default)]
+    pub headword: Option<String>,
     /// 省略 = 用服务端按语言存的偏好；都没有 = auto
     #[serde(default)]
     pub level: Option<DailyLevelIn>,
@@ -189,7 +193,17 @@ pub async fn daily_sentence(
 
     let units = domain_for(&state, &lang, &pack.pack_id, &pack.version)?;
 
-    // 层解析：请求参数 > 服务端按语言偏好 > auto
+    // 指定词头（回捞场景）：直接取该词所在层，跳过推荐与随机抽样。
+    // 抽到的词没词典例句时前端拿 ai_request 走流式生成，完成后必须能原样
+    // 捞回同一个词——否则随机重抽到别的词，缓存键对不上，前端误报「生成无效」
+    let specified = input
+        .headword
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|hw| units.iter().find(|u| u.headword == hw).cloned());
+
+    // 层解析：请求参数 > 服务端按语言偏好 > auto；指定词头时层随词走
     let pref = input
         .level
         .clone()
@@ -201,7 +215,9 @@ pub async fn daily_sentence(
         .collect();
     let lowest_nonempty = band_counts.iter().position(|c| *c > 0).unwrap_or(0);
 
-    let (band, reason, known_sample, manual) = match pref.mode.as_str() {
+    let (band, reason, known_sample, manual) = match &specified {
+        Some(u) => (u.band, String::new(), None, true),
+        None => match pref.mode.as_str() {
         "manual" => {
             let b = pref.band.unwrap_or(lowest_nonempty);
             let b = if b < band_count && band_counts[b] > 0 {
@@ -232,23 +248,27 @@ pub async fn daily_sentence(
                 false,
             ),
         },
+        },
     };
 
-    // 抽词：带排除重抽（同层两个候选，排除词命中就取另一个）。
+    // 抽词：指定词头直接用；否则带排除重抽（同层两个候选，排除词命中就取另一个）。
     // 层里唯一词恰好是被排除的（换一句但没有第二个词）：原样返回并给 note 说明
     let exclude = input
         .exclude_headword
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let (mut unit, mut dup_note) = {
-        let two = sample_band(&units, band, 2);
-        match two.iter().find(|u| Some(u.headword.as_str()) != exclude) {
-            Some(u) => (u.clone(), None),
-            None => (
-                two.first().cloned().unwrap_or_else(|| sample_band(&units, band, 1).into_iter().next().unwrap()),
-                exclude.map(|_| "本层只有这一个词，没有别的可换".to_string()),
-            ),
+    let (mut unit, mut dup_note) = match specified {
+        Some(u) => (u, None),
+        None => {
+            let two = sample_band(&units, band, 2);
+            match two.iter().find(|u| Some(u.headword.as_str()) != exclude) {
+                Some(u) => (u.clone(), None),
+                None => (
+                    two.first().cloned().unwrap_or_else(|| sample_band(&units, band, 1).into_iter().next().unwrap()),
+                    exclude.map(|_| "本层只有这一个词，没有别的可换".to_string()),
+                ),
+            }
         }
     };
 

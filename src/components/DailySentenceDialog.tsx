@@ -64,6 +64,9 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
         try {
           const r = await dailySentence({
             lang,
+            // 指定词头回捞快路径：随机重抽会抽到别的词，缓存键对不上（误报「生成结果无效」）。
+            // req.text 是服务端解析的抽中词头（缓存键的 text 分量）
+            headword: req.text,
             level: levelsByLang[lang]
               ? { mode: levelsByLang[lang].mode as "auto" | "manual", band: levelsByLang[lang].band }
               : undefined,

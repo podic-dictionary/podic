@@ -325,9 +325,11 @@ export interface DailySentenceResult {
   ai_request?: { task: string; text: string; context: unknown; model: string };
 }
 
-/** 随机抽词 + 例句（词典例句优先，AI 单句兜底并缓存）；level 省略 = 服务端偏好 */
+/** 随机抽词 + 例句（词典例句优先，AI 单句兜底并缓存）；level 省略 = 服务端偏好；
+ * headword 指定词头 = 回捞快路径（AI 生成完成后取回同一个词，不随机重抽） */
 export const dailySentence = (body: {
   lang: string;
+  headword?: string;
   level?: { mode: "auto" | "manual"; band?: number };
   exclude_headword?: string;
   provider_id?: string;

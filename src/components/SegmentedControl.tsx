@@ -18,14 +18,14 @@ export default function Seg<T extends string>({
 }) {
   const grow = fill ? "flex-1" : "shrink-0";
   return (
-    <div className={`flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800 ${disabled ? "opacity-50" : ""}`}>
+    <div className={`flex gap-0.5 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800 ${disabled ? "opacity-50" : ""}`}>
       {options.map((o) => (
         <button
           key={o.id}
           onClick={() => onChange(o.id)}
           disabled={disabled}
           aria-pressed={value === o.id}
-          className={`${grow} min-w-fit rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors disabled:cursor-not-allowed ${
+          className={`${grow} min-w-fit rounded-lg px-2 py-1.5 text-sm whitespace-nowrap transition-colors disabled:cursor-not-allowed ${
             value === o.id
               ? "bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-400"
               : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
