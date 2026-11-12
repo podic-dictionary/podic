@@ -633,6 +633,18 @@ pub async fn review_favorite(
     if session.is_empty() || session.len() > 64 {
         return Err(bad_req("session_id 非法"));
     }
+    // 输入长度在拿全局锁之前拦下：typed 文本/choice key 不设限的话，
+    // 超长输入的归一化会在持锁状态下吃内存拖住整个服务
+    if let Some(t) = &input.answer.text {
+        if t.len() > 128 {
+            return Err(bad_req("答案过长"));
+        }
+    }
+    if let Some(k) = &input.answer.selected_key {
+        if k.len() > 128 {
+            return Err(bad_req("selected_key 非法"));
+        }
+    }
     let retry = input.phase.as_deref() == Some("retry");
     let core = lock(&state);
     let fav = podic_core::store::favorite_get(&core.conn, id)?

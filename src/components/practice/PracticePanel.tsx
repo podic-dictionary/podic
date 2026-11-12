@@ -65,6 +65,8 @@ export default function PracticePanel({
 
   const [queue, setQueue] = useState<PracticeQuestion[]>([]);
   const [retryQueue, setRetryQueue] = useState<PracticeQuestion[]>([]);
+  const [round, setRound] = useState<"first" | "retry">("first"); // 显式轮次：不再用 results.length 推断（末题反馈页会误判）
+  const [retryTotal, setRetryTotal] = useState(0); // 转入重练那一刻的错词总数（之后错词进 queue，retryQueue 只剩未答的）
   const [total, setTotal] = useState(0);
   const [current, setCurrent] = useState<PracticeQuestion | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -115,6 +117,8 @@ export default function PracticePanel({
       sessionId.current = newSessionId();
       setResults([]);
       setRetryQueue([]);
+      setRound("first");
+      setRetryTotal(0);
       setTotal(built.questions.length);
       setCurrent(built.questions[0]);
       setQueue(built.questions.slice(1));
@@ -148,6 +152,8 @@ export default function PracticePanel({
       const reshuffled = retryQueue.map((q) =>
         q.options ? { ...q, options: [...q.options].sort(() => Math.random() - 0.5) } : q,
       );
+      setRound("retry");
+      setRetryTotal(retryQueue.length);
       setCurrent(reshuffled[0]);
       setQueue(reshuffled.slice(1));
       setRetryQueue([]);
@@ -161,7 +167,7 @@ export default function PracticePanel({
     if (!current || submitting || feedback) return;
     setSubmitting(true);
     setSubmitError("");
-    const isRetry = results.length >= total;
+    const isRetry = round === "retry";
     try {
       const o = await reviewFavorite(current.favId, {
         session_id: sessionId.current,
@@ -254,7 +260,7 @@ export default function PracticePanel({
               词→义：给单词选意思 · 义→词：给意思选单词 · 拼写：给意思写单词 · 听音：只听发音选意思
             </p>
           </div>
-          {prepMsg && <p className="text-sm text-red-500">{prepMsg}</p>}
+          {prepMsg && <p className="text-sm text-red-500 dark:text-red-400">{prepMsg}</p>}
           <button
             onClick={start}
             disabled={!lang || modes.length === 0 || preparing}
@@ -272,11 +278,9 @@ export default function PracticePanel({
   }
 
   if (phase === "run" && current) {
-    const retryRound = results.length >= total;
-    const answeredShown = retryRound ? stats.retryDone + (feedback ? 1 : 0) : results.length + (feedback ? 1 : 0);
-    const totalShown = retryRound
-      ? stats.retryDone + (feedback ? 1 : 0) + retryQueue.length + (feedback ? 0 : 1)
-      : total;
+    const retryRound = round === "retry";
+    const answeredShown = retryRound ? stats.retryDone : results.length;
+    const totalShown = retryRound ? retryTotal : total;
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-zinc-50 dark:bg-zinc-950">
         <PanelHeader
@@ -375,7 +379,7 @@ export default function PracticePanel({
               <p className="text-zinc-400 dark:text-zinc-500">升级</p>
             </div>
             <div className="rounded-xl bg-red-50 py-2 dark:bg-red-950/40">
-              <p className="text-lg text-red-500">↓ {stats.down}</p>
+              <p className="text-lg text-red-500 dark:text-red-400">↓ {stats.down}</p>
               <p className="text-zinc-400 dark:text-zinc-500">降级</p>
             </div>
           </div>
@@ -400,7 +404,7 @@ export default function PracticePanel({
                   r.after > r.before
                     ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
                     : r.after < r.before
-                      ? "bg-red-50 text-red-500 dark:bg-red-950"
+                      ? "bg-red-50 text-red-500 dark:bg-red-950 dark:text-red-400"
                       : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                 }`}
               >
@@ -465,7 +469,8 @@ function QuestionView({ q, revealed, selected, onSelect }: {
 
   const faceIsWord = q.mode === "word_meaning";
   const faceIsAudio = q.mode === "audio_meaning";
-  const showWord = faceIsWord || faceIsAudio || revealed || wordShown;
+  // 词头可见性：词→义题、已揭晓、或用户主动点了「看单词」——听音题答前绝不自动露词
+  const showWord = faceIsWord || revealed || wordShown;
 
   return (
     <div className="mt-6 text-center">

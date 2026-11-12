@@ -9,7 +9,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use podic_core::store::{self, VocabTestRow};
 use podic_core::vocab_test::{
-    allocate_samples, assign_bands, build_domain, estimate, sample_band, Band, DOMAIN_RULE_VERSION,
+    allocate_samples, assign_bands, build_domain, estimate, interleave_bands, sample_band, Band,
+    DOMAIN_RULE_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -53,31 +54,22 @@ pub async fn create_vocab_test(
         .collect();
     let samples = allocate_samples(&pops, question_count);
 
-    // 层内抽样后层间交错出题（高频层靠前但不连排）
+    // 层内抽样后层间交错出题（高频层靠前但不连排；空层不会卡死，见 core 测试）
     let per_band: Vec<Vec<_>> = (0..band_count)
         .map(|b| sample_band(units, b, samples[b]))
         .collect();
-    let mut items: Vec<Value> = Vec::with_capacity(samples.iter().sum::<i64>() as usize);
-    let mut cursors = vec![0usize; band_count];
-    let mut exhausted = band_count;
-    while exhausted > 0 {
-        for (b, cur) in cursors.iter_mut().enumerate() {
-            if *cur >= per_band[b].len() {
-                continue;
-            }
-            let u = &per_band[b][*cur];
-            items.push(json!({
-                "id": format!("t{}", items.len() + 1),
-                "band": b,
+    let mut items: Vec<Value> = podic_core::vocab_test::interleave_bands(per_band)
+        .into_iter()
+        .enumerate()
+        .map(|(i, u)| {
+            json!({
+                "id": format!("t{}", i + 1),
+                "band": u.band,
                 "headword": u.headword,
                 "ipa": u.ipa,
-            }));
-            *cur += 1;
-            if *cur >= per_band[b].len() {
-                exhausted -= 1;
-            }
-        }
-    }
+            })
+        })
+        .collect();
 
     let bands: Vec<Band> = (0..band_count)
         .map(|b| Band { id: b, population: pops[b], sample_size: samples[b] })
@@ -145,30 +137,9 @@ pub async fn finish_vocab_test(
     let core = lock(&state);
     let row = store::vocab_test_get(&core.conn, &id)?
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "测验不存在".into()))?;
-    if let Some(stored) = &row.result_json {
-        // 幂等：同答案重放（顺序无关）返回原结果；换答案拒绝
-        let same = row
-            .answers_json
-            .as_deref()
-            .and_then(|a| serde_json::from_str::<Vec<VocabAnswer>>(a).ok())
-            .map(|stored_answers| {
-                let as_set = |v: &[VocabAnswer]| -> std::collections::HashSet<(String, bool)> {
-                    v.iter().map(|a| (a.item_id.clone(), a.known)).collect()
-                };
-                as_set(&stored_answers) == as_set(&answers)
-            })
-            .unwrap_or(false);
-        if same {
-            return Ok(Json(json!({
-                "id": row.id,
-                "finished": true,
-                "result": serde_json::from_str::<Value>(stored).unwrap_or(Value::Null),
-            })));
-        }
-        return Err(ApiError(StatusCode::CONFLICT, "该测验已完成，不能修改答案".into()));
-    }
 
-    // 校验答案精确覆盖计划：不重不漏，known 为布尔（serde 已保证类型）
+    // 校验答案精确覆盖计划：不重不漏，known 为布尔（serde 已保证类型）。
+    // 放在幂等分支之前——已完成的测验收到畸形请求也先按 400 拒，绕不过契约
     let plan: Value = serde_json::from_str(&row.plan_json)
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "计划快照损坏".into()))?;
     let plan_items = plan
@@ -192,6 +163,29 @@ pub async fn finish_vocab_test(
         if !band_of.contains_key(a.item_id.as_str()) || !seen.insert(a.item_id.clone()) {
             return Err(ApiError(StatusCode::BAD_REQUEST, format!("题目 {} 非法或重复", a.item_id)));
         }
+    }
+
+    if let Some(stored) = &row.result_json {
+        // 幂等：同答案重放（顺序无关）返回原结果；换答案拒绝
+        let same = row
+            .answers_json
+            .as_deref()
+            .and_then(|a| serde_json::from_str::<Vec<VocabAnswer>>(a).ok())
+            .map(|stored_answers| {
+                let as_map = |v: &[VocabAnswer]| -> std::collections::HashSet<(String, bool)> {
+                    v.iter().map(|a| (a.item_id.clone(), a.known)).collect()
+                };
+                as_map(&stored_answers) == as_map(&answers)
+            })
+            .unwrap_or(false);
+        if same {
+            return Ok(Json(json!({
+                "id": row.id,
+                "finished": true,
+                "result": serde_json::from_str::<Value>(stored).unwrap_or(Value::Null),
+            })));
+        }
+        return Err(ApiError(StatusCode::CONFLICT, "该测验已完成，不能修改答案".into()));
     }
 
     let bands: Vec<Value> = plan

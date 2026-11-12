@@ -34,8 +34,11 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<VocabTestResult | null>(null);
   const [history, setHistory] = useState<VocabTestHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyReqRef = useRef(0);
   const [exitAsk, setExitAsk] = useState(false);
   const lockRef = useRef(false); // 防双击把同一答案记到下一题
+  const langRef = useRef("");
 
   useEffect(() => {
     listPacks()
@@ -71,7 +74,8 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
     setAnswers(next);
     if (idx + 1 < plan.items.length) {
       setIdx(idx + 1);
-      lockRef.current = false;
+      // 锁不在这里解：等 idx 变化触发渲染后由下方 effect 解锁，
+      // 双击的第二个 click 会撞在还没解锁的新题上
       return;
     }
     // 最后一题：提交全部答案
@@ -87,9 +91,13 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
       setError(e instanceof Error ? `提交未确认：${e.message}` : "提交未确认，请重答最后一题");
     } finally {
       setSubmitting(false);
-      lockRef.current = false;
     }
   };
+
+  // 切题渲染完成后解锁输入（含 undo 回退的场景）
+  useEffect(() => {
+    lockRef.current = false;
+  }, [idx]);
 
   const undo = () => {
     if (lockRef.current || submitting || answers.length === 0) return;
@@ -105,10 +113,19 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
     setExitAsk(true);
   };
 
+  /** 历史按语言绑定：竞态时旧语言的迟到响应直接丢弃 */
   const openHistory = async (l: string) => {
+    const req = ++historyReqRef.current;
+    setHistory([]);
+    setHistoryLoading(true);
     try {
-      setHistory(await listVocabTests(l));
-    } catch { /* 忽略 */ }
+      const items = await listVocabTests(l);
+      if (historyReqRef.current === req && langRef.current === l) setHistory(items);
+    } catch {
+      if (historyReqRef.current === req && langRef.current === l) setHistory([]);
+    } finally {
+      if (historyReqRef.current === req) setHistoryLoading(false);
+    }
   };
 
   // ---------------- setup ----------------
@@ -135,7 +152,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
               {packs.map((p) => (
                 <button
                   key={p.lang}
-                  onClick={() => { setLang(p.lang); openHistory(p.lang); }}
+                  onClick={() => { setLang(p.lang); langRef.current = p.lang; openHistory(p.lang); }}
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     lang === p.lang
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
@@ -170,6 +187,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
           {lang && history.length > 0 && (
             <div>
               <p className="eyebrow text-zinc-400">历史结果（{langName(lang)}）</p>
+              {historyLoading && <p className="mt-2 text-xs text-zinc-400">加载历史…</p>}
               <ul className="mt-2 space-y-1.5">
                 {history.slice(0, 5).map((h) => (
                   <li key={h.id} className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-xs dark:bg-zinc-900">

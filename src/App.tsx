@@ -102,6 +102,7 @@ export default function App() {
 
   const switchView = (v: View) => {
     if (v === view) return;
+    userNavRef.current = true; // 用户主动导航（tab 点击 / hash 跳转 / 原生返回），记忆校正不再介入
     if (mainRef.current) scrollPos.current[view] = mainRef.current.scrollTop;
     setView(v);
     if (v !== "settings") setSettingsSub(null);
@@ -126,8 +127,13 @@ export default function App() {
   const installState = useInstall();
   const settingsDirty = useSettingsDirty();
   const practiceActive = usePracticeActive();
-  // 练习/自测进行中按返回键的确认丢弃
-  const [favExitAsk, setFavExitAsk] = useState(false);
+  // 练习/自测进行中需要卸载会话时的确认（返回键/浏览器返回共用）：
+  // 携带确认后要执行的动作，取消则原地不动
+  const [favExitAsk, setFavExitAsk] = useState<null | {
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>(null);
   const [leaveAsk, setLeaveAsk] = useState<{ view: View; reason: "install" | "dirty" } | null>(null);
   const guardView = (v: View) => {
     if (v === view) return;
@@ -136,10 +142,15 @@ export default function App() {
     else switchView(v);
   };
   // 初始定位：读 URL hash 恢复页面（刷新/网页直链），返回栈 base/sentinel 也落在该 URL 上。
-  // 无路径的冷启动（裸 URL）保持缓存恢复的 tab；带明确路径（含 #/search）则 hash 优先
+  // 无路径的冷启动（裸 URL）保持缓存恢复的 tab；带明确路径（含 #/search）则 hash 优先。
+  // 幂等保护：StrictMode 双跑时第二次直接返回——否则首次运行生成的 #/search
+  // 会被当成「明确 hash」，阻断后面的服务端记忆校正（评审 R05）
   const bootViewRef = useRef<View>("search");
   const hashExplicitRef = useRef(false);
+  const bootedRef = useRef(false);
   useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
     const r = parseHash();
     const explicit = r.path.length > 0;
     const v = explicit ? viewOf(r.path[0]) : view;
@@ -170,29 +181,37 @@ export default function App() {
   }, []);
 
   // ---- tab 记忆（服务端为准，localStorage 兜底）----
+  // 「用户是否已经主动导航」：switchView / popstate / hashchange 都算；
+  // 服务端记忆校正不算（它走 setView 直写，绕过标记）。单调置位，
+  // 避免「当前值恰好等于启动值」被误判为未导航（评审 R04）
+  const userNavRef = useRef(false);
   // 服务端设置到达后校正启动 tab：仅无明确 hash、且用户尚未导航时应用一次
   const viewCorrectedRef = useRef(false);
   useEffect(() => {
     if (viewCorrectedRef.current || !settingsLoaded) return;
     viewCorrectedRef.current = true;
     if (hashExplicitRef.current) return; // deeplink/刷新带明确路径：hash 优先
-    if (view !== bootViewRef.current) return; // 用户已导航，不抢当前页
+    if (userNavRef.current) return; // 用户已导航，不抢当前页
     if (lastView && lastView !== view && VIEWS.some((x) => x.id === lastView)) {
-      switchView(lastView as View);
+      // 直写不经过 switchView：校正不算用户导航，也不重复记滚动位置
+      setView(lastView as View);
     }
   }, [settingsLoaded, lastView, view]);
 
-  // 每次 tab 变化持久化：localStorage 即时 + 服务端设置。串行链防乱序落盘
-  // （本地请求通常按序返回，但不做保证）；失败静默——只是偏好，不值得打扰
+  // 每次 tab 变化持久化：localStorage 即时 + 服务端设置。串行链防乱序落盘。
+  // 服务端写入要同时满足：设置已加载（否则兜底值会抢在 GET 前落盘，评审 R03）
+  // 且用户真的导航过（启动恢复/校正/deeplink 指定的初始页不写回，明确指定的
+  // 页面不该改写记忆的 tab）。失败静默——只是偏好，不值得打扰
   const viewSaveChain = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     try {
       localStorage.setItem(VIEW_PREF_KEY, view);
     } catch { /* 静默 */ }
+    if (!settingsLoaded || !userNavRef.current) return;
     viewSaveChain.current = viewSaveChain.current
       .then(() => saveSettings({ last_view: view }))
       .catch(() => { /* 保存失败不影响使用，下次启动用上次成功值 */ });
-  }, [view]);
+  }, [view, settingsLoaded]);
   useEffect(() => {
     if (restoring.current) {
       restoring.current = false;
@@ -210,6 +229,9 @@ export default function App() {
   // hash 跳转（deeplink / 手动改地址）：派生页面状态并按需触发查询
   useEffect(() => {
     const onHash = () => {
+      // 任何 hash 跳转（含同页 deeplink 如 #/search?q=…）都算用户导航：
+      // 不设置的话，稍晚到达的服务端记忆会把用户从 deeplink 页面拽走（评审 R04）
+      userNavRef.current = true;
       const r = parseHash();
       const v = viewOf(r.path[0]);
       const s = v === "settings" ? subOf(r.path[1]) : null;
@@ -240,12 +262,9 @@ export default function App() {
       PodicHarmony?: { setCanGoBack: (v: boolean) => void };
       __podicGoBack?: () => void;
     };
-    // 查词根且无二级页才交给壳直接退出；阅读文章/生词本子页内返回走 __podicGoBack。
-    // 切走生词本时子页保留（回来继续会话），但返回键不跨 tab 借道
-    const canGoBack =
-      settingsSub !== null ||
-      (view === "favorites" && favoritesSub !== null) ||
-      (view !== "search" && view !== "favorites");
+    // 返回语义与 __podicGoBack 动作从同一套规则推导（评审 R06）：
+    // 查词根且无二级页才交给壳退出；生词本列表也能返回查词
+    const canGoBack = view !== "search" || settingsSub !== null || favoritesSub !== null;
     w.PodicAndroid?.setCanGoBack(canGoBack);
     w.PodicHarmony?.setCanGoBack(canGoBack);
     w.__podicGoBack = () => {
@@ -253,8 +272,24 @@ export default function App() {
       else if (view === "reading" && articleId !== null) setArticleId(null);
       else if (view === "favorites" && favoritesSub !== null) {
         // 会话进行中先确认丢弃（首答等级已在服务端，丢的是剩余题目）
-        if (practiceActive) setFavExitAsk(true);
-        else setFavoritesSub(null);
+        if (practiceActive) {
+          setFavExitAsk(
+            favoritesSub === "vocab-test"
+              ? {
+                  title: "放弃本次自测？",
+                  message: "未提交的自测不会生成估计结果。",
+                  onConfirm: () => setFavoritesSub(null),
+                }
+              : {
+                  title: "结束本次练习？",
+                  message: "已答题目的熟练度变化已保存，剩余题目将丢弃。",
+                  onConfirm: () => setFavoritesSub(null),
+                },
+          );
+        } else setFavoritesSub(null);
+      } else if (favoritesSub !== null) {
+        // 在其他 tab 按返回：回到进行中的练习/自测（切走时会话是保留的）
+        switchView("favorites");
       } else if (view !== "search") switchView("search");
     };
   }, [view, settingsSub, articleId, favoritesSub, practiceActive]);
@@ -269,6 +304,36 @@ export default function App() {
         favSub?: FavoritesSub;
         sentinel?: boolean;
       } | null;
+      // 浏览器返回会卸载进行中的练习/自测时：先取消这次返回（推回当前条目），
+      // 确认放弃后再应用目标状态——不能不吭一声就把会话清了（评审 R07）
+      const targetSub = s?.favSub ?? null;
+      const unloadsSession =
+        practiceActive && favoritesSub !== null && targetSub === null;
+      const cancelPop = () => {
+        restoring.current = true;
+        history.pushState(
+          { podic: 1, view, sub: settingsSub, article: articleId, favSub: favoritesSub },
+          "",
+          hashUrl(view, settingsSub),
+        );
+      };
+      if (unloadsSession) {
+        cancelPop();
+        const target = s;
+        setFavExitAsk({
+          title: "结束当前练习？",
+          message: "已答题目的熟练度变化已保存，剩余题目将丢弃。",
+          onConfirm: () => {
+            if (!target) return;
+            restoring.current = true;
+            setView(target.view ?? "search");
+            setSettingsSub(target.sub ?? null);
+            setArticleId(target.article ?? null);
+            setFavoritesSub(target.favSub ?? null);
+          },
+        });
+        return;
+      }
       if (!s?.podic) {
         if (exitAllowed.current) return; // 确认过退出，放行离开页面
         // state=null：hash 赋值产生的匿名条目（已改 replaceState，此处兜底旧条目）。
@@ -278,6 +343,7 @@ export default function App() {
         const s0 = v0 === "settings" ? subOf(r.path[1]) : null;
         if (v0 !== view || s0 !== settingsSub) {
           restoring.current = true;
+          userNavRef.current = true;
           setView(v0);
           setSettingsSub(s0);
           setFavoritesSub(null);
@@ -291,6 +357,7 @@ export default function App() {
         return;
       }
       restoring.current = true;
+      userNavRef.current = true; // 浏览器返回也是用户导航，记忆校正不再介入
       setView(s.view ?? "search");
       setSettingsSub(s.sub ?? null);
       setArticleId(s.article ?? null);
@@ -299,8 +366,8 @@ export default function App() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-    // 兜底分支读 view/settingsSub，需要随状态更新监听闭包
-  }, [view, settingsSub]);
+    // 兜底分支读 view/settingsSub/practiceActive/favoritesSub，需随状态更新监听闭包
+  }, [view, settingsSub, articleId, favoritesSub, practiceActive]);
 
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = scrollPos.current[view] ?? 0;
@@ -471,17 +538,18 @@ export default function App() {
         onCancel={() => setLeaveAsk(null)}
       />
 
-      {/* 练习/自测进行中按返回键：确认丢弃剩余题目（面板内返回按钮走它自己的确认框） */}
+      {/* 练习/自测进行中卸载会话前的确认（返回键/浏览器返回共用，文案按子页类型区分） */}
       <ConfirmDialog
-        open={favExitAsk}
-        title="结束当前练习？"
-        message="已答题目的熟练度变化已保存，剩余题目将丢弃。"
+        open={favExitAsk !== null}
+        title={favExitAsk?.title ?? ""}
+        message={favExitAsk?.message ?? ""}
         confirmText="结束练习"
         onConfirm={() => {
-          setFavExitAsk(false);
-          setFavoritesSub(null);
+          const ask = favExitAsk;
+          setFavExitAsk(null);
+          ask?.onConfirm();
         }}
-        onCancel={() => setFavExitAsk(false)}
+        onCancel={() => setFavExitAsk(null)}
       />
     </div>
   );

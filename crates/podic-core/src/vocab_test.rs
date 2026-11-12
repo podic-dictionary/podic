@@ -199,17 +199,17 @@ pub fn assign_bands(domain: &mut Domain) {
 }
 
 /// 层分配题量：均分，余数给大层；某层人口不足分配量则全取（普查），
-/// 差额转给后面的层。返回各层 sample_size
+/// 差额先顺延给相邻层、末尾剩余再回流到仍有容量的层——保证总量
+/// 达到 min(total, Σpopulation)，不让末层小导致题量短缺
 pub fn allocate_samples(pops: &[i64], total: i64) -> Vec<i64> {
     let h = pops.len();
-    let mut alloc = vec![0i64; h];
-    let mut remaining = total;
-    // 先按人口比例均分（base = total/h，余数按人口从大到小补）
-    let base = remaining / h as i64;
-    for a in alloc.iter_mut() {
-        *a = base;
+    if h == 0 {
+        return vec![];
     }
-    let mut rem = remaining - base * h as i64;
+    let total = total.min(pops.iter().sum());
+    let base = total / h as i64;
+    let mut alloc = vec![base; h];
+    let mut rem = total - base * h as i64;
     let mut order: Vec<usize> = (0..h).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(pops[i]));
     for &i in &order {
@@ -219,12 +219,11 @@ pub fn allocate_samples(pops: &[i64], total: i64) -> Vec<i64> {
         alloc[i] += 1;
         rem -= 1;
     }
-    remaining = alloc.iter().sum();
-    // 人口不足的层全取，差额顺延
+    // 正向顺延：人口不足的层全取，差额转给下一层
     let mut surplus = 0i64;
     for i in 0..h {
         let want = alloc[i] + surplus;
-        if pops[i] <= want {
+        if pops[i] < want {
             surplus = want - pops[i];
             alloc[i] = pops[i];
         } else {
@@ -232,7 +231,24 @@ pub fn allocate_samples(pops: &[i64], total: i64) -> Vec<i64> {
             surplus = 0;
         }
     }
-    let _ = remaining;
+    // 末尾剩余回流：按剩余容量从大到小补，直到分完
+    while surplus > 0 {
+        let mut room: Vec<usize> = (0..h).filter(|&i| alloc[i] < pops[i]).collect();
+        room.sort_by_key(|&i| std::cmp::Reverse(pops[i] - alloc[i]));
+        if room.is_empty() {
+            break;
+        }
+        let mut s = surplus;
+        for &i in &room {
+            if s == 0 {
+                break;
+            }
+            let give = s.min(pops[i] - alloc[i]);
+            alloc[i] += give;
+            s -= give;
+        }
+        surplus = s;
+    }
     alloc
 }
 
@@ -273,6 +289,32 @@ fn fastrand_idx(bound: usize) -> usize {
     } else {
         (s % bound as u64) as usize
     }
+}
+
+/// 层间交错出题：高频层靠前但不连排。终止按「已取题数」计——空层（巨组跨边界
+/// 后的中间层）没有题可出，不参与终止判定，否则循环永不退出
+pub fn interleave_bands(per_band: Vec<Vec<Unit>>) -> Vec<Unit> {
+    let total_items: usize = per_band.iter().map(|v| v.len()).sum();
+    let mut items = Vec::with_capacity(total_items);
+    let mut cursors = vec![0usize; per_band.len()];
+    while items.len() < total_items {
+        let mut progress = false;
+        for (b, cur) in cursors.iter_mut().enumerate() {
+            if items.len() >= total_items {
+                break;
+            }
+            if *cur >= per_band[b].len() {
+                continue;
+            }
+            items.push(per_band[b][*cur].clone());
+            *cur += 1;
+            progress = true;
+        }
+        if !progress {
+            break; // 防御：全部层空
+        }
+    }
+    items
 }
 
 /// 分层估计 + Wilson/Bonferroni 区间。
@@ -324,7 +366,6 @@ pub fn estimate(pops: &[i64], knowns: &[i64], samples: &[i64]) -> (i64, i64, i64
 mod tests {
     use super::*;
 
-    #[test]
     #[test]
     fn 分层_单组退化单层_巨组不劈开() {
         // 模拟 ja：全部同分（1 组 22000）→ 只有一层，不按 id 伪造难度档
@@ -400,6 +441,32 @@ mod tests {
         assert_eq!(allocate_samples(&[10, 20], 60), vec![10, 20]);
         // 单层
         assert_eq!(allocate_samples(&[22000], 60), vec![60]);
+        // 末层只有 1 个词：差额回流到前面的层，总量仍兑现 60（评审 R08 场景）
+        assert_eq!(allocate_samples(&[2000, 1], 60).iter().sum::<i64>(), 60);
+        assert_eq!(allocate_samples(&[2000, 3000, 5000, 1], 60).iter().sum::<i64>(), 60);
+        // 分配不超过各层人口
+        for (p, a) in [2000i64, 3000, 5000, 1].iter().zip(allocate_samples(&[2000, 3000, 5000, 1], 60)) {
+            assert!(a <= *p);
+        }
+    }
+
+    #[test]
+    fn 交错出题_空层不卡死() {
+        // 评审 R01 场景：[6000, 0, 6000] 的人口 → [20, 0, 40] 的抽样，中间层为空。
+        // 交错循环必须终止且出满 60 题
+        let band0: Vec<Unit> = (0..20)
+            .map(|i| Unit { headword: format!("a{i}"), ipa: None, band: 0 })
+            .collect();
+        let band1: Vec<Unit> = vec![];
+        let band2: Vec<Unit> = (0..40)
+            .map(|i| Unit { headword: format!("c{i}"), ipa: None, band: 2 })
+            .collect();
+        let items = interleave_bands(vec![band0, band1, band2]);
+        assert_eq!(items.len(), 60);
+        assert_eq!(items.iter().filter(|u| u.band == 0).count(), 20);
+        assert_eq!(items.iter().filter(|u| u.band == 2).count(), 40);
+        // 全空输入
+        assert!(interleave_bands(vec![vec![], vec![]]).is_empty());
     }
 
     #[test]
