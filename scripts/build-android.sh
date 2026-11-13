@@ -44,7 +44,8 @@ cp -r dist android/app/src/main/assets/web
 mkdir -p android/app/src/main/assets/packs
 # aapt2 对 *.gz 资产会去后缀并透明解压（与 .db 同名冲突），这里统一只放 .db
 rm -f android/app/src/main/assets/packs/*.db android/app/src/main/assets/packs/*.gz
-cp packs/en-dict-*.db android/app/src/main/assets/packs/
+# 只打包最新版英文词典：glob 会把历史版本一起带上（en 0.1.1+0.2.0 时 AAB 冲破 150MB 上限）
+ls packs/en-dict-*.db | sort -V | tail -1 | xargs cp -t android/app/src/main/assets/packs/
 ls -lh android/app/src/main/assets/packs/ || true
 
 echo "[4/4] gradle $GRADLE_TASK"
