@@ -136,7 +136,7 @@ if not editable:
     if not create_ver:
         print("无可编辑版本（state != PREPARE_FOR_SUBMISSION）:", [v["attributes"]["appStoreState"] for v in versions])
         sys.exit(1)
-    release_type = opt("--release-type", "AFTER_APPROVED")
+    release_type = opt("--release-type", "AFTER_APPROVAL")
     created = api("POST", "/v1/appStoreVersions",
         {"data": {"type": "appStoreVersions",
                   "attributes": {"versionString": create_ver, "platform": "IOS", "releaseType": release_type},
