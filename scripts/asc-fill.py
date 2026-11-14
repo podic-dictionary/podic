@@ -162,8 +162,9 @@ for locale, text in LOCALES.items():
         )
         have[locale] = created["data"]["id"]
         print(f"    创建 locale {locale}")
-    # subtitle 在 appInfoLocalization（不在 version localization schema）
-    vattrs = {k: v for k, v in text.items() if k not in ("subtitle", "whatsNew")}
+    # subtitle 在 appInfoLocalization（不在 version localization schema）；whatsNew 必须填，
+    # 空着的版本过不了提审校验（409 whatsNew required）
+    vattrs = {k: v for k, v in text.items() if k != "subtitle"}
     api("PATCH", f"/v1/appStoreVersionLocalizations/{have[locale]}",
         {"data": {"type": "appStoreVersionLocalizations", "id": have[locale], "attributes": vattrs}})
     print(f"    填充 {locale} 描述/关键词/推广文本 ✓")
