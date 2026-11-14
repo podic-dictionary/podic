@@ -172,21 +172,35 @@ api("PATCH", f"/v1/appStoreVersions/{vid}",
     {"data": {"type": "appStoreVersions", "id": vid, "attributes": {"copyright": COPYRIGHT}}})
 print("[2] 版权 ✓")
 
-# 副标题：appInfoLocalizations（en-US 已有则 PATCH；zh-Hans 缺则 CREATE）
+# 副标题：appInfoLocalizations（en-US 已有则 PATCH；zh-Hans 缺则 CREATE）。
+# app 级元数据有时处于锁定态（409 subtitle can not be modified）——非致命，
+# 挂上 build 后再重试一次
 infos = api("GET", f"/v1/apps/{APP_ID}/appInfos")["data"]
 info_id = infos[0]["id"]
 info_locs = api("GET", f"/v1/appInfos/{info_id}/appInfoLocalizations")["data"]
 info_by_locale = {l["attributes"]["locale"]: l["id"] for l in info_locs}
-for locale, text in LOCALES.items():
-    attrs = {"subtitle": text["subtitle"]}
-    if locale in info_by_locale:
-        api("PATCH", f"/v1/appInfoLocalizations/{info_by_locale[locale]}",
-            {"data": {"type": "appInfoLocalizations", "id": info_by_locale[locale], "attributes": attrs}})
-    else:
-        api("POST", "/v1/appInfoLocalizations",
-            {"data": {"type": "appInfoLocalizations", "attributes": {"locale": locale, **attrs},
-                      "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info_id}}}}})
-    print(f"    副标题 {locale} ✓")
+
+
+def patch_subtitle():
+    failed = []
+    for locale in LOCALES:
+        attrs = {"subtitle": LOCALES[locale]["subtitle"]}
+        if locale in info_by_locale:
+            r = api("PATCH", f"/v1/appInfoLocalizations/{info_by_locale[locale]}",
+                {"data": {"type": "appInfoLocalizations", "id": info_by_locale[locale], "attributes": attrs}},
+                raise_on_error=False)
+        else:
+            r = api("POST", "/v1/appInfoLocalizations",
+                {"data": {"type": "appInfoLocalizations", "attributes": {"locale": locale, **attrs},
+                          "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info_id}}}}},
+                raise_on_error=False)
+        if "__err" in r:
+            failed.append(locale)
+    return failed
+
+
+subtitle_failed = patch_subtitle()
+print("    副标题 ✓" if not subtitle_failed else f"    副标题暂锁（稍后重试）: {subtitle_failed}")
 
 def upload_screenshot(set_id, fname, raw):
     """往 appScreenshotSet 里传一张图：创建记录 -> 分片上传 -> 标记完成"""
@@ -366,6 +380,10 @@ else:
 
 print("\n完成。剩余网页操作：")
 print("  - App Privacy：选 Data Not Collected（API 无此端点）")
+if subtitle_failed:
+    subtitle_failed = patch_subtitle()
+    print("[7b] 副标题重试 ✓" if not subtitle_failed else f"[7b] 副标题仍锁定（网页手动改）: {subtitle_failed}")
+
 if "--submit" in sys.argv:
     sub = api("POST", "/v1/appStoreSubmissions",
         {"data": {"type": "appStoreSubmissions",
