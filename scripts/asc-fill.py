@@ -427,8 +427,7 @@ if "--submit" in sys.argv:
     if container is None:
         container = api("POST", "/v1/reviewSubmissions",
             {"data": {"type": "reviewSubmissions", "attributes": {"platform": "IOS"},
-                      "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}},
-                                        "appStoreVersionForReview": {"data": {"type": "appStoreVersions", "id": vid}}}}},
+                      "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}},
             raise_on_error=False)
         if "__err" in container:
             print(f"[8] 创建 reviewSubmission 失败: {container.get('body', '')[:400]}")
