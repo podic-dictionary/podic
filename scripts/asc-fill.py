@@ -414,8 +414,8 @@ if subtitle_failed:
     print("[7b] 副标题重试 ✓" if not subtitle_failed else f"[7b] 副标题仍锁定（网页手动改）: {subtitle_failed}")
 
 if "--submit" in sys.argv:
-    sub = api("POST", "/v1/appStoreSubmissions",
-        {"data": {"type": "appStoreSubmissions",
+    sub = api("POST", "/v1/appStoreVersionSubmissions",
+        {"data": {"type": "appStoreVersionSubmissions",
                   "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}},
         raise_on_error=False)
     if "__err" in sub:
