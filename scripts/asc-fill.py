@@ -41,32 +41,46 @@ COPYRIGHT = "Copyright © 2026 felix021"
 LOCALES = {
     "en-US": {
         "description": (
-            "Podic is a clean, open-source dictionary app for English / French / Japanese ↔ Chinese.\n\n"
-            "• Offline lookups: headwords, IPA, senses, inflections and real-usage example sentences\n"
+            "Podic is a clean, open-source dictionary app for English / French / Japanese / German / "
+            "Spanish / Russian / Italian / Portuguese ↔ Chinese, with one-tap installation of all eight "
+            "dictionaries; you can also register any language and import custom dictionary packs. "
+            "Dictionary data comes from freely-licensed corpora (ECDICT, CFDict, JMdict, Tatoeba and more). "
+            "Fully offline — no account needed.\n\n"
+            "• Offline lookups: headwords, IPA, senses, inflections and real-usage example sentences with translations\n"
             "• Reverse lookup: type Chinese to find the word\n"
-            "• Open data: built from freely-licensed corpora (ECDICT, CFDict, JMdict, Tatoeba)\n"
+            "• Wordbook practice: word→meaning, spelling and listening modes with mastery tracking\n"
+            "• Vocabulary size test: frequency-stratified sampling per dictionary\n"
+            "• Daily sentence: a random word each day with a real example (dictionary first, AI fallback)\n"
+            "• System TTS read-aloud for words and example sentences\n"
+            "• Reading: paste or fetch articles, tap any word to look it up, mark new words\n"
             "• Optional AI: bring your own API key for deep explanations, generated examples, "
             "sense completion and translation\n\n"
             "No account, no ads, no tracking. All data stays on your device."
         ),
-        "keywords": "dictionary,offline,english,french,japanese,chinese,translation,open source",
-        "promotionalText": "Open source. Fully offline. Bring your own AI key.",
+        "keywords": "dictionary,offline,english,french,japanese,german,spanish,russian,italian,portuguese,chinese",
+        "promotionalText": "Open source. Fully offline. 8 dictionaries, practice, vocab test and daily sentence. Bring your own AI key.",
         "subtitle": "Open-source offline dictionary",
-        "whatsNew": "First release on the App Store.",
+        "whatsNew": "New: wordbook practice (meaning/spelling/listening with mastery tracking), per-language vocabulary size test, and a daily sentence (dictionary example first, AI fallback). System TTS read-aloud for words and examples, plus navigation and UX fixes.",
     },
     "zh-Hans": {
         "description": (
-            "Podic 词典是一款干净清爽的开源词典应用，支持英 / 法 / 日三语与中文互查。"
-            "全部词典数据来自自由许可的开源语料（ECDICT、CFDICT、JMdict、Tatoeba 等），离线可用，无需注册登录。\n\n"
+            "Podic 词典是一款干净清爽的开源词典应用，支持英 / 法 / 日 / 德 / 西 / 俄 / 意 / 葡八语与中文互查，"
+            "八语词典一键在线安装，也可注册任意语言、导入自定义词典包。"
+            "词典数据来自自由许可的开源语料（ECDICT、CFDICT、JMdict、Tatoeba 等），离线可用，无需注册登录。\n\n"
             "• 离线查词：词头、音标、词性、屈折变形、真实语料例句与中文翻译\n"
             "• 中文反查：输入中文找到对应单词\n"
+            "• 生词本练习：词义、拼写、听音三种题型，自动追踪熟练度\n"
+            "• 词汇量自测：按词典词频分层抽样，估计词汇量\n"
+            "• 每日一句：随机抽词学例句，词典例句优先，AI 生成兜底\n"
+            "• 系统朗读：调用系统 TTS 朗读单词与例句\n"
+            "• 阅读增强：粘贴或抓取文章，点词即查，生词一键标记\n"
             "• AI 增强（可选）：自带 API Key 即可启用深度讲解、例句生成、释义补全与整句翻译\n\n"
             "Podic 不收集任何个人数据，无广告、无内置付费；所有数据仅保存在你的设备上。"
         ),
-        "keywords": "词典,英语,法语,日语,离线,翻译,开源,英汉词典,日汉,法汉",
-        "promotionalText": "开源、离线、无广告；AI 能力自带 Key 即可用。",
-        "subtitle": "开源离线词典 英法日",
-        "whatsNew": "首个 App Store 版本。",
+        "keywords": "词典,英语,法语,日语,德语,西班牙语,俄语,意大利语,葡萄牙语,离线,开源",
+        "promotionalText": "开源、离线、无广告；生词练习、词汇量自测、每日一句；AI 能力自带 Key 即可用。",
+        "subtitle": "开源离线词典 八语互查",
+        "whatsNew": "新增生词本练习（词义/拼写/听音，熟练度追踪）、分语言词汇量自测、每日一句（词典例句优先、AI 生成兜底）；系统 TTS 朗读单词与例句；返回键导航与多项体验修复。",
     },
 }
 
@@ -114,14 +128,24 @@ def api(method, path, body=None, raw=None, raw_type=None, raise_on_error=True):
         return {"__err": e.code, "body": body}
 
 
-# ---------- 1. 找可编辑版本 ----------
+# ---------- 1. 找可编辑版本；没有就按 --create-version 建（过审后自动发布）----------
 versions = api("GET", f"/v1/apps/{APP_ID}/appStoreVersions")["data"]
 editable = [v for v in versions if v["attributes"]["appStoreState"] == "PREPARE_FOR_SUBMISSION"]
 if not editable:
-    print("无可编辑版本（state != PREPARE_FOR_SUBMISSION）:", [v["attributes"]["appStoreState"] for v in versions])
-    sys.exit(1)
-vid = editable[0]["id"]
-print(f"[1] 版本 {editable[0]['attributes']['versionString']} id={vid}")
+    create_ver = opt("--create-version")
+    if not create_ver:
+        print("无可编辑版本（state != PREPARE_FOR_SUBMISSION）:", [v["attributes"]["appStoreState"] for v in versions])
+        sys.exit(1)
+    release_type = opt("--release-type", "AFTER_APPROVED")
+    created = api("POST", f"/v1/apps/{APP_ID}/appStoreVersions",
+        {"data": {"type": "appStoreVersions",
+                  "attributes": {"versionString": create_ver, "platform": "IOS", "releaseType": release_type},
+                  "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}})
+    vid = created["data"]["id"]
+    print(f"[1] 新建版本 {create_ver} id={vid}（releaseType={release_type}）")
+else:
+    vid = editable[0]["id"]
+    print(f"[1] 版本 {editable[0]['attributes']['versionString']} id={vid}")
 
 # ---------- 2. 本地化 ----------
 locs = api("GET", f"/v1/appStoreVersions/{vid}/appStoreVersionLocalizations")["data"]
@@ -164,25 +188,14 @@ for locale, text in LOCALES.items():
                       "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info_id}}}}})
     print(f"    副标题 {locale} ✓")
 
-# ---------- 3. 截图 ----------
-# 现行 API：先建 appScreenshotSets（按 set 类型），再往 set 里加 appScreenshots 并上传
-for fname, set_type in [(SCREENS[0], "APP_IPHONE_67"), (SCREENS[1], "APP_IPAD_PRO_129")] if len(SCREENS) == 2 else []:
-    locale = have.get("zh-Hans") or list(have.values())[0]
-    raw = open(fname, "rb").read()
-    sets = [x for x in api("GET", f"/v1/appStoreVersionLocalizations/{locale}/appScreenshotSets")["data"] if x["attributes"].get("screenshotDisplayType") == set_type]
-    if sets:
-        set_id = sets[0]["id"]
-    else:
-        set_id = api("POST", "/v1/appScreenshotSets",
-            {"data": {"type": "appScreenshotSets", "attributes": {"screenshotDisplayType": set_type},
-                      "relationships": {"appStoreVersionLocalization": {"data": {"type": "appStoreVersionLocalizations", "id": locale}}}}}
-        )["data"]["id"]
+def upload_screenshot(set_id, fname, raw):
+    """往 appScreenshotSet 里传一张图：创建记录 -> 分片上传 -> 标记完成"""
     created = api("POST", "/v1/appScreenshots",
         {"data": {"type": "appScreenshots",
                   "attributes": {"fileName": fname.split("/")[-1], "fileSize": len(raw)},
                   "relationships": {"appScreenshotSet": {"data": {"type": "appScreenshotSets", "id": set_id}}}}})
     shot = created["data"]
-    print("SHOT ATTRS:", json.dumps(shot.get("attributes", {}))[:300]); ops = shot.get("attributes", {}).get("uploadOperations") or shot.get("attributes", {}).get("assetDeliveryUploadOperations") or []
+    ops = shot.get("attributes", {}).get("uploadOperations") or shot.get("attributes", {}).get("assetDeliveryUploadOperations") or []
     for op in ops:
         req = urllib.request.Request(op["url"], data=raw[op["offset"] : op["offset"] + op["length"]], method=op["method"])
         headers = op.get("requestHeaders", {})
@@ -196,7 +209,62 @@ for fname, set_type in [(SCREENS[0], "APP_IPHONE_67"), (SCREENS[1], "APP_IPAD_PR
     api("PATCH", f"/v1/appScreenshots/{shot['id']}",
         {"data": {"type": "appScreenshots", "id": shot["id"],
                   "attributes": {"uploaded": True, "sourceFileChecksum": __import__("hashlib").md5(raw).hexdigest()}}})
+    return shot
+
+
+def ensure_set(loc_id, set_type):
+    """找到（或创建）某 localization 下指定类型的截图 set"""
+    sets = [x for x in api("GET", f"/v1/appStoreVersionLocalizations/{loc_id}/appScreenshotSets")["data"] if x["attributes"].get("screenshotDisplayType") == set_type]
+    if sets:
+        return sets[0]["id"]
+    return api("POST", "/v1/appScreenshotSets",
+        {"data": {"type": "appScreenshotSets", "attributes": {"screenshotDisplayType": set_type},
+                  "relationships": {"appStoreVersionLocalization": {"data": {"type": "appStoreVersionLocalizations", "id": loc_id}}}}}
+    )["data"]["id"]
+
+# ---------- 3. 截图 ----------
+# 现行 API：先建 appScreenshotSets（按 set 类型），再往 set 里加 appScreenshots 并上传
+for fname, set_type in [(SCREENS[0], "APP_IPHONE_67"), (SCREENS[1], "APP_IPAD_PRO_129")] if len(SCREENS) == 2 else []:
+    locale = have.get("zh-Hans") or list(have.values())[0]
+    raw = open(fname, "rb").read()
+    upload_screenshot(ensure_set(locale, set_type), fname, raw)
     print(f"[3] 截图 {set_type} ✓ ({len(raw)//1024}KB)")
+
+# ---------- 3b. 从旧版本克隆截图（API 新建的版本截图为空，不补会被审核拒）----------
+# 顺带从旧版本捞审核联系人电话（新版本没有 review detail，而电话是必填项）
+clone_from = opt("--clone-from")
+if clone_from:
+    src = [v for v in versions if v["attributes"]["versionString"] == clone_from]
+    if not src:
+        print(f"[3b] 找不到版本 {clone_from}，跳过截图克隆")
+    else:
+        src_vid = src[0]["id"]
+        rel = api("GET", f"/v1/appStoreVersions/{src_vid}/relationships/appStoreReviewDetail", raise_on_error=False)["data"]
+        if rel.get("id") and not CONTACT_PHONE:
+            rd = api("GET", f"/v1/appStoreReviewDetails/{rel['id']}")
+            CONTACT_PHONE = rd["data"]["attributes"].get("contactPhone") or ""
+        n = 0
+        for sl in api("GET", f"/v1/appStoreVersions/{src_vid}/appStoreVersionLocalizations")["data"]:
+            slocale = sl["attributes"]["locale"]
+            if slocale not in have:
+                created = api("POST", "/v1/appStoreVersionLocalizations",
+                    {"data": {"type": "appStoreVersionLocalizations", "attributes": {"locale": slocale},
+                              "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}})
+                have[slocale] = created["data"]["id"]
+            for sset in api("GET", f"/v1/appStoreVersionLocalizations/{sl['id']}/appScreenshotSets")["data"]:
+                stype = sset["attributes"]["screenshotDisplayType"]
+                dset_id = ensure_set(have[slocale], stype)
+                exist = api("GET", f"/v1/appScreenshotSets/{dset_id}/appScreenshots")["data"]
+                if exist:
+                    continue  # 目标 set 已有图（重跑场景），不动
+                for shot in api("GET", f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]:
+                    dl = (shot["attributes"].get("assetDeliveryState") or {}).get("url")
+                    if not dl:
+                        continue
+                    raw = urllib.request.urlopen(dl).read()
+                    upload_screenshot(dset_id, shot["attributes"]["fileName"], raw)
+                    n += 1
+        print(f"[3b] 从 {clone_from} 克隆截图 {n} 张 ✓" + (f"，审核电话 {CONTACT_PHONE}" if CONTACT_PHONE else ""))
 
 # ---------- 4. 年龄分级问卷（全否 => 4+）----------
 # 踩坑：字段类型混合——大部分是枚举字符串（NONE/…），v2 新增的几项是 BOOLEAN；
@@ -256,14 +324,26 @@ if cur.get("id"):
     print(f"[6] 版本已关联 build（id={cur['id'][:8]}…），跳过")
 else:
     all_builds = api("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-version")["data"]
-    valid = [b for b in all_builds if b["attributes"]["processingState"] == "VALID"]
-    if not valid:
-        print("[6] 无 VALID build，跳过（等 TestFlight 处理完重跑）")
+    if "--require-build" in sys.argv:
+        want = sys.argv[sys.argv.index("--require-build") + 1]
+        match = [b for b in all_builds if str(b["attributes"]["version"]) == want]
+        if not match:
+            print(f"[6] build {want} 不存在"); sys.exit(1)
+        if match[0]["attributes"]["processingState"] != "VALID":
+            print(f"[6] build {want} 还没处理完（{match[0]['attributes']['processingState']}），等处理完重跑"); sys.exit(1)
+        pick = match[0]
     else:
+        valid = [b for b in all_builds if b["attributes"]["processingState"] == "VALID"]
+        if not valid:
+            print("[6] 无 VALID build，跳过（等 TestFlight 处理完重跑）")
+            pick = None
+        else:
+            pick = valid[0]
+    if pick:
         api("PATCH", f"/v1/appStoreVersions/{vid}",
             {"data": {"type": "appStoreVersions", "id": vid,
-                      "relationships": {"build": {"data": {"type": "builds", "id": valid[0]["id"]}}}}})
-        print(f"[6] 关联 build {valid[0]['attributes']['version']} ✓")
+                      "relationships": {"build": {"data": {"type": "builds", "id": pick["id"]}}}}})
+        print(f"[6] 关联 build {pick['attributes']['version']} ✓")
 
 # ---------- 7. 审核联系人 ----------
 # 踩坑：appStoreReviewDetails 禁用 GET_COLLECTION（403），id 只能从 version 的
@@ -286,4 +366,15 @@ else:
 
 print("\n完成。剩余网页操作：")
 print("  - App Privacy：选 Data Not Collected（API 无此端点）")
-print("  - 确认无误后点 Submit for Review")
+if "--submit" in sys.argv:
+    sub = api("POST", "/v1/appStoreSubmissions",
+        {"data": {"type": "appStoreSubmissions",
+                  "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}},
+        raise_on_error=False)
+    if "__err" in sub:
+        print(f"[8] 提交审核失败: {sub.get('body', '')[:400]}")
+        print("  - 请到 ASC 网页手动 Submit for Review（先补上面的网页项）")
+    else:
+        print("[8] 已提交审核 ✓（过审后按版本 releaseType 自动/手动发布）")
+else:
+    print("  - 确认无误后点 Submit for Review（或加 --submit 由 API 提交）")
