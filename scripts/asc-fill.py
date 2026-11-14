@@ -10,6 +10,7 @@
 """
 import base64
 import json
+import os
 import subprocess
 import sys
 import time
@@ -176,7 +177,10 @@ print("[2] 版权 ✓")
 # app 级元数据有时处于锁定态（409 subtitle can not be modified）——非致命，
 # 挂上 build 后再重试一次
 infos = api("GET", f"/v1/apps/{APP_ID}/appInfos")["data"]
-info_id = infos[0]["id"]
+# app 有两个 appInfo（线上 READY_FOR_DISTRIBUTION 锁定态 + PREPARE_FOR_SUBMISSION 可编辑态），
+# 副标题/分级挂在锁定的那个上会 409，必须选可编辑的
+info_editable = [a for a in infos if a["attributes"].get("state") == "PREPARE_FOR_SUBMISSION"]
+info_id = (info_editable or infos)[0]["id"]
 info_locs = api("GET", f"/v1/appInfos/{info_id}/appInfoLocalizations")["data"]
 info_by_locale = {l["attributes"]["locale"]: l["id"] for l in info_locs}
 
@@ -279,6 +283,24 @@ if clone_from:
                     upload_screenshot(dset_id, shot["attributes"]["fileName"], raw)
                     n += 1
         print(f"[3b] 从 {clone_from} 克隆截图 {n} 张 ✓" + (f"，审核电话 {CONTACT_PHONE}" if CONTACT_PHONE else ""))
+
+# ---------- 3c. 按 --shots-json 批量传截图（[{"locale","set","files":[...]}]）----------
+if "--shots-json" in sys.argv:
+    spec = json.load(open(os.path.expanduser(sys.argv[sys.argv.index("--shots-json") + 1])))
+    for item in spec:
+        loc_id = have.get(item["locale"])
+        if not loc_id:
+            print(f"[3c] {item['locale']} 无 localization，跳过")
+            continue
+        dset_id = ensure_set(loc_id, item["set"])
+        exist = api("GET", f"/v1/appScreenshotSets/{dset_id}/appScreenshots")["data"]
+        if exist:
+            print(f"[3c] {item['locale']}/{item['set']} 已有 {len(exist)} 张，跳过")
+            continue
+        for f in item["files"]:
+            raw = open(os.path.expanduser(f), "rb").read()
+            upload_screenshot(dset_id, os.path.basename(f), raw)
+        print(f"[3c] {item['locale']}/{item['set']} 上传 {len(item['files'])} 张 ✓")
 
 # ---------- 4. 年龄分级问卷（全否 => 4+）----------
 # 踩坑：字段类型混合——大部分是枚举字符串（NONE/…），v2 新增的几项是 BOOLEAN；
