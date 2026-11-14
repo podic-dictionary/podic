@@ -414,14 +414,48 @@ if subtitle_failed:
     print("[7b] 副标题重试 ✓" if not subtitle_failed else f"[7b] 副标题仍锁定（网页手动改）: {subtitle_failed}")
 
 if "--submit" in sys.argv:
-    sub = api("POST", "/v1/appStoreVersionSubmissions",
-        {"data": {"type": "appStoreVersionSubmissions",
-                  "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}},
+    # 旧 appStoreVersionSubmissions 已废弃（CREATE 405）；现行 ReviewSubmissions API：
+    # 容器（可复用已有的 open 容器）-> 挂 appStoreVersion item -> 标记 submitted
+    open_sub = api("GET", f"/v1/apps/{APP_ID}/reviewSubmissions?filter[platform]=IOS", raise_on_error=False)
+    container = None
+    if "__err" not in open_sub:
+        states = {"READY_TO_SUBMIT", "IN_PROGRESS"}
+        for rs in open_sub.get("data", []):
+            if rs["attributes"]["state"] in states:
+                container = rs
+                break
+    if container is None:
+        container = api("POST", "/v1/reviewSubmissions",
+            {"data": {"type": "reviewSubmissions", "attributes": {"platform": "IOS"},
+                      "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}},
+                                        "appStoreVersionForReview": {"data": {"type": "appStoreVersions", "id": vid}}}}},
+            raise_on_error=False)
+        if "__err" in container:
+            print(f"[8] 创建 reviewSubmission 失败: {container.get('body', '')[:400]}")
+            print("  - 请到 ASC 网页手动 Submit for Review")
+            sys.exit(1)
+    rid = container["data"]["id"]
+    print(f"[8] reviewSubmission {rid[:8]}… state={container['data']['attributes']['state']}")
+    # item：查已挂的 items 里有没有本版本
+    items = api("GET", f"/v1/reviewSubmissions/{rid}/items")["data"]
+    have_item = any(i["relationships"]["appStoreVersion"]["data"]["id"] == vid for i in items)
+    if not have_item:
+        r = api("POST", "/v1/reviewSubmissionItems",
+            {"data": {"type": "reviewSubmissionItems",
+                      "relationships": {"reviewSubmission": {"data": {"type": "reviewSubmissions", "id": rid}},
+                                        "appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}}}},
+            raise_on_error=False)
+        if "__err" in r:
+            print(f"[8] 挂 item 失败: {r.get('body', '')[:300]}")
+            sys.exit(1)
+        print("[8] item 已挂 ✓")
+    done = api("PATCH", f"/v1/reviewSubmissions/{rid}",
+        {"data": {"type": "reviewSubmissions", "id": rid, "attributes": {"submitted": True}}},
         raise_on_error=False)
-    if "__err" in sub:
-        print(f"[8] 提交审核失败: {sub.get('body', '')[:400]}")
-        print("  - 请到 ASC 网页手动 Submit for Review（先补上面的网页项）")
+    if "__err" in done:
+        print(f"[8] 提交失败: {done.get('body', '')[:400]}")
+        print("  - 请到 ASC 网页手动 Submit for Review")
     else:
-        print("[8] 已提交审核 ✓（过审后按版本 releaseType 自动/手动发布）")
+        print(f"[8] 已提交审核 ✓ state={done['data']['attributes']['state']}（过审后按 releaseType={container['data']['attributes'].get('submittedAppVersion', {}).get('releaseType', 'AFTER_APPROVAL')} 发布）")
 else:
     print("  - 确认无误后点 Submit for Review（或加 --submit 由 API 提交）")
