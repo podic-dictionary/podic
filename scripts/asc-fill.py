@@ -294,6 +294,11 @@ if "--shots-json" in sys.argv:
             continue
         dset_id = ensure_set(loc_id, item["set"])
         exist = api("GET", f"/v1/appScreenshotSets/{dset_id}/appScreenshots")["data"]
+        if len(exist) != len(item["files"]):
+            # 数量对不上（上次中断的残局）：清空重传，顺序以本次 files 为准
+            for e in exist:
+                api("DELETE", f"/v1/appScreenshots/{e['id']}")
+            exist = []
         if exist:
             print(f"[3c] {item['locale']}/{item['set']} 已有 {len(exist)} 张，跳过")
             continue
@@ -357,7 +362,7 @@ print("[5] 隐私政策 URL ✓")
 # ---------- 6. 关联 build（取 latest VALID，版本无 build 时才挂）----------
 # 踩坑：/v1/appStoreVersions/{vid}/builds 子路径不存在（404），已挂的 build 走
 # relationships/build 单数端点查；候选 build 用 /v1/builds?filter[app]= 列
-cur = api("GET", f"/v1/appStoreVersions/{vid}/relationships/build")["data"]
+cur = api("GET", f"/v1/appStoreVersions/{vid}/relationships/build")["data"] or {}
 if cur.get("id"):
     print(f"[6] 版本已关联 build（id={cur['id'][:8]}…），跳过")
 else:
