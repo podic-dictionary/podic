@@ -331,6 +331,10 @@ AGE_ATTRS = {
     "lootBox": False,
     "messagingAndChat": False,
     "parentalControls": False,
+    # 2025 新增必填项（漏一个整个 PATCH 409）
+    "socialMedia": "NONE",
+    "meetAndGreet": "NONE",
+    "contestsWithRealPrizes": "NONE",
 }
 api("PATCH", f"/v1/ageRatingDeclarations/{ard_id}",
     {"data": {"type": "ageRatingDeclarations", "id": ard_id, "attributes": AGE_ATTRS}})
