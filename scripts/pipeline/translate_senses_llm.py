@@ -199,35 +199,7 @@ def main():
                 rows = parse_batch(api_call(args.model, system, user, batch_tokens))
             except ApiReject:
                 # 主力拒答（内容审查）：本机 llama 逐条兜底
-                if not args.llama_model:
-                    return None
-                rows = []
-                for e in chunk:
-                    r = None
-                    for attempt in range(2):
-                        try:
-                            ss = e.get("senses", [])
-                            src = " | ".join((s.get(args.source_field) or "")[:160] for s in ss[:4]) \
-                                or "[词]（编写 1-2 条释义）"
-                            out = llama_call(args.llama_model, system,
-                                f"把{args.language_name}词条的释义翻译成简洁的中文词典释义。"
-                                f"输出 {{\"word\": \"{e['headword']}\", \"zh\": [每个义项一句中文]}}，只输出这个 JSON 对象。\n"
-                                f"{e['headword']} :: {src}", 400)
-                            r = parse_batch(f"[{out}]")
-                            if r and r[0]["word"] == e["headword"]:
-                                r = [r[0]]
-                                break
-                            r = None
-                        except Exception as ex:
-                            common.log(f"  [llama] {e['headword']} 第 {attempt + 1} 次失败: {ex}")
-                            r = None
-                    if not r:
-                        with lock:
-                            with open(work / "llama-failed.txt", "a", encoding="utf-8") as f:
-                                f.write(e["headword"] + "\n")
-                        return None  # 一条救不回整批放弃（保持词序校验语义），重跑再试
-                    rows.extend(r)
-                return rows or None
+                return llama_fallback(idx, chunk)
             except Exception as e:
                 common.log(f"  [warn] 批 {idx} 网络错误(第 {attempt + 1} 次): {e}")
                 time.sleep(5 * (attempt + 1))
@@ -240,9 +212,43 @@ def main():
                 common.log(f"  [warn] 批 {idx} 词序不对应(第 {attempt + 1} 次)")
                 continue
             return rows
-        return None
+        # 主力 3 轮失败（拒答 / 坏输出 / 网络）统一落 llama 兜底
+        return llama_fallback(idx, chunk)
 
-        # 静态检查友好：worker 主体结束（上面 return 已覆盖所有路径）
+    def llama_fallback(idx: int, chunk: list[dict]) -> list[dict] | None:
+        """本机 llama 逐条翻（主力拒答或坏输出）；一条两次仍失败记
+        llama-failed.txt 并整批放弃（重跑可再试）"""
+        if not args.llama_model:
+            return None
+        rows = []
+        for e in chunk:
+            r = None
+            for attempt in range(3):
+                try:
+                    ss = e.get("senses", [])
+                    src = " | ".join((s.get(args.source_field) or "")[:160] for s in ss[:4]) \
+                        or "[词]（编写 1-2 条释义）"
+                    out = llama_call(args.llama_model, system,
+                        f"把{args.language_name}词条的释义翻译成简洁的中文词典释义。"
+                        f"输出 {{\"word\": \"{e['headword']}\", \"zh\": [每个义项一句中文]}}，只输出这个 JSON 对象。\n"
+                        f"{e['headword']} :: {src}", 400)
+                    r = parse_batch(f"[{out}]")
+                    if r and r[0]["word"] == e["headword"]:
+                        r = [r[0]]
+                        break
+                    r = None
+                except Exception as ex:
+                    common.log(f"  [llama] {e['headword']} 第 {attempt + 1} 次失败: {ex}")
+                    r = None
+            if not r:
+                # 救不回的单条记 failed 后跳过（run 按 word 写入、顺序无关，
+                # 不连累同批其他条）；重跑时断点机制会让它再试
+                with lock:
+                    with open(work / "llama-failed.txt", "a", encoding="utf-8") as f:
+                        f.write(e["headword"] + "\n")
+                continue
+            rows.extend(r)
+        return rows or None
 
     def run(idx, chunk):
         rows = worker(idx, chunk)

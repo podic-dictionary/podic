@@ -17,6 +17,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import common
 
+# 中文释义繁→简统一（ECDICT 等源数据混有繁体释义，抽样 ~3%）：
+# 只动 senses[].zh / zh_terms / 例句译文这些中文文本，headword/reading/原文不动
+try:
+    from opencc import OpenCC
+    _cc = OpenCC("t2s")
+    def t2s(t: str) -> str:
+        return _cc.convert(t)
+except ImportError:  # 无 opencc 环境保底：原样通过
+    def t2s(t: str) -> str:
+        return t
+
 SCHEMA_VERSION = 1
 
 DDL = """
@@ -159,6 +170,9 @@ def main():
     for e in entries:
         norm = e["norm"]
         senses = e.get("senses") or []
+        for _s in senses:
+            if _s.get("zh"):
+                _s["zh"] = t2s(_s["zh"])
         zh_text = "；".join(s["zh"] for s in senses if s.get("zh"))
         batch.append((
             e["headword"], e.get("reading"), norm, e.get("ipa"),
@@ -188,7 +202,7 @@ def main():
         if not eid_list:
             continue
         for row in e.get("zh_terms") or []:
-            term, raw_idx = row[0], int(row[1])
+            term, raw_idx = t2s(row[0]), int(row[1])
             origin = row[2] if len(row) > 2 else "pipeline"
             for eid in eid_list:
                 n_senses = eid_senses_len.get(eid) or 0
@@ -225,7 +239,8 @@ def main():
     if args.examples and (work / "sentences.jsonl").exists():
         sent_batch, link_batch = [], []
         for s in common.read_jsonl(work / "sentences.jsonl"):
-            sent_batch.append((s["id"], s["text"], json.dumps(s.get("translation") or [], ensure_ascii=False)))
+            _trs = [t2s(t) for t in (s.get("translation") or [])]
+            sent_batch.append((s["id"], s["text"], json.dumps(_trs, ensure_ascii=False)))
         for r in common.read_jsonl(work / "entry_sentence.jsonl"):
             # 两种键按语义查各自的映射：entry=headword（tatoeba 关联，en/fr）按 casefold 精确
             # 关联；entry_norm=norm（refine 的 AI 例句）按 norm。不能一个键同时回退两个映射——
