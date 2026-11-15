@@ -93,7 +93,9 @@ class MainActivity : Activity() {
                     requestId = req.optString("request_id"),
                     text = req.optString("text"),
                     lang = req.optString("lang"),
-                    speed = if (req.optString("speed") == "slow") 0.75f else 1.0f,
+                    // rate 数值优先（设置页可调慢速倍率）；旧前端只传 speed 符号值
+                    speed = req.optDouble("rate", 0.0).takeIf { it > 0 }?.toFloat()
+                        ?: if (req.optString("speed") == "slow") 0.75f else 1.0f,
                     provider = req.optString("provider", "auto"),
                 )
                 "stop" -> mgr.stop()

@@ -106,6 +106,24 @@ export function setDefaultSpeedCache(s: SpeechSpeed) {
   defaultSpeedCache = s;
 }
 
+// 持久化的慢速倍率（settings.tts.slow_rate，0.5~0.9）：同 defaultSpeed 的读一次缓存模式
+let slowRateCache: number | null = null;
+let slowRateLoading: Promise<number> | null = null;
+export function slowRate(): Promise<number> {
+  if (slowRateCache !== null) return Promise.resolve(slowRateCache);
+  slowRateLoading ??= getSettings()
+    .then((s) => {
+      const r = s.tts?.slow_rate;
+      slowRateCache = typeof r === "number" && r >= 0.5 && r <= 0.9 ? r : 0.75;
+      return slowRateCache;
+    })
+    .catch(() => 0.75);
+  return slowRateLoading;
+}
+export function setSlowRateCache(r: number) {
+  slowRateCache = r;
+}
+
 let seq = 0;
 const resolvers = new Map<string, (s: TtsEvent["state"]) => void>();
 function resolveActive(id: string, state: TtsEvent["state"]) {
@@ -121,6 +139,8 @@ export interface SpeakHandle {
   /** 播放结束/取消/出错时 resolve（state 字段区分） */
   done: Promise<TtsEvent["state"]>;
   cancel: () => void;
+  /** 本次实际倍速（慢速徽标显示用） */
+  rate?: number;
 }
 
 /// 朗读一段文本。provider：auto = 有端侧模型用引擎，否则系统；
@@ -130,6 +150,8 @@ export function speak(opts: {
   lang: Lang | string;
   speed: SpeechSpeed;
   provider?: "auto" | "system" | "offline";
+  /** 慢速倍率（settings.tts.slow_rate）；缺省 0.75。调用方经 slowRate() 取后传入 */
+  rate?: number;
 }): SpeakHandle | null {
   const requestId = `sp${++seq}`;
   if (hasTtsRequest()) {
@@ -145,10 +167,12 @@ export function speak(opts: {
     });
     const send = (op: string): boolean =>
       tryBridge("ttsRequest", JSON.stringify({ op, request_id: requestId, ...payload }));
+    const rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
     const payload = {
       text: opts.text,
       lang: String(opts.lang),
       speed: opts.speed,
+      rate,
       provider: opts.provider ?? "auto",
     };
     if (!send("speak")) {
@@ -160,6 +184,7 @@ export function speak(opts: {
       requestId,
       done,
       cancel: () => void send("stop"),
+      rate,
     };
   }
   // 旧壳：同步 ttsSpeak 桥（无 request 区分；podic:tts-end 即结束，速度由壳固定）
@@ -184,7 +209,7 @@ export function speak(opts: {
   const tag = LANG_TAGS[String(opts.lang)] ?? String(opts.lang);
   const u = new SpeechSynthesisUtterance(opts.text);
   u.lang = tag;
-  u.rate = opts.speed === "slow" ? 0.75 : 1.0;
+  u.rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
   const done = new Promise<TtsEvent["state"]>((resolve) => {
     u.onend = () => resolve("ended");
     u.onerror = () => resolve("error");

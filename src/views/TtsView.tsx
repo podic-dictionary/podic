@@ -5,10 +5,11 @@ import {
 } from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Seg from "../components/SegmentedControl";
+import { parseHash } from "../lib/router";
 import UpdateSourcePicker, { type SourcePreset } from "../components/UpdateSourcePicker";
 import { ChevronLeftIcon, SpinnerIcon, TrashIcon } from "../components/icons";
 import { langDisplayName } from "../langNames";
-import { setDefaultSpeedCache, invalidateModelsCache, speak, hasShellBridge, unloadEngine } from "../tts/speech";
+import { setDefaultSpeedCache, setSlowRateCache, invalidateModelsCache, slowRate, speak, hasShellBridge, unloadEngine } from "../tts/speech";
 
 /** 与后端 DEFAULT_TTS_MANIFEST_URL / GHPROXY_PREFIX 一致（测速候选地址用） */
 const TTS_MANIFEST_URL = "https://github.com/podic-dictionary/tts/releases/latest/download/tts-metainfo.json";
@@ -21,6 +22,7 @@ const TTS_PRESETS: readonly SourcePreset[] = [
 interface TtsSettingsState {
   source: { mode: string; custom_manifest_url: string };
   default_speed: string;
+  slow_rate?: number;
   languages: Record<string, { provider: string }>;
 }
 
@@ -59,6 +61,23 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
   const [listenBusy, setListenBusy] = useState<string | null>(null);
   const inShell = hasShellBridge();
 
+  // 三 tab（朗读/模型/更新源）：hash 驱动（#/settings/tts/models、…/source），刷新/直链可恢复
+  const [tab, setTabState] = useState<"speech" | "models" | "source">(() => {
+    const t = parseHash().path[2];
+    return t === "models" || t === "source" ? t : "speech";
+  });
+  useEffect(() => {
+    const onHash = () => {
+      const t = parseHash().path[2];
+      setTabState(t === "models" || t === "source" ? t : "speech");
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const setTab = (t: "speech" | "models" | "source") => {
+    window.location.hash = `#/settings/tts${t === "speech" ? "" : `/${t}`}`;
+  };
+
   const reloadModels = useCallback(() => {
     invalidateModelsCache();
     return ttsModels().then(setInstalled).catch(() => setInstalled([]));
@@ -78,6 +97,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       setSettings(s.tts ?? {
         source: { mode: "github", custom_manifest_url: "" },
         default_speed: "normal",
+        slow_rate: 0.75,
         languages: {},
       });
     }).catch(() => {});
@@ -146,6 +166,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
     await saveSettings({ tts: next });
     setSettings(next);
     if (patch.default_speed) setDefaultSpeedCache(patch.default_speed === "slow" ? "slow" : "normal");
+    if (typeof patch.slow_rate === "number") setSlowRateCache(patch.slow_rate);
     if (patch.source) void reloadCatalog();
   };
 
@@ -212,7 +233,8 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
     const lang = m.languages[0] ?? "en";
     const text = SAMPLE_TEXT[lang] ?? "Hello, this is a sample pronunciation.";
     setListenBusy(key);
-    const h = speak({ text, lang, speed, provider: "offline" });
+    const rate = speed === "slow" ? await slowRate() : undefined;
+    const h = speak({ text, lang, speed, rate, provider: "offline" });
     if (!h) {
       setListenBusy(null);
       return;
@@ -256,10 +278,29 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         端侧离线发音模型：装好后查词朗读自动使用（系统没有该语言语音也能读），不联网、不出网
       </p>
 
+      {/* tab 切换：朗读（语速/倍率/用法）/ 模型（下载·更新·删除）/ 更新源 */}
+      <div className="mt-3 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
+        {(["speech", "models", "source"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+              tab === t
+                ? "bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-400"
+                : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            }`}
+          >
+            {t === "speech" ? "朗读" : t === "models" ? "模型" : "更新源"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "speech" && (
+      <>
       {/* 默认语速 */}
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">默认朗读语速</h2>
-        <p className="mt-0.5 text-xs text-zinc-400">查词页喇叭按钮的默认语速；播放中长按喇叭可临时用慢速重读</p>
+        <p className="mt-0.5 text-xs text-zinc-400">朗读按钮点一下使用的语速；长按永远读慢速</p>
         <div className="mt-2">
           <Seg
             value={(settings?.default_speed === "slow" ? "slow" : "normal")}
@@ -272,7 +313,34 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
-      {/* 下载源 */}
+      {/* 慢速倍率 */}
+      <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+        <h2 className="text-sm font-medium text-zinc-500">慢速朗读倍率</h2>
+        <p className="mt-0.5 text-xs text-zinc-400">
+          长按朗读按钮（词条、例句、每日一句通用）按此倍率放慢，跟读学习发音用；试听·慢速同此倍率
+        </p>
+        <div className="mt-2">
+          <Seg
+            value={String(settings?.slow_rate ?? 0.75)}
+            options={[0.5, 0.6, 0.7, 0.75, 0.8, 0.9].map((r) => ({ id: String(r), label: `${r}×` }))}
+            onChange={(v) => void saveTts({ slow_rate: Number(v) })}
+          />
+        </div>
+      </section>
+
+      {/* 用法说明 */}
+      <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+        <h2 className="text-sm font-medium text-zinc-500">朗读按钮怎么用</h2>
+        <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-zinc-400">
+          <li>· 点一下喇叭：按「默认语速」朗读，播放中再点停止</li>
+          <li>· 长按喇叭（约半秒）：按「慢速倍率」放慢重读，适合跟读辨音</li>
+          <li>· 词条头词、每条例句、每日一句的喇叭都支持这两种操作</li>
+        </ul>
+      </section>
+      </>
+      )}
+
+      {tab === "source" && (
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">模型下载源</h2>
         <div className="mt-2">
@@ -285,8 +353,9 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
           />
         </div>
       </section>
+      )}
 
-      {/* 模型列表 */}
+      {tab === "models" && (
       <section className="mt-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-zinc-500">语音模型</h2>
@@ -449,6 +518,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
           </div>
         ))}
       </section>
+      )}
 
       <ConfirmDialog
         open={confirmDel !== null}

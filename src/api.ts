@@ -195,6 +195,7 @@ export interface SettingsView {
   tts?: {
     source: { mode: string; custom_manifest_url: string };
     default_speed: string;
+    slow_rate?: number;
     languages: Record<string, { provider: string }>;
   } | null;
 }
@@ -211,6 +212,7 @@ export const saveSettings = (settings: {
   tts?: {
     source: { mode: string; custom_manifest_url: string };
     default_speed: string;
+    slow_rate?: number;
     languages: Record<string, { provider: string }>;
   };
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });

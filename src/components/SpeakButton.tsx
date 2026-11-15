@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Lang } from "../types";
 import {
-  defaultSpeed, hasShellBridge, installedModels, offlineModelFor, speak,
+  defaultSpeed, hasShellBridge, installedModels, offlineModelFor, slowRate, speak,
   systemVoiceAvailable, type SpeakHandle, type SpeechSpeed,
 } from "../tts/speech";
 
@@ -52,8 +52,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   const showDownload = inShell && hasVoice === false && !hasModel;
   if (hasVoice === false && !hasModel && !inShell) return null;
 
-  const start = async (speed: SpeechSpeed) => {
-    const h = speak({ text, lang, speed, provider: "auto" });
+  const start = async (speed: SpeechSpeed, rate?: number) => {
+    const h = speak({ text, lang, speed, rate, provider: "auto" });
     if (!h) return;
     handleRef.current?.cancel();
     handleRef.current = h;
@@ -76,7 +76,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     window.clearTimeout(pressTimer.current);
     pressTimer.current = window.setTimeout(() => {
       slowFiredRef.current = true;
-      void start("slow");
+      // 慢速倍率可调（设置→语音引擎）：异步取缓存值再播，徽标用 handle.rate
+      void slowRate().then((r) => start("slow", r));
     }, 450);
   };
   const clearPress = () => window.clearTimeout(pressTimer.current);
@@ -116,6 +117,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
       onPointerCancel={clearPress}
       onContextMenu={(e) => e.preventDefault()}
       title={speaking ? "停止朗读（长按慢速）" : "朗读发音（长按慢速）"}
+      aria-label="朗读发音"
       className={`inline-flex select-none items-center gap-0.5 p-1.5 -m-1.5 align-middle transition-colors ${
         speaking
           ? "text-emerald-600 dark:text-emerald-400"
@@ -139,7 +141,9 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
               />
             ))}
           </span>
-          {speaking === "slow" && <span className="text-[10px] font-medium leading-none">0.75×</span>}
+          {speaking === "slow" && (
+            <span className="text-[10px] font-medium leading-none">{handleRef.current?.rate ?? 0.75}×</span>
+          )}
         </>
       )}
     </button>

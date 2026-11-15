@@ -81,6 +81,9 @@ pub struct TtsSettings {
     /// normal | slow（全局默认；朗读按钮的菜单只覆盖单次）
     #[serde(default = "default_tts_speed")]
     pub default_speed: String,
+    /// 慢速朗读倍率（0.5~0.9，步长 0.1）：长按朗读按钮与试听·慢速的实际倍速
+    #[serde(default = "default_tts_slow_rate")]
+    pub slow_rate: f64,
     /// 按语言：provider = auto | system | offline（auto = 已装模型优先，否则系统）
     #[serde(default)]
     pub languages: std::collections::HashMap<String, TtsLangPref>,
@@ -88,6 +91,10 @@ pub struct TtsSettings {
 
 fn default_tts_speed() -> String {
     "normal".into()
+}
+
+fn default_tts_slow_rate() -> f64 {
+    0.75
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
