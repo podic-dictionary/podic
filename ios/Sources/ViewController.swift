@@ -11,6 +11,10 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
     private var renderView: WKWebView?
     /// 进行中渲染请求的 token（换请求/超时后置空，迟到回调靠它丢弃）
     private var renderToken: String?
+    /// 本地后端端口（恢复流程要对比重启前后是否换了 origin）
+    private var serverPort: Int32 = 0
+    /// 恢复流程互斥：探活/重启/重载一次只跑一个（didBecomeActive 可能连发）
+    private var recovering = false
 
     override func loadView() {
         webView = WKWebView(frame: .zero)
@@ -32,6 +36,9 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
             let port = podic_start_server(dirCString, 0) // 0=内核挑空闲端口，杜绝端口冲突
             DispatchQueue.main.async { [self] in
                 if port > 0 {
+                    serverPort = port
+                    // 端口进统一日志：真机「Load failed」排查时 simctl/log 直接可查
+                    NSLog("podic server on 127.0.0.1:\(port)")
                     webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)")!))
                 } else {
                     webView.loadHTMLString("podic 后端启动失败，请重启应用", baseURL: nil)
@@ -88,6 +95,50 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
         }
     }
 
+    /// 回前台/解锁后探活本地后端；挂了就重启并重载页面（保留当前路径与 hash）。
+    /// iOS 挂起可能让 listener 被系统回收（TN2277）或后端线程退出，壳不恢复的话
+    /// 所有 /api 请求会永久 Load failed（每日一句打开即请求，最先暴露）
+    func recoverServerIfNeeded() {
+        guard !recovering, serverPort > 0 else { return }
+        recovering = true
+        var req = URLRequest(url: URL(string: "http://127.0.0.1:\(serverPort)/api/health")!)
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req) { [weak self] _, response, _ in
+            let healthy = (response as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async {
+                guard let self else { return }
+                defer { self.recovering = false }
+                guard !healthy else { return }
+                NSLog("podic health check failed after resume, restarting server")
+                let newPort = podic_restart_server()
+                guard newPort > 0 else {
+                    NSLog("podic server restart failed")
+                    return
+                }
+                if newPort == self.serverPort {
+                    self.webView.reload() // 同端口：页面重新请求即可
+                    return
+                }
+                // 换端口 = 换 origin：保留当前路径/查询/hash 重载，尽量回到原界面
+                self.serverPort = newPort
+                var comps = URLComponents()
+                comps.scheme = "http"
+                comps.host = "127.0.0.1"
+                comps.port = Int(newPort)
+                if let cur = self.webView.url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) {
+                    comps.path = cur.path
+                    comps.query = cur.query
+                    comps.fragment = cur.fragment
+                } else {
+                    comps.path = "/"
+                }
+                if let url = comps.url {
+                    self.webView.load(URLRequest(url: url))
+                }
+            }
+        }.resume()
+    }
+
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         MainActor.assumeIsolated {
             if webView === self.webView {
@@ -124,6 +175,15 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKSc
                 UIApplication.shared.open(url)
             }
             return nil
+        }
+    }
+
+    /// WebContent 进程被系统回收（内存压力）时页面白屏：重载恢复
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        MainActor.assumeIsolated {
+            if webView === self.webView {
+                self.webView.reload()
+            }
         }
     }
 

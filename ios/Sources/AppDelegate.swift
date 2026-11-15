@@ -25,6 +25,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    /// 解锁/回前台都走这里：探活本地后端，挂了自动重启+重载（每日一句 Load failed 根因的壳侧恢复）
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        (window?.rootViewController as? ViewController)?.recoverServerIfNeeded()
+    }
+
     /// 深链接：podic://search?q=hi&lang=en / podic://translate?text=hi -> 前端 hash 路由
     func application(
         _ app: UIApplication,

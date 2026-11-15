@@ -131,24 +131,96 @@ pub async fn serve(addr: &str, data_dir: PathBuf, dist_dir: PathBuf) -> Result<(
     Ok(())
 }
 
+/// 服务实例：线程存活即在跑。iOS 挂起/恢复后 listener 可能被系统回收
+/// （TN2277），axum::serve 又不会因 accept 错误退出——服务死了旧实现也
+/// 只会返回陈旧端口（OnceLock），宿主从此永远连不上。这里把一次性端口
+/// 改成可管理实例：壳可以查询存活、强制重启，重启优先复用原端口
+struct ServerInstance {
+    port: u16,
+    generation: u32,
+    data_dir: PathBuf,
+    thread: std::thread::JoinHandle<()>,
+    shutdown: tokio::sync::watch::Sender<bool>,
+}
+
+static SERVER: std::sync::Mutex<Option<ServerInstance>> = std::sync::Mutex::new(None);
+static GENERATION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 服务线程是否还在跑（初始化失败/serve 退出后为 false）
+pub fn server_alive() -> bool {
+    SERVER
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|s| !s.thread.is_finished())
+}
+
 /// 在后台线程启动完整后端（静态前端取自 `data_dir/web`），返回实际监听端口。
 ///
 /// - `port <= 0` 时由内核挑空闲端口
-/// - 幂等：重复调用返回首次启动的端口；绑定/启动失败返回 -1
+/// - 幂等且自愈：已存活直接返回其端口；实例死了（初始化失败/serve 退出）
+///   用记录的 data_dir 重启，优先复用原端口；绑定/启动失败返回 -1
 ///
 /// 供移动端壳复用：Android JNI / iOS C ABI / 鸿蒙 NAPI 都据此在设备内起本地服务，
 /// 宿主 WebView 再加载 `http://127.0.0.1:{port}`。
 pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
-    static STARTED: OnceLock<u16> = OnceLock::new();
-    if let Some(p) = STARTED.get() {
-        return *p as i32;
+    let mut guard = SERVER.lock().unwrap();
+    if let Some(inst) = guard.as_ref() {
+        if !inst.thread.is_finished() {
+            return inst.port as i32;
+        }
     }
-    let dist_dir = data_dir.join("web");
+    // 实例死了：重启优先复用原端口（同 origin 保住 WebView 的 localStorage），
+    // 原端口仍被旧线程占着（极端卡死场景）时由 spawn_server 兜底换端口
+    let prefer = guard.as_ref().map(|s| s.port as i32).unwrap_or(port);
+    let data_dir = guard.as_ref().map(|s| s.data_dir.clone()).unwrap_or(data_dir);
+    spawn_server(&mut guard, data_dir, prefer)
+}
 
-    // 先用 std listener 绑定拿实际端口，再交给 tokio
-    let addr = format!("127.0.0.1:{}", if port > 0 { port } else { 0 });
+/// 强制重启（健康探测失败时壳调用）：先优雅停旧实例，短暂等待后无论是否
+/// 退出都起新实例——卡死的旧线程无法安全强杀，其端口占着就换端口，
+/// WebView 重载新 origin 即可
+pub fn restart_background() -> i32 {
+    let mut guard = SERVER.lock().unwrap();
+    let (port, data_dir) = match guard.take() {
+        Some(inst) => {
+            let _ = inst.shutdown.send(true);
+            let inst_port = inst.port;
+            let dir = inst.data_dir;
+            // 优雅停机窗口：serve 循环响应 shutdown 信号需要让出时间；等不到就放弃
+            for _ in 0..16 {
+                if inst.thread.is_finished() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            (inst_port as i32, dir)
+        }
+        None => return -1,
+    };
+    spawn_server(&mut guard, data_dir, port)
+}
+
+/// 绑定 + 起线程 + 记录实例。prefer 端口绑不上时让内核挑空闲端口
+fn spawn_server(
+    guard: &mut std::sync::MutexGuard<'static, Option<ServerInstance>>,
+    data_dir: PathBuf,
+    prefer: i32,
+) -> i32 {
+    let dist_dir = data_dir.join("web");
+    let addr = format!("127.0.0.1:{}", if prefer > 0 { prefer } else { 0 });
     let std_listener = match std::net::TcpListener::bind(&addr) {
         Ok(l) => l,
+        Err(_) if prefer > 0 => {
+            // 原端口被占（旧实例未退/端口被系统回收给别处）：换随机端口
+            match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    plog!("podic bind fallback: {e}");
+                    return -1;
+                }
+            }
+        }
         Err(e) => {
             plog!("podic bind {addr}: {e}");
             return -1;
@@ -163,11 +235,11 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
         return -1;
     }
     let actual = std_listener.local_addr().map(|a| a.port()).unwrap_or(0);
-    if STARTED.set(actual).is_err() {
-        return STARTED.get().map(|p| *p as i32).unwrap_or(-1);
-    }
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
 
-    std::thread::Builder::new()
+    let data_dir_for_thread = data_dir.clone();
+    let thread = match std::thread::Builder::new()
         .name("podic-server".into())
         .spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -189,7 +261,7 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
                         return;
                     }
                 };
-                let state = match init_state(&data_dir) {
+                let state = match init_state(&data_dir_for_thread) {
                     Ok(s) => s,
                     Err(e) => {
                         plog!("podic init state: {e}");
@@ -197,12 +269,59 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
                     }
                 };
                 let app = build_router(state, &dist_dir);
-                if let Err(e) = axum::serve(listener, app).await {
+                plog!("podic serve g{generation} on 127.0.0.1:{actual}");
+                let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+                    while shutdown_rx.changed().await.is_ok() {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                });
+                if let Err(e) = serve.await {
                     plog!("podic serve: {e}");
                 }
             });
         })
-        .ok();
+    {
+        Ok(t) => t,
+        Err(e) => {
+            plog!("podic spawn thread: {e}");
+            return -1;
+        }
+    };
 
+    **guard = Some(ServerInstance {
+        port: actual,
+        generation,
+        data_dir,
+        thread,
+        shutdown: shutdown_tx,
+    });
     actual as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 空临时目录起服务 → 幂等返回同端口；重启拿到可用端口且存活；
+    /// 旧端口在优雅停机后让出（同端口复用）
+    #[test]
+    fn start_idempotent_and_restart_recovers() {
+        let dir = std::env::temp_dir().join(format!("podic-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p1 = start_background(dir.clone(), 0);
+        assert!(p1 > 0, "首次启动应返回端口");
+        assert!(server_alive());
+        let p2 = start_background(dir.clone(), 0);
+        assert_eq!(p1, p2, "存活时重复调用应幂等返回原端口");
+        // 等 serve 就绪再重启，避免初始化竞态
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let p3 = restart_background();
+        assert!(p3 > 0, "重启应返回可用端口");
+        assert!(server_alive());
+        // 旧实例优雅停机后原端口应可复用（TN2277 场景壳依赖同端口恢复保住 origin）
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(p3, p1, "重启应复用原端口");
+    }
 }

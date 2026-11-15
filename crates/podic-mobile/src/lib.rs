@@ -35,3 +35,16 @@ pub unsafe extern "C" fn podic_start_server(data_dir: *const std::os::raw::c_cha
     };
     podic_server::start_background(std::path::PathBuf::from(dir), port)
 }
+
+/// C ABI（iOS 桥接）：强制重启后端（健康探测失败时壳调用），
+/// 返回新端口（优先复用原端口），从未启动过/失败返回 -1
+#[no_mangle]
+pub extern "C" fn podic_restart_server() -> i32 {
+    podic_server::restart_background()
+}
+
+/// C ABI（iOS 桥接）：服务线程是否存活（初始化失败/serve 退出后 false）
+#[no_mangle]
+pub extern "C" fn podic_server_alive() -> i32 {
+    podic_server::server_alive() as i32
+}
