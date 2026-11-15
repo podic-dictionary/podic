@@ -78,7 +78,9 @@ pub fn build(task: &str, text: &str, context: Option<&Value>) -> Prompt {
                     "为词语「{text}」生成一句自然、完整、可独立理解的例句（只造一句），并给一条简体中文译文。\n输出格式：{{\"text\": \"例句\", \"translation\": [\"中文译文\"]}}"
                 ),
             },
-            max_tokens: 400,
+            // 思考模型的思考也消耗 completion 预算：400 会被思考吃光正文 0 字/
+            // 烂 JSON 落缓存（回捞解析失败误报「生成结果无效」），2000 实测够
+            max_tokens: 2000,
             temperature: 0.7,
         },
         "translate" => Prompt {
@@ -102,7 +104,7 @@ pub fn build(task: &str, text: &str, context: Option<&Value>) -> Prompt {
                      senses 最多 3 条，每条必须含非空 zh。专有名词按 pos=[\"n.\"] 给一条释义。",
                     lang_name = lang_name(lang),
                 ),
-                max_tokens: 600,
+                max_tokens: 2000, // 同 daily：思考模型预算要盖过思考长度
                 temperature: 0.2,
             }
         }

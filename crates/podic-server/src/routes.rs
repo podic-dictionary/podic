@@ -744,16 +744,8 @@ pub async fn ai_run(
         temperature: p.temperature,
     };
 
-    // 缓存键（含词条上下文）
-    let mut hasher = Sha256::new();
-    hasher.update(req.task.as_bytes());
-    hasher.update([0]);
-    hasher.update(model.as_bytes());
-    hasher.update([0]);
-    hasher.update(req.text.as_bytes());
-    hasher.update([0]);
-    hasher.update(req.context.as_ref().map(|c| c.to_string()).unwrap_or_default().as_bytes());
-    let cache_key = format!("{:x}", hasher.finalize());
+    // 缓存键（含词条上下文；数字规范化防 JS 往返错位，与每日一句回捞共用）
+    let cache_key = podic_core::ai::ai_cache_key(&req.task, &model, &req.text, req.context.as_ref());
 
     let cached = if req.fresh {
         None
@@ -799,11 +791,15 @@ pub async fn ai_run(
 
         match client.stream(&chat, stop, &mut on_delta).await {
             Ok(outcome) => {
-                // 空结果不进缓存（如被 thinking 吃掉 token 的失败响应）
-                if !full.trim().is_empty() {
-                    let core = lock(&state);
-                    let _ = podic_core::store::ai_cache_put(&core.conn, &cache_key, &req.task, &model, &full);
+                // 空结果不进缓存也不发成功 done（如被 thinking 吃掉 token 的失败
+                // 响应）——发了 done 前端会当生成成功去回捞，误报「生成结果无效」
+                if full.trim().is_empty() {
+                    let _ = tx.send(sse_event(json!({ "type": "error", "message": "生成结果为空（模型输出被截断或耗尽额度）" })));
+                    state.ai_tasks.lock().unwrap().remove(&task_id);
+                    return;
                 }
+                let core = lock(&state);
+                let _ = podic_core::store::ai_cache_put(&core.conn, &cache_key, &req.task, &model, &full);
                 let _ = tx.send(sse_event(json!({
                         "type": "done",
                         "usage": { "input": outcome.usage.input, "output": outcome.usage.output },

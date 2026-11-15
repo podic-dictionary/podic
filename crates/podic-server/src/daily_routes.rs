@@ -137,21 +137,6 @@ fn parse_cached_daily(raw: &str) -> Option<(String, Vec<String>)> {
     Some((text, translation))
 }
 
-/// 与 /api/ai/run 完全一致的缓存键算法：task\0model\0text\0context。
-/// 每日一句的「词先行」改造后，AI 生成交由前端走 /api/ai/run（流式+取消），
-/// 生成结果由该接口统一写入 ai_cache；本接口用同款键读缓存，保证
-/// 「前端刚生成过的句子，下次抽到同词直接命中」
-fn ai_run_cache_key(task: &str, model: &str, text: &str, context: &Value) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(task.as_bytes());
-    hasher.update([0]);
-    hasher.update(model.as_bytes());
-    hasher.update([0]);
-    hasher.update(text.as_bytes());
-    hasher.update([0]);
-    hasher.update(context.to_string().as_bytes());
-    format!("{:x}", hasher.finalize())
-}
 
 /// POST /api/daily-sentence
 pub async fn daily_sentence(
@@ -334,7 +319,7 @@ pub async fn daily_sentence(
     let ai_context = json!({"prompt_version": DAILY_PROMPT_VERSION, "entry": entry_ctx});
     let ai_cache_key = resolved_model
         .as_deref()
-        .map(|m| ai_run_cache_key("daily", m, &unit.headword, &ai_context))
+        .map(|m| podic_core::ai::ai_cache_key("daily", m, &unit.headword, Some(&ai_context)))
         .unwrap_or_default();
     let cached_ai = chosen.is_none().then(|| {
         resolved_model

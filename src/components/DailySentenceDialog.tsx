@@ -42,53 +42,68 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
   useEffect(() => () => aiHandle.current?.cancel(), []);
 
   /** 走 /api/ai/run 流式生成当前词的例句；服务端 done 前已统一落缓存，
-   * 完成后重拉一次快路径即可拿到干净句子（缓存键两侧一致，必命中） */
+   * 完成后重拉一次快路径即可拿到干净句子（缓存键两侧一致，必命中）。
+   * fresh=绕开缓存重生成（坏缓存——截断的烂 JSON——必须覆盖掉，否则重试永远命中坏内容） */
   const generateSentence = useCallback(
-    (req: NonNullable<DailySentenceResult["ai_request"]>) => {
+    (req: NonNullable<DailySentenceResult["ai_request"]>, fresh = false) => {
       const seq = ++aiReqSeq.current;
       setAiState("generating");
       setAiError("");
       const handle = aiRun(
-        { task: req.task as never, text: req.text, context: req.context, provider_id: aiChoice.providerId, model: req.model },
+        { task: req.task as never, text: req.text, context: req.context, provider_id: aiChoice.providerId, model: req.model, fresh },
         () => {}, // JSON 整体解析，不逐字上屏
       );
       aiHandle.current = handle;
-      handle.done.then(async (cacheKey) => {
-        if (aiReqSeq.current !== seq) return;
-        if (!cacheKey) {
-          setAiState("error");
-          setAiError("生成失败，请重试或换一句");
-          return;
-        }
-        try {
-          const r = await dailySentence({
-            lang,
-            // 指定词头回捞快路径：随机重抽会抽到别的词，缓存键对不上（误报「生成结果无效」）。
-            // req.text 是服务端解析的抽中词头（缓存键的 text 分量）
-            headword: req.text,
-            level: levelsByLang[lang]
-              ? { mode: levelsByLang[lang].mode as "auto" | "manual", band: levelsByLang[lang].band }
-              : undefined,
-            provider_id: aiChoice.providerId || undefined,
-            model: aiChoice.model || undefined,
-          });
+      handle.done
+        .then(async (cacheKey) => {
           if (aiReqSeq.current !== seq) return;
-          if (r.sentence) {
-            setData((prev) => (prev && prev.word.headword === r.word.headword ? { ...prev, sentence: r.sentence } : prev));
-            setAiState("idle");
-          } else {
+          if (!cacheKey) {
             setAiState("error");
-            setAiError("生成结果无效，请重试或换一句");
+            setAiError("生成失败，请重试或换一句");
+            return;
           }
-        } catch {
+          try {
+            const r = await dailySentence({
+              lang,
+              // 指定词头回捞快路径：随机重抽会抽到别的词，缓存键对不上（误报「生成结果无效」）。
+              // req.text 是服务端解析的抽中词头（缓存键的 text 分量）
+              headword: req.text,
+              level: levelsByLang[lang]
+                ? { mode: levelsByLang[lang].mode as "auto" | "manual", band: levelsByLang[lang].band }
+                : undefined,
+              provider_id: aiChoice.providerId || undefined,
+              // 回捞 model 与生成请求对齐（ai_request.model）：aiChoice.model 若与
+              // 生成时不同，服务端会按别的模型算缓存键，必 miss
+              model: req.model || undefined,
+            });
+            if (aiReqSeq.current !== seq) return;
+            if (r.sentence) {
+              setData((prev) => (prev && prev.word.headword === r.word.headword ? { ...prev, sentence: r.sentence } : prev));
+              setAiState("idle");
+            } else if (!fresh) {
+              // 回捞空多半是缓存里躺着截断的烂结果（思考模型吃光 max_tokens 曾致）：
+              // 自动 fresh 重生成一次，同时覆盖坏缓存；只重试这一层，不无限递归
+              generateSentence(req, true);
+            } else {
+              setAiState("error");
+              setAiError("生成结果无效，请重试或换一句");
+            }
+          } catch {
+            if (aiReqSeq.current === seq) {
+              setAiState("error");
+              setAiError("生成失败，请重试或换一句");
+            }
+          }
+        })
+        .catch(() => {
+          // 网络异常时 done 会 reject（fetch/SSE 中断）：不接会把界面卡在「生成中」
           if (aiReqSeq.current === seq) {
             setAiState("error");
             setAiError("生成失败，请重试或换一句");
           }
-        }
-      });
+        });
     },
-    [lang, levelsByLang, aiChoice.providerId, aiChoice.model],
+    [lang, levelsByLang, aiChoice.providerId], 
   );
 
   // 词先行：sentence=null 且带 ai_request 时，按「自动补全」设置决定是否立刻生成
@@ -256,7 +271,7 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
                   <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
                     <p>{aiError}</p>
                     <button
-                      onClick={() => generateSentence(aiReq)}
+                      onClick={() => generateSentence(aiReq, true)}
                       className="mt-1.5 text-xs text-emerald-600 hover:underline dark:text-emerald-400"
                     >
                       重试本词

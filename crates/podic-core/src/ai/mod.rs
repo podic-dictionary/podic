@@ -71,3 +71,76 @@ impl AnyClient {
         }
     }
 }
+
+// ---------- AI 缓存键 ----------
+
+/// AI 结果缓存键：task\0model\0text\0规范化(context)。
+/// ai/run（落缓存）与每日一句回捞（读缓存）共用，保证两侧逐字节一致。
+pub fn ai_cache_key(task: &str, model: &str, text: &str, context: Option<&serde_json::Value>) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(task.as_bytes());
+    hasher.update([0]);
+    hasher.update(model.as_bytes());
+    hasher.update([0]);
+    hasher.update(text.as_bytes());
+    hasher.update([0]);
+    hasher.update(
+        context
+            .map(|c| canon_json(c).to_string())
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    format!("{:x}", hasher.finalize())
+}
+
+/// JSON 数字规范化：整数值的浮点（f64 1.0）统一成整数表示（1）。
+/// 服务端 lookup 的 freq=1.0 经前端 JS JSON 往返会变 1（JS number 不区分），
+/// 两侧序列化字节不同曾致每日一句回捞键错位（生成键≠回捞键，误报
+/// 「生成结果无效」——ja 包词条 freq 全为 1.0 时必现）。统一成整数
+/// 表示与前端往返写下的历史缓存天然兼容；非整数（0.85）保持原样。
+fn canon_json(v: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::Number(n) => {
+            // 无损整数范围才转（超出 i64 的浮点保留原样）
+            if let Some(f) = n.as_f64() {
+                if f.fract() == 0.0 && f.abs() < 9.0e15 {
+                    return Value::Number(serde_json::Number::from(f as i64));
+                }
+            }
+            v.clone()
+        }
+        Value::Array(a) => Value::Array(a.iter().map(canon_json).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), canon_json(x))).collect()),
+        _ => v.clone(),
+    }
+}
+
+#[cfg(test)]
+mod cache_key_tests {
+    use super::ai_cache_key;
+    use serde_json::json;
+
+    /// 根因回归：服务端 f64 1.0 与前端 JS 往返后的 1 必须同键
+    #[test]
+    fn 键数字规范化_整数值浮点与整数同键() {
+        let rust_side = json!({"entry": {"freq": 1.0, "headword": "花婿"}});
+        let js_roundtrip = json!({"entry": {"freq": 1, "headword": "花婿"}});
+        assert_eq!(
+            ai_cache_key("daily", "m", "花婿", Some(&rust_side)),
+            ai_cache_key("daily", "m", "花婿", Some(&js_roundtrip)),
+        );
+    }
+
+    /// 非整数浮点两侧往返都不变，不参与规范化
+    #[test]
+    fn 键数字规范化_非整数浮点保持原样() {
+        let a = json!({"freq": 0.85});
+        let b = json!({"freq": 0.85});
+        assert_eq!(ai_cache_key("t", "m", "x", Some(&a)), ai_cache_key("t", "m", "x", Some(&b)));
+        let int = json!({"freq": 2});
+        let float = json!({"freq": 2.5});
+        assert_ne!(ai_cache_key("t", "m", "x", Some(&int)), ai_cache_key("t", "m", "x", Some(&float)));
+    }
+}
