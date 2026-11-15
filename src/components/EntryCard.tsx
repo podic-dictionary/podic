@@ -87,7 +87,10 @@ function Examples({ entry, auto }: { entry: Entry; auto: boolean }) {
       <ul className="mt-2.5 space-y-2.5 border-l border-emerald-200/70 pl-3.5 dark:border-emerald-800/60">
         {sentences.map((s) => (
           <li key={s.id}>
-            <p className="font-dict text-[15px] leading-relaxed text-zinc-700 dark:text-zinc-200">{s.text}</p>
+            <p className="font-dict text-[15px] leading-relaxed text-zinc-700 dark:text-zinc-200">
+              {s.text}
+              <SpeakButton text={s.text} lang={entry.lang} />
+            </p>
             {s.translation?.[0] && <p className="mt-0.5 text-sm text-zinc-400">{s.translation[0]}</p>}
           </li>
         ))}

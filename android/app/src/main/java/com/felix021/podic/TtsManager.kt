@@ -204,8 +204,21 @@ class TtsManager(
         return try {
             track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
             track.play()
+            // 播放头停滞看门狗：正常播放时播放头按采样率推进；音频路由异常
+            // （蓝牙断连、输出设备休眠等）会让它停住——不能陪它等一辈子，
+            // 停滞超过 4s 按播完收场，朗读会话照常结束
+            var lastPos = -1
+            var stalledSince = 0L
             while (!stopCurrent) {
-                if (track.playbackHeadPosition >= samples.size) return true
+                val pos = track.playbackHeadPosition
+                if (pos >= samples.size) return true
+                if (pos != lastPos) {
+                    lastPos = pos
+                    stalledSince = 0L
+                } else {
+                    if (stalledSince == 0L) stalledSince = System.currentTimeMillis()
+                    if (System.currentTimeMillis() - stalledSince > 4000) return true
+                }
                 Thread.sleep(40)
             }
             track.pause()
