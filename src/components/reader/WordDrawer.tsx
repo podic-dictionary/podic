@@ -162,6 +162,8 @@ export default function WordDrawer({
               onClick={() => {
                 setStatus(m.s === "none" ? undefined : m.s);
                 onMark(norm, m.s);
+                // 认识 = 打扫完毕，顺手收卡片回去继续读（少一次关闭操作）
+                if (m.s === "known") onClose();
               }}
               className={`rounded-xl px-5 py-2.5 text-sm transition-colors ${
                 m.s !== "none" && status === m.s
