@@ -61,7 +61,7 @@ LOCALES = {
         "keywords": "dictionary,offline,english,french,japanese,german,spanish,russian,italian,portuguese,chinese",
         "promotionalText": "Open source. Fully offline. 8 dictionaries, practice, vocab test and daily sentence. Bring your own AI key.",
         "subtitle": "Open-source offline dictionary",
-        "whatsNew": "New: wordbook practice (meaning/spelling/listening with mastery tracking), per-language vocabulary size test, and a daily sentence (dictionary example first, AI fallback). System TTS read-aloud for words and examples, plus navigation and UX fixes.",
+        "whatsNew": "New: wordbook practice (meaning/spelling/listening with mastery tracking), per-language vocabulary size test, and a daily sentence (dictionary example first, AI fallback). System TTS read-aloud for words and examples, plus navigation and UX fixes. Much smaller app size.",
     },
     "zh-Hans": {
         "description": (
@@ -81,7 +81,7 @@ LOCALES = {
         "keywords": "词典,英语,法语,日语,德语,西班牙语,俄语,意大利语,葡萄牙语,离线,开源",
         "promotionalText": "开源、离线、无广告；生词练习、词汇量自测、每日一句；AI 能力自带 Key 即可用。",
         "subtitle": "开源离线词典 八语互查",
-        "whatsNew": "新增生词本练习（词义/拼写/听音，熟练度追踪）、分语言词汇量自测、每日一句（词典例句优先、AI 生成兜底）；系统 TTS 朗读单词与例句；返回键导航与多项体验修复。",
+        "whatsNew": "新增生词本练习（词义/拼写/听音，熟练度追踪）、分语言词汇量自测、每日一句（词典例句优先、AI 生成兜底）；系统 TTS 朗读单词与例句；返回键导航与多项体验修复；安装包体积大幅优化。",
     },
 }
 
