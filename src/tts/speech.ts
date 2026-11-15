@@ -7,17 +7,45 @@ import { getSettings, ttsModels, type TtsInstalled } from "../api";
 
 export type SpeechSpeed = "normal" | "slow";
 
-/// 壳桥协议（Android MainActivity.ttsRequest / iOS podicTts 同构）
-type TtsRequest = (json: string) => void;
-type LegacyTts = { ttsSpeak: (text: string, lang: string) => void; ttsStop: () => void };
-const podicAndroid = (): { ttsRequest?: TtsRequest } & Partial<LegacyTts & { ttsAvailable: (lang: string) => boolean }> | undefined =>
-  (window as unknown as { PodicAndroid?: {} }).PodicAndroid;
-const bridge = (): TtsRequest | null => podicAndroid()?.ttsRequest ?? null;
-/// 旧壳（无 ttsRequest）：同步 ttsSpeak 桥，结束事件无请求区分
-const legacyTts = (): LegacyTts | null => {
-  const b = podicAndroid();
-  return b?.ttsSpeak && b?.ttsStop ? (b as LegacyTts) : null;
+/// 壳桥对象（Android MainActivity 注入的 PodicAndroid）。
+/// 注意：@JavascriptInterface 方法必须以对象方法形式调用（p.ttsRequest(...)），
+/// 把函数拆下来单独调用会被 Chromium JavaBridge 判为 "non-injected object"
+/// 同步抛错——曾导致查词页白屏（SpeakButton effect 里未捕获）
+type Bridge = {
+  ttsRequest?: (json: string) => void;
+  ttsSpeak?: (text: string, lang: string) => void;
+  ttsStop?: () => void;
+  ttsAvailable?: (lang: string) => boolean;
 };
+const podicAndroid = (): Bridge | undefined =>
+  (window as unknown as { PodicAndroid?: Bridge }).PodicAndroid;
+
+/// 方法式调用桥方法；不存在或抛错（reload 竞态下桥失效）返回 undefined
+function callBridge<T>(method: keyof Bridge, ...args: unknown[]): T | undefined {
+  const p = podicAndroid();
+  const fn = p?.[method];
+  if (typeof fn !== "function") return undefined;
+  try {
+    return (p as Record<string, (...a: unknown[]) => T>)[method](...args);
+  } catch {
+    return undefined;
+  }
+}
+
+/// 同 callBridge，但返回是否调用成功（void 方法用）
+function tryBridge(method: keyof Bridge, ...args: unknown[]): boolean {
+  const p = podicAndroid();
+  const fn = p?.[method];
+  if (typeof fn !== "function") return false;
+  try {
+    (p as Record<string, (...a: unknown[]) => unknown>)[method](...args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const hasTtsRequest = (): boolean => typeof podicAndroid()?.ttsRequest === "function";
 
 /// 引擎事件（壳经 evaluateJavascript 派发到 window）
 export type TtsEvent = { request_id: string; state: "ended" | "cancelled" | "error"; message?: string };
@@ -104,8 +132,7 @@ export function speak(opts: {
   provider?: "auto" | "system" | "offline";
 }): SpeakHandle | null {
   const requestId = `sp${++seq}`;
-  const b = bridge();
-  if (b) {
+  if (hasTtsRequest()) {
     wireEvents();
     const on = (e: TtsEvent) => {
       if (e.request_id !== requestId) return;
@@ -116,25 +143,15 @@ export function speak(opts: {
       resolvers.set(requestId, resolve);
       listeners.add(on);
     });
-    // 桥对象在页面 reload 竞态下会变成 non-injected（调用同步抛错），
-    // 绝不能让它冒泡——SpeakButton 的 effect 里炸了会白屏
-    const call = (json: string): boolean => {
-      try {
-        b(json);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    const ok = call(JSON.stringify({
-      op: "speak",
-      request_id: requestId,
+    const send = (op: string): boolean =>
+      tryBridge("ttsRequest", JSON.stringify({ op, request_id: requestId, ...payload }));
+    const payload = {
       text: opts.text,
       lang: String(opts.lang),
       speed: opts.speed,
       provider: opts.provider ?? "auto",
-    }));
-    if (!ok) {
+    };
+    if (!send("speak")) {
       listeners.delete(on);
       resolvers.delete(requestId);
       return null;
@@ -142,12 +159,12 @@ export function speak(opts: {
     return {
       requestId,
       done,
-      cancel: () => void call(JSON.stringify({ op: "stop", request_id: requestId })),
+      cancel: () => void send("stop"),
     };
   }
   // 旧壳：同步 ttsSpeak 桥（无 request 区分；podic:tts-end 即结束，速度由壳固定）
-  const legacy = legacyTts();
-  if (legacy) {
+  const legacy = podicAndroid();
+  if (typeof legacy?.ttsSpeak === "function") {
     wireEvents();
     const done = new Promise<TtsEvent["state"]>((resolve) => {
       const on = () => {
@@ -156,12 +173,10 @@ export function speak(opts: {
       };
       window.addEventListener("podic:tts-end", on);
     });
-    try {
-      legacy.ttsSpeak(opts.text, LANG_TAGS[String(opts.lang)] ?? String(opts.lang));
-    } catch {
+    if (!tryBridge("ttsSpeak", opts.text, LANG_TAGS[String(opts.lang)] ?? String(opts.lang))) {
       return null;
     }
-    return { requestId, done, cancel: () => { try { legacy.ttsStop(); } catch { /* 壳已失效 */ } } };
+    return { requestId, done, cancel: () => void tryBridge("ttsStop") };
   }
   // 浏览器：Web Speech（无 request_id，本地 Promise 近似）
   const synth = window.speechSynthesis;
@@ -188,26 +203,21 @@ const LANG_TAGS: Record<string, string> = {
 
 /// 壳是否存在（决定「下载语音」CTA 是否显示：只有壳内能用端侧引擎）
 export function hasShellBridge(): boolean {
-  return bridge() !== null || legacyTts() !== null;
+  const p = podicAndroid();
+  return typeof p?.ttsRequest === "function" || typeof p?.ttsSpeak === "function";
 }
 
 /// 请求壳卸载端侧引擎并释放使用引用（删除模型前调，避免后端 409）
 export function unloadEngine() {
-  bridge()?.(JSON.stringify({ op: "unload" }));
+  void callBridge("ttsRequest", JSON.stringify({ op: "unload" }));
 }
 
 /// 系统 TTS 有没有该语言的语音（null = 无法判断）。壳走 ttsAvailable，
 /// 浏览器走 Web Speech 的 voice 清单
 export function systemVoiceAvailable(lang: string): boolean | null {
   const tag = LANG_TAGS[lang] ?? lang;
-  const avail = podicAndroid()?.ttsAvailable;
-  if (avail) {
-    // reload 竞态下桥对象失效会同步抛错（non-injected）：吞掉当未知处理
-    try {
-      return avail(tag);
-    } catch {
-      return null;
-    }
+  if (typeof podicAndroid()?.ttsAvailable === "function") {
+    return callBridge<boolean>("ttsAvailable", tag) ?? null;
   }
   const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
   if (!synth) return null;

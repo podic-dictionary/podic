@@ -8,6 +8,7 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,7 +52,7 @@ class TtsManager(
                 return@execute
             }
             if (model == null) {
-                // provider=offline 且未装模型：直接报错（试听按钮只对已装模型出现，理论到不了这）
+                android.util.Log.w("podic", "tts speak: no installed model for lang=$lang (provider=$provider)")
                 emit(requestId, "error", "未安装该语言的语音模型")
                 return@execute
             }
@@ -115,8 +116,16 @@ class TtsManager(
         engineModelId?.let { PodicNative.ttsRelease(it) }
         engine = null
         engineModelId = null
-        val path = PodicNative.ttsModelPath(m.modelId) ?: return null
-        val cfg = buildConfig(m, path) ?: return null
+        val path = PodicNative.ttsModelPath(m.modelId)
+        if (path == null) {
+            android.util.Log.w("podic", "tts loadEngine: ttsModelPath null for ${m.modelId}")
+            return null
+        }
+        val cfg = buildConfig(m, path)
+        if (cfg == null) {
+            android.util.Log.w("podic", "tts loadEngine: buildConfig null for ${m.modelId} (family=${m.family})")
+            return null
+        }
         return try {
             PodicNative.ttsAcquire(m.modelId)
             val e = OfflineTts(config = cfg)
@@ -130,21 +139,43 @@ class TtsManager(
         }
     }
 
-    /// 按 family 构造引擎配置（当前只有 supertonic；新 family 在这扩展）
+    /// 按 family 构造引擎配置（supertonic 多语言 / vits 即 piper 系；新 family 在这扩展）
     private fun buildConfig(m: InstalledModel, path: String): OfflineTtsConfig? {
-        if (m.family != "supertonic") return null
-        val sup = m.config?.optJSONObject("supertonic") ?: return null
-        fun p(key: String): String? = sup.optString(key).takeIf { it.isNotEmpty() }?.let { "$path/$it" }
-        val sc = OfflineTtsSupertonicModelConfig(
-            durationPredictor = p("duration_predictor") ?: return null,
-            textEncoder = p("text_encoder") ?: return null,
-            vectorEstimator = p("vector_estimator") ?: return null,
-            vocoder = p("vocoder") ?: return null,
-            ttsJson = p("tts_json") ?: return null,
-            unicodeIndexer = p("unicode_indexer") ?: return null,
-            voiceStyle = p("voice_style") ?: return null,
-        )
-        val mc = OfflineTtsModelConfig(supertonic = sc, numThreads = 2, debug = false)
+        fun p(obj: JSONObject, key: String): String? =
+            obj.optString(key).takeIf { it.isNotEmpty() }?.let { "$path/$it" }
+        val mc = when (m.family) {
+            "supertonic" -> {
+                val sup = m.config?.optJSONObject("supertonic") ?: return null
+                OfflineTtsModelConfig(
+                    supertonic = OfflineTtsSupertonicModelConfig(
+                        durationPredictor = p(sup, "duration_predictor") ?: return null,
+                        textEncoder = p(sup, "text_encoder") ?: return null,
+                        vectorEstimator = p(sup, "vector_estimator") ?: return null,
+                        vocoder = p(sup, "vocoder") ?: return null,
+                        ttsJson = p(sup, "tts_json") ?: return null,
+                        unicodeIndexer = p(sup, "unicode_indexer") ?: return null,
+                        voiceStyle = p(sup, "voice_style") ?: return null,
+                    ),
+                    numThreads = 2,
+                    debug = false,
+                )
+            }
+            "vits" -> {
+                val v = m.config?.optJSONObject("vits") ?: return null
+                OfflineTtsModelConfig(
+                    vits = OfflineTtsVitsModelConfig(
+                        model = p(v, "model") ?: return null,
+                        tokens = p(v, "tokens") ?: return null,
+                        lexicon = v.optString("lexicon").takeIf { it.isNotEmpty() }?.let { "$path/$it" } ?: "",
+                        dataDir = v.optString("data_dir").takeIf { it.isNotEmpty() }?.let { "$path/$it" } ?: "",
+                        dictDir = v.optString("dict_dir").takeIf { it.isNotEmpty() }?.let { "$path/$it" } ?: "",
+                    ),
+                    numThreads = 2,
+                    debug = false,
+                )
+            }
+            else -> return null
+        }
         return OfflineTtsConfig(model = mc)
     }
 

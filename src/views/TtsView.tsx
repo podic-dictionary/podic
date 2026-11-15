@@ -52,6 +52,8 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
   // 进行中的安装/更新（含 SSE 进度与后台续接的任务）：model_id → 进度
   const [installing, setInstalling] = useState<Record<string, { phase: string; downloaded: number; total: number; background?: boolean } | undefined>>({});
   const cancelFns = useRef<Record<string, () => void>>({});
+  // SSE 仍活跃的模型（区分 SSE 断线兜底与真后台任务）
+  const sseModels = useRef<Set<string>>(new Set());
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [delErr, setDelErr] = useState("");
   const [listenBusy, setListenBusy] = useState<string | null>(null);
@@ -83,49 +85,59 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
     void reloadCatalog();
   }, [reloadModels, reloadCatalog]);
 
-  // 后台任务续接：页面重进时下载不中断（SSE 断开不取消），轮询任务状态直到结束
+  // 任务轮询兜底：SSE 断开不取消服务端下载（gh-proxy 会掐长连接，WebView 里
+  // SSE 中途断掉是常态），页面打开期间持续轮询，恢复进度显示并在任务结束时刷新模型列表
   useEffect(() => {
     let stop = false;
-    const poll = async () => {
+    let seenRunning = new Set<string>();
+    const tick = async () => {
       try {
         const tasks = await ttsTasks();
+        if (stop) return;
         const running = tasks.filter((t) => t.state === "running");
-        if (!stop && running.length > 0) {
-          setInstalling((prev) => {
-            const next = { ...prev };
-            for (const t of running) {
-              if (!next[t.model_id]) next[t.model_id] = { phase: "download", downloaded: 0, total: 0, background: true };
-            }
-            return next;
-          });
+        for (const t of running) {
+          if (!cancelFns.current[t.model_id]) {
+            cancelFns.current[t.model_id] = () => void ttsCancelTask(t.id).catch(() => {});
+          }
+        }
+        setInstalling((prev) => {
+          const next = { ...prev };
+          let changed = false;
           for (const t of running) {
-            if (!cancelFns.current[t.model_id]) {
-              cancelFns.current[t.model_id] = () => void ttsCancelTask(t.id).catch(() => {});
+            const sseAlive = sseModels.current.has(t.model_id);
+            if (!next[t.model_id]) {
+              // 页面重进/SSE 未建立：显示后台续接
+              next[t.model_id] = { phase: "download", downloaded: 0, total: 0, background: true };
+              changed = true;
+            } else if (!sseAlive && !next[t.model_id]!.background) {
+              // SSE 已断（finally 清了标记）但任务还在跑：标记后台续接
+              next[t.model_id] = { ...next[t.model_id]!, background: true };
+              changed = true;
             }
           }
-          window.setTimeout(poll, 2000);
-          return;
-        }
-        const finished = tasks.filter((t) => t.state === "done" || t.state === "error");
-        if (finished.length > 0) {
-          const ids = new Set(finished.map((t) => t.model_id));
-          setInstalling((prev) => {
-            const next = { ...prev };
-            let changed = false;
-            for (const id of ids) {
-              if (next[id]?.background) { delete next[id]; changed = true; }
+          for (const t of tasks) {
+            if (t.state !== "running" && next[t.model_id]?.background) {
+              delete next[t.model_id];
+              changed = true;
             }
-            return changed ? next : prev;
-          });
-          ids.forEach((id) => delete cancelFns.current[id]);
-          void reloadModels();
+          }
+          return changed ? next : prev;
+        });
+        const runningIds = new Set(running.map((t) => t.id));
+        if ([...seenRunning].some((id) => !runningIds.has(id))) {
+          void reloadModels(); // 有任务从运行变为结束
         }
+        seenRunning = runningIds;
       } catch {
-        if (!stop) window.setTimeout(poll, 5000);
+        // 服务端暂时不可达：等下个周期
       }
     };
-    void poll();
-    return () => { stop = true; };
+    void tick();
+    const iv = window.setInterval(tick, 3000);
+    return () => {
+      stop = true;
+      window.clearInterval(iv);
+    };
   }, [reloadModels]);
 
   const saveTts = async (patch: Partial<TtsSettingsState>) => {
@@ -163,6 +175,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         setInstalling((p) => (p[modelId] ? { ...p, [modelId]: { phase: ev.phase!, downloaded: ev.downloaded ?? 0, total: ev.total ?? 0 } } : p));
       }
     });
+    sseModels.current.add(modelId);
     cancelFns.current[modelId] = () => void inst.cancel();
     inst.done
       .then(() => {
@@ -172,9 +185,12 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       })
       .catch(() => { /* SSE error 事件已在下方统一处理 */ })
       .finally(() => {
+        sseModels.current.delete(modelId);
         delete cancelFns.current[modelId];
+        // SSE 断线兜底：任务可能仍在服务端跑，这里不清进度条，
+        // 交给轮询标记「后台续接」或在其结束时清掉
         setInstalling((p) => {
-          if (!p[modelId]) return p;
+          if (!p[modelId] || p[modelId]!.background) return p;
           const next = { ...p };
           delete next[modelId];
           return next;
