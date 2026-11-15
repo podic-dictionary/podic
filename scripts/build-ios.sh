@@ -33,8 +33,10 @@ xcodebuild -create-xcframework \
 echo "[4/4] 资源"
 mkdir -p ios/Resources/web ios/Resources/packs
 rsync -a --delete dist/ ios/Resources/web/
-# 只带最新版英文词典（同 build-android.sh：历史版本会把包体积顶爆）
+# 只带最新版英文词典。不用 rsync --exclude --delete：exclude 会保护接收侧旧文件
+# 不被删（en/fr/ja 历史包全残留进 bundle，App Store 显示 706MB 的根因），rm+cp 确定性重建
 LATEST_EN=$(ls packs/en-dict-*.db | sort -V | tail -1 | xargs basename)
-rsync -a --delete packs/ ios/Resources/packs/ --include "$LATEST_EN" --exclude '*'
+rm -rf ios/Resources/packs && mkdir -p ios/Resources/packs
+cp "packs/$LATEST_EN" ios/Resources/packs/
 
 echo "完成：ios/Frameworks/PodicMobile.xcframework + ios/Resources（xcodegen generate 后可构建，见 ios/README.md）"

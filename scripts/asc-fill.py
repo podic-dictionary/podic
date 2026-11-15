@@ -364,11 +364,20 @@ print("[5] 隐私政策 URL ✓")
 # 踩坑：/v1/appStoreVersions/{vid}/builds 子路径不存在（404），已挂的 build 走
 # relationships/build 单数端点查；候选 build 用 /v1/builds?filter[app]= 列
 cur = api("GET", f"/v1/appStoreVersions/{vid}/relationships/build")["data"] or {}
-if cur.get("id"):
+attached_same = False
+if cur.get("id") and "--require-build" in sys.argv:
+    want = sys.argv[sys.argv.index("--require-build") + 1]
+    cur_ver = str(api(f"/v1/builds/{cur['id']}")["data"]["attributes"]["version"])
+    attached_same = cur_ver == want
+    if not attached_same:
+        print(f"[6] 版本当前挂的是 build {cur_ver}，替换为 build {want}")
+if cur.get("id") and attached_same:
+    print(f"[6] 版本已关联 build（id={cur['id'][:8]}…），跳过")
+elif cur.get("id") and "--require-build" not in sys.argv:
     print(f"[6] 版本已关联 build（id={cur['id'][:8]}…），跳过")
 else:
     all_builds = api("GET", f"/v1/builds?filter[app]={APP_ID}&sort=-version")["data"]
-    if "--require-build" in sys.argv:
+    if "--require-build" in sys.argv and attached_same is False:
         want = sys.argv[sys.argv.index("--require-build") + 1]
         match = [b for b in all_builds if str(b["attributes"]["version"]) == want]
         if not match:
