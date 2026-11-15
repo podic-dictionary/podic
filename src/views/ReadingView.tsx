@@ -352,7 +352,7 @@ export default function ReadingView({
             {saving ? "保存中…" : "保存并阅读"}
           </button>
           <span className="text-xs text-zinc-400">{form.content.length} 字符</span>
-          {saveErr && <span className="text-xs text-red-500">{saveErr}</span>}
+          {saveErr && <span className="wrap-text text-xs text-red-500">{saveErr}</span>}
         </div>
       </div>
     );
@@ -451,7 +451,7 @@ export default function ReadingView({
         >
           <PlusIcon size={15} /> 粘贴文章
         </button>
-        <span className="text-xs text-zinc-400">粘一段外文，逐词点读；缺词让 AI 补进词典</span>
+        <span className="wrap-text text-xs text-zinc-400">粘一段外文，逐词点读；缺词让 AI 补进词典</span>
       </div>
 
       {goneNotice && (

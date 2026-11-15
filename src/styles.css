@@ -279,6 +279,17 @@ body::after {
 .action-row > * {
   flex: 0 0 auto;
 }
+/* 说明文字（直接子级 p/span 及显式 .wrap-text）允许收缩断行：
+   上面 flex:0 0 auto 会把长文案按自然宽度撑出卡片甚至屏幕外。
+   曾经靠各调用点手动加 wrap-text 修过一轮，后续重写丢失类造成回归——
+   改为 p/span 默认可收缩，结构性防回归（按钮/选择器不受影响） */
+.action-row > p,
+.action-row > span,
+.action-row .wrap-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 html.hand-left .action-row {
   flex-direction: row;
   justify-content: flex-start;

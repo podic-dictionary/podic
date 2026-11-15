@@ -70,11 +70,11 @@ export default function AiCompleteBar({
         </p>
       ) : (
         <div className="action-row">
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="wrap-text text-sm text-zinc-500 dark:text-zinc-400">
             词典里没有「{q}」的精确词条，以下是近似结果
           </p>
           {phase === "failed" && (
-            <p className="text-sm text-red-500 dark:text-red-400">{errMsg || "AI 补全失败"}</p>
+            <p className="wrap-text text-sm text-red-500 dark:text-red-400">{errMsg || "AI 补全失败"}</p>
           )}
           <button
             onClick={() => run(phase === "failed")}
