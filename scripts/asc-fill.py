@@ -372,7 +372,7 @@ cur = api("GET", f"/v1/appStoreVersions/{vid}/relationships/build")["data"] or {
 attached_same = False
 if cur.get("id") and "--require-build" in sys.argv:
     want = sys.argv[sys.argv.index("--require-build") + 1]
-    cur_ver = str(api(f"/v1/builds/{cur['id']}")["data"]["attributes"]["version"])
+    cur_ver = str(api("GET", f"/v1/builds/{cur['id']}")["data"]["attributes"]["version"])
     attached_same = cur_ver == want
     if not attached_same:
         print(f"[6] 版本当前挂的是 build {cur_ver}，替换为 build {want}")
