@@ -116,7 +116,15 @@ def load_sources(names: str) -> str:
         else:
             # 自定义来源名（community 包常见）：如实写进 meta，不静默丢致谢
             out.append({"name": name, "url": "", "license": ""})
-    return json.dumps(out, ensure_ascii=False)
+    # 同名来源去重（jmdict_eng/jmdict_fre 同为 JMdict/EDRDG）：按 name+url 保首条
+    seen = set()
+    dedup = []
+    for o in out:
+        k = (o.get("name"), o.get("url"))
+        if k not in seen:
+            seen.add(k)
+            dedup.append(o)
+    return json.dumps(dedup, ensure_ascii=False)
 
 
 def main():
@@ -187,18 +195,30 @@ def main():
         " VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
     # 回填 id：norm / casefold(headword) -> [entry_id, ...]
     # 例句关联键 en/fr 是 casefold(headword)（保变音，élève≠élevé），ja 是 norm
-    for (eid, norm, head) in db.execute("SELECT id, norm, headword FROM entry"):
+    # ja 的 zh_terms 关联用 (norm, casefold(reading))：方(かた)/方(ほう) 的 norm
+    # 都是「方」，仅按 norm/headword 关联会把异读音词条的义项串挂（反查「子时」
+    # 挂到 子(こ) 上），reading 才能区分
+    norm_reading_to_id: dict[tuple[str, str], list[int]] = {}
+    for (eid, norm, head, reading) in db.execute("SELECT id, norm, headword, reading FROM entry"):
         norm_to_id.setdefault(norm, []).append(eid)
         head_to_id.setdefault(head.casefold(), []).append(eid)
+        norm_reading_to_id.setdefault((norm, (reading or "").casefold()), []).append(eid)
 
     zh_batch = []
     # 同 headword 可有多条词条（如 LLM 把俄语变格词归一成同一词典形），各自义项数不同：
-    # sense_idx 必须按「挂载目标词条」的义项数钳制，不能只按产生方钳
+    # sense_idx 必须按「挂载目标词条」的义项数钳制，不能只按产生方钳。
+    # ja 同词头异读音词条（方=かた/ほう）义项完全不同，按 headword 关联会串到
+    # 别的读音词条（反查出「子时」挂到 子(こ) 上）——ja 改按 norm 关联（读音不同
+    # norm 不同）；en/fr 维持 casefold(headword)（按 norm 会串 élève/élevé 异形）
     eid_senses_len = dict(db.execute("SELECT id, json_array_length(senses) FROM entry"))
+    is_ja = args.lang == "ja"
     for e in common.read_jsonl(work / "entries.jsonl"):
-        # zh_terms 属于产生它的那个词条：按 casefold(headword) 精确关联。
-        # 按 norm 会串到同 norm 的异形词条（élève/élevé），且对方义项数更少时 sense_idx 越界
-        eid_list = head_to_id.get(e["headword"].casefold()) or []
+        if is_ja:
+            eid_list = norm_reading_to_id.get((e["norm"], (e.get("reading") or "").casefold())) or []
+            if not eid_list:
+                eid_list = norm_to_id.get(e["norm"]) or []  # 无读音词条退回 norm
+        else:
+            eid_list = head_to_id.get(e["headword"].casefold()) or []
         if not eid_list:
             continue
         for row in e.get("zh_terms") or []:
