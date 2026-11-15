@@ -1,30 +1,13 @@
 // 唯一的 HTTP 出口：所有后端调用都从这里走
 import type { ArticleFull, ArticleMeta, Entry, PackInfo, Sentence, SuggestItem, UserDictEntry, WordStatus, LanguageConfig } from "./types";
 
-export async function api<T>(path: string, init?: RequestInit & { retries?: number }): Promise<T> {
-  // iOS 锁屏/后台恢复后的头几秒，WKWebView 网络栈短暂判定无网络（loopback 请求也报
-  // "Load failed"），每日一句等打开即发请求的页面会撞上。GET 与显式声明的只读请求
-  // 自动退避重试；其余请求单发（有服务端副作用）
-  const isGet = (init?.method ?? "GET") === "GET";
-  const retries = Math.max(0, init?.retries ?? (isGet ? 2 : 0));
-  const { retries: _drop, ...fetchInit } = init ?? {};
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, 800 * attempt));
-    try {
-      const resp = await fetch(`/api${path}`, fetchInit);
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        const err = new Error(`${resp.status}: ${body || resp.statusText}`);
-        if (resp.status >= 500 && attempt < retries) { lastErr = err; continue; }
-        throw err;
-      }
-      return resp.json() as Promise<T>;
-    } catch (e) {
-      lastErr = e;
-    }
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(`/api${path}`, init);
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`${resp.status}: ${body || resp.statusText}`);
   }
-  throw lastErr;
+  return resp.json() as Promise<T>;
 }
 
 const qs = (params: Record<string, string | number | undefined>) => {
@@ -354,8 +337,6 @@ export const dailySentence = (body: {
 }) =>
   api<DailySentenceResult>("/daily-sentence", {
     method: "POST",
-    // 纯读接口（抽词+查例句+缓存命中，无服务端状态变化）：享受恢复期重试
-    retries: 2,
     body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
   });
