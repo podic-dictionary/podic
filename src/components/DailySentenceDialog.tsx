@@ -213,6 +213,12 @@ export default function DailySentenceDialog({ lang, onClose, onOpenWord }: {
           ) : error ? (
             <div className="space-y-3 py-6 text-center">
               <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
+              <button
+                onClick={() => fetchOne()}
+                className="text-xs text-emerald-600 hover:underline dark:text-emerald-400"
+              >
+                重试
+              </button>
             </div>
           ) : word ? (
             <>
