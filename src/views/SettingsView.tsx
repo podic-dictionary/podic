@@ -14,6 +14,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
+import PromptsView from "./PromptsView";
 import TtsView from "./TtsView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
@@ -35,6 +36,8 @@ interface Draft {
   api_key: string;
   models: ModelRow[]; // 逐行列表输入
   active_model: string; // 不在表单展示，保存时同步为列表第一项
+  max_tokens: string; // 输出额度覆盖（空 = 按任务内置值）
+  thinking: string; // auto | off
 }
 
 /// 已保存 Key 的掩码：真实 key 不回传浏览器，字段以掩码占位；保存时含掩码 = 未修改
@@ -48,6 +51,8 @@ const emptyDraft = (): Draft => ({
   api_key: "",
   models: [],
   active_model: "",
+  max_tokens: "",
+  thinking: "auto",
 });
 const firstModel = (d: Draft) => d.models.map((r) => r.name.trim()).filter(Boolean)[0];
 
@@ -115,7 +120,7 @@ function SubHeader({
   );
 }
 
-export type SettingsSub = null | "ai" | "about" | "packs" | "userdict" | "languages" | "tts";
+export type SettingsSub = null | "ai" | "about" | "packs" | "userdict" | "languages" | "tts" | "prompts";
 
 /// 语言管理的一行（dnd-kit 可排序）：抓手拖动换序，顺序即切换器渲染顺序
 function SortableLangRow({
@@ -659,7 +664,7 @@ export default function SettingsView({
   const [addQuery, setAddQuery] = useState("");
   // 未保存检测：草稿签名与已存 providers 对比（掩码 key 视同未改）；离开提示用
   const [leaveAiAsk, setLeaveAiAsk] = useState(false);
-  const draftSig = (d: Pick<Draft, "name" | "protocol" | "base_url" | "api_key" | "models">) =>
+  const draftSig = (d: Pick<Draft, "name" | "protocol" | "base_url" | "api_key" | "models" | "max_tokens" | "thinking">) =>
     [
       d.name, d.protocol, d.base_url,
       d.api_key === KEY_MASK ? "" : d.api_key,
@@ -671,6 +676,7 @@ export default function SettingsView({
       const a = drafts.map(draftSig);
       const b = providers.map((p) => ({
         name: p.name, protocol: p.protocol, base_url: p.base_url,
+        max_tokens: p.max_tokens ? String(p.max_tokens) : "", thinking: p.thinking || "auto",
         api_key: p.has_key ? KEY_MASK : "",
         models: p.models.map((m) => ({ name: m, label: p.labels?.[m] ?? "" })),
       })).map(draftSig);
@@ -686,6 +692,8 @@ export default function SettingsView({
         providers.map((p) => ({
           ...p,
           api_key: p.has_key ? KEY_MASK : "",
+          max_tokens: p.max_tokens ? String(p.max_tokens) : "",
+          thinking: p.thinking || "auto",
           models: p.models.map((m) => ({ name: m, label: p.labels?.[m] ?? "" })),
         })),
       );
@@ -733,6 +741,8 @@ export default function SettingsView({
               api_key: d.api_key.includes("•") ? "" : d.api_key,
               models,
               labels,
+              max_tokens: d.max_tokens.trim() ? Number(d.max_tokens.trim()) : null,
+              thinking: d.thinking || "auto",
               // 表单没有单独的默认模型入口：跟随模型列表第一项
               active_model: models[0] ?? "",
             };
@@ -915,6 +925,42 @@ export default function SettingsView({
                       className={inputRow}
                     />
                   </div>
+
+                  <div>
+                    <p className="mb-1 text-xs text-zinc-400">输出额度（max tokens，空 = 按任务默认）</p>
+                    <input
+                      value={d.max_tokens}
+                      onChange={(e) => patch(d.id, { max_tokens: e.target.value.replace(/[^0-9]/g, "") })}
+                      placeholder="如 4000"
+                      inputMode="numeric"
+                      className={inputRow}
+                    />
+                    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                      思考模型的思考也消耗额度；生成被截断（JSON 残缺、内容为空）时调高
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-xs text-zinc-400">思考强度</p>
+                    <div className="flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
+                      {[["auto", "自动（模型默认）"], ["off", "关闭（省额度、更快）"]].map(([v, label]) => (
+                        <button
+                          key={v}
+                          onClick={() => patch(d.id, { thinking: v })}
+                          className={`flex-1 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                            (d.thinking || "auto") === v
+                              ? "bg-white text-emerald-600 shadow-sm dark:bg-zinc-950 dark:text-emerald-400"
+                              : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                      「关闭」会带 thinking disabled 参数（智谱等支持）；服务不认该参数时自动去掉重试
+                    </p>
+                  </div>
                   <div>
                     <p className="mb-1 text-xs text-zinc-400">API Key</p>
                     <div className="relative">
@@ -1068,6 +1114,11 @@ export default function SettingsView({
     return <TtsView onBack={() => setSub(null)} />;
   }
 
+  // ---- 二级页：AI 提示词 ----
+  if (sub === "prompts") {
+    return <PromptsView onBack={() => setSub(null)} />;
+  }
+
   // ---- 二级页：词典 ----
   if (sub === "packs") {
     return (
@@ -1180,6 +1231,7 @@ export default function SettingsView({
         />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
         <Row label="语音引擎" hint="离线发音模型 · 下载 · 试听" onClick={() => setSub("tts")} />
+        <Row label="AI 提示词" hint="查看 · 修改 · 还原各任务提示词" onClick={() => setSub("prompts")} />
         <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => openExternal(PACK_GUID_URL)} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />
       </section>

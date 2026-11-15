@@ -18,6 +18,19 @@ pub struct ProviderConfig {
     /// 模型展示名称（real model name -> 显示别名），缺省用原名
     #[serde(default)]
     pub labels: std::collections::BTreeMap<String, String>,
+    /// 输出额度覆盖（None = 按任务内置值；思考模型的思考也吃额度，需要时调高）
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    /// 思考强度：auto（默认，不干预）| off（尽力关闭思考：省额度、更快）
+    #[serde(default)]
+    pub thinking: String,
+}
+
+/// 提示词覆盖：system/user 模板，{text}/{context} 占位符与内置模板一致
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptOverride {
+    pub system: String,
+    pub user: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +138,9 @@ pub struct Settings {
     /// 每日一句偏好（缺省 = 各语言 auto）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_sentence: Option<DailySentencePrefs>,
+    /// AI 提示词自定义（task -> 覆盖模板；未覆盖的任务用内置模板）
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub prompts: std::collections::HashMap<String, PromptOverride>,
     /// 端侧 TTS 引擎设置（缺省 = github 源/原速/auto）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts: Option<TtsSettings>,
@@ -138,6 +154,7 @@ impl Default for Settings {
             languages: default_languages(),
             last_view: None,
             daily_sentence: None,
+            prompts: std::collections::HashMap::new(),
             tts: None,
         }
     }

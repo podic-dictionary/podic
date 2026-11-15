@@ -84,6 +84,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
             axum::routing::post(routes::review_favorite).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
         )
         .route("/api/ai/run", axum::routing::post(routes::ai_run))
+        .route("/api/prompts", axum::routing::get(routes::prompts_list))
         .route("/api/ai/cancel", axum::routing::post(routes::ai_cancel))
         .route("/api/ai/overlay", axum::routing::get(routes::get_overlay).post(routes::save_overlay).delete(routes::delete_overlay))
         .route("/api/reader/tokenize", axum::routing::post(reader_routes::tokenize))

@@ -24,6 +24,7 @@ const PAGE_LABELS: { [k in Exclude<SettingsSub, null>]: string } = {
   ai: "AI Provider",
   userdict: "AI 词典",
   languages: "语言",
+  prompts: "AI 提示词",
   packs: "词典",
   tts: "语音引擎",
   about: "关于",

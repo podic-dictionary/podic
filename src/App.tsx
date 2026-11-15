@@ -25,7 +25,7 @@ const VIEW_PREF_KEY = "podic.view";
 // 底部 tab 顺序：查词固定居中（左右利手都在拇指易点区），其余按手性分布，
 // 右利手 = 设置-阅读-查词-翻译-生词，左利手镜像（桌面 Sidebar 固定顺序不随 hand 变）
 const NAV_ORDER: View[] = ["settings", "reading", "search", "translate", "favorites"];
-const SETTINGS_SUBS = ["ai", "about", "updates", "packs", "userdict", "languages", "tts"] as const;
+const SETTINGS_SUBS = ["ai", "about", "updates", "packs", "userdict", "languages", "tts", "prompts"] as const;
 const viewOf = (p?: string): View =>
   (VIEWS.some((v) => v.id === p) ? p : "search") as View;
 const subOf = (s?: string): SettingsSub =>

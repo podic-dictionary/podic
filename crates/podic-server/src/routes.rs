@@ -407,6 +407,10 @@ struct ProviderView {
     active_model: String,
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     labels: std::collections::BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    thinking: String,
     has_key: bool,
 }
 
@@ -429,6 +433,8 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
                 models: p.models.clone(),
                 active_model: p.active_model.clone(),
                 labels: p.labels.clone(),
+                max_tokens: p.max_tokens,
+                thinking: p.thinking.clone(),
                 has_key: !p.api_key.is_empty(),
             }
         })
@@ -459,6 +465,10 @@ pub struct ProviderIn {
     active_model: String,
     #[serde(default)]
     labels: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    thinking: String,
 }
 
 #[derive(Deserialize)]
@@ -485,6 +495,9 @@ pub struct SettingsIn {
     /// 每日一句偏好（按语言存难度层选择）；整段替换，前端发完整 levels_by_lang
     #[serde(default)]
     daily_sentence: Option<podic_core::settings::DailySentencePrefs>,
+    /// AI 提示词自定义；整份替换（删除某任务覆盖 = 从 map 去掉后提交）
+    #[serde(default)]
+    prompts: Option<std::collections::HashMap<String, podic_core::settings::PromptOverride>>,
     tts: Option<podic_core::settings::TtsSettings>,
 }
 
@@ -557,6 +570,8 @@ pub async fn save_settings(
                 models: p.models.clone(),
                 active_model: p.active_model.clone(),
                 labels: p.labels.clone(),
+                max_tokens: p.max_tokens,
+                thinking: p.thinking.clone(),
             });
         }
         candidate.providers = providers;
@@ -575,6 +590,9 @@ pub async fn save_settings(
     }
     if let Some(d) = &input.daily_sentence {
         candidate.daily_sentence = Some(d.clone());
+    }
+    if let Some(pr) = &input.prompts {
+        candidate.prompts = pr.clone();
     }
     core.settings = candidate;
     core.save_settings()?;
@@ -706,6 +724,27 @@ pub struct AiRunReq {
     pub fresh: bool,
 }
 
+/// GET /api/prompts：全部 AI 任务的内置提示词 + 用户覆盖（提示词编辑页数据源）
+pub async fn prompts_list(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    let core = lock(&state);
+    let items: Vec<Value> = podic_core::ai::prompt::task_specs()
+        .into_iter()
+        .map(|t| {
+            let ovr = core.settings.prompts.get(t.task).map(|o| {
+                json!({"system": o.system, "user": o.user})
+            });
+            json!({
+                "task": t.task,
+                "label": t.label,
+                "system": t.system,
+                "user": t.user,
+                "override": ovr,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "tasks": items })))
+}
+
 pub async fn ai_run(
     State(state): State<AppState>,
     Json(req): Json<AiRunReq>,
@@ -735,12 +774,22 @@ pub async fn ai_run(
         return Err(ApiError(StatusCode::BAD_REQUEST, "该 Provider 未配置模型".into()));
     }
 
-    let p = prompt::build(&req.task, &req.text, req.context.as_ref());
+    // 用户自定义提示词（settings.prompts[task]）覆盖内置模板
+    let (sys_ovr, user_ovr) = {
+        let core = lock(&state);
+        core.settings
+            .prompts
+            .get(&req.task)
+            .map(|o| (Some(o.system.clone()), Some(o.user.clone())))
+            .unwrap_or((None, None))
+    };
+    let p = prompt::build_with(&req.task, &req.text, req.context.as_ref(), sys_ovr.as_deref(), user_ovr.as_deref());
     let chat = ChatRequest {
         model: model.clone(),
         system: Some(p.system),
         messages: vec![Msg { role: "user".into(), content: p.user }],
-        max_tokens: p.max_tokens,
+        // Provider 级输出额度覆盖优先（思考模型的思考也吃额度，需要时调高）
+        max_tokens: provider.max_tokens.unwrap_or(p.max_tokens),
         temperature: p.temperature,
     };
 

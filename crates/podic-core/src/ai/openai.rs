@@ -14,6 +14,9 @@ pub struct OpenAiClient {
     http: reqwest::Client,
     url: String,
     api_key: String,
+    /// Provider 思考强度 off：请求带 thinking disabled（不认该字段的服务
+    /// 400 提到 thinking 时去掉重试一次，与 anthropic 同款降级）
+    disable_thinking: bool,
 }
 
 /// URL 末段是否为版本段："/v1"、"/v3"、"/v4"、"/v1beta" 这类（字母 v 开头的段）
@@ -45,6 +48,7 @@ impl OpenAiClient {
             http: reqwest::Client::new(),
             url,
             api_key: cfg.api_key.clone(),
+            disable_thinking: cfg.thinking == "off",
         })
     }
 
@@ -79,23 +83,29 @@ impl OpenAiClient {
             "max_tokens": req.max_tokens,
             "temperature": req.temperature,
         });
+        if self.disable_thinking {
+            // 智谱等支持显式关思考的服务；模型不支持时靠下方 400 降级兜底
+            body["thinking"] = json!({"type": "disabled"});
+        }
 
-        let resp = self.post(&body).await?;
-        let resp = if resp.status() == reqwest::StatusCode::BAD_REQUEST {
+        let mut resp = self.post(&body).await?;
+        // 400 降级链：字段名修复 / 去掉服务不认的 thinking，各重试一次
+        for _ in 0..2 {
+            if resp.status() != reqwest::StatusCode::BAD_REQUEST {
+                break;
+            }
             let text = resp.text().await.unwrap_or_default();
             if text.contains("max_tokens") {
                 // 新版字段名降级重试
                 body["max_completion_tokens"] = body["max_tokens"].take();
-                let r = self.post(&body).await?;
-                if !r.status().is_success() {
-                    let t = r.text().await.unwrap_or_default();
-                    return Err(Error::Other(format!("OpenAI API: {t}")));
-                }
-                r
+            } else if text.contains("thinking") && body.get("thinking").is_some() {
+                body.as_object_mut().unwrap().remove("thinking");
             } else {
                 return Err(Error::Other(format!("OpenAI API: {text}")));
             }
-        } else if !resp.status().is_success() {
+            resp = self.post(&body).await?;
+        }
+        let resp = if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(Error::Other(format!("OpenAI API: {}", text)));
         } else {

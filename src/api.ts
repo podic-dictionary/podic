@@ -180,6 +180,10 @@ export interface ProviderView {
   models: string[];
   active_model: string;
   labels?: Record<string, string>;
+  /** 输出额度覆盖（思考模型可调高；空 = 按任务内置值） */
+  max_tokens?: number | null;
+  /** 思考强度：空/auto = 不干预；off = 尽力关闭思考（省额度、更快） */
+  thinking?: string;
   has_key: boolean;
 }
 
@@ -205,6 +209,8 @@ export const getSettings = () => api<SettingsView>("/settings");
 export const saveSettings = (settings: {
   /** 三组字段均可省略：省略 = 后端保留现值（各页面只提交自己改的字段，防跨端覆盖） */
   providers?: (Partial<ProviderView> & { id: string; name: string; protocol: string })[];
+  /** AI 提示词自定义：整份替换（还原某任务 = 从 map 删掉后提交） */
+  prompts?: Record<string, { system: string; user: string }>;
   manifest_url?: string;
   languages?: LanguageConfig[];
   last_view?: string;
@@ -216,6 +222,16 @@ export const saveSettings = (settings: {
     languages: Record<string, { provider: string }>;
   };
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
+
+export interface PromptTaskView {
+  task: string;
+  label: string;
+  system: string;
+  user: string;
+  override?: { system: string; user: string } | null;
+}
+
+export const getPrompts = () => api<{ tasks: PromptTaskView[] }>("/prompts");
 
 export const testProvider = (
   provider_id: string,
