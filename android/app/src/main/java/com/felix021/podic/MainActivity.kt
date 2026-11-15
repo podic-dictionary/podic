@@ -16,6 +16,11 @@ import java.io.File
 class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var canGoBackInApp = false
+    /// 本地后端端口与数据目录（恢复流程重调 startServer 用；startServer 幂等且自愈）
+    private var serverPort = 0
+    private var dataDirPath = ""
+    /// 恢复流程互斥：探活/重启/重载一次只跑一个（onResume 可能连发）
+    private var recovering = false
     /// SPA 渲染用的隐藏 WebView（同屏只留一个，新请求会销毁旧的）
     private var renderView: WebView? = null
     /// 系统 TTS：Android WebView 不支持 Web Speech API，喇叭按钮经桥接走原生合成
@@ -188,6 +193,7 @@ class MainActivity : Activity() {
                 override fun onError(utteranceId: String?) = notifyTtsEnd()
             })
             val dataDir = File(filesDir, "data").apply { mkdirs() }
+            dataDirPath = dataDir.absolutePath
             try {
                 AssetsInstaller.install(this, dataDir)
             } catch (e: Exception) {
@@ -196,6 +202,9 @@ class MainActivity : Activity() {
             val port = PodicNative.startServer(dataDir.absolutePath, 0) // 0=内核挑空闲端口，杜绝端口冲突
             runOnUiThread {
                 if (port > 0) {
+                    serverPort = port
+                    // 端口进 logcat：「Load failed」排查时 adb logcat 直接可查
+                    android.util.Log.i("podic", "server on 127.0.0.1:$port")
                     // 冷启动深链接（podic://search?q=…）拼进初始 URL 的 hash，前端路由直接落到目标页
                     webView.loadUrl("http://127.0.0.1:$port" + (pendingDeepLink?.let { "#$it" } ?: ""))
                 } else {
@@ -232,6 +241,54 @@ class MainActivity : Activity() {
         super.onResume()
         webView.onResume()
         renderView?.onResume()
+        recoverServerIfNeeded()
+    }
+
+    /// 回前台探活本地后端；挂了就重调 startServer（幂等自愈，实例死了会重启并
+    /// 优先复用原端口），换端口时保 hash 重载。对齐 iOS 壳的生命周期恢复。
+    /// 探活必须走原生 HTTP：onResume 瞬间 WebView 渲染器尚未恢复执行，JS 探活
+    /// 必然超时，会把每次回前台都误判成故障（实测 3/3 误触发全页 reload）
+    private fun recoverServerIfNeeded() {
+        if (recovering || serverPort <= 0 || !this::webView.isInitialized) return
+        recovering = true
+        val port = serverPort
+        Thread {
+            val healthy = try {
+                val conn = java.net.URL("http://127.0.0.1:$port/api/health").openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                conn.useCaches = false
+                val ok = conn.responseCode == 200
+                conn.disconnect()
+                ok
+            } catch (_: Exception) {
+                false
+            }
+            if (healthy) {
+                runOnUiThread { recovering = false }
+                return@Thread
+            }
+            android.util.Log.i("podic", "health check failed after resume, restarting server")
+            val newPort = PodicNative.startServer(dataDirPath, 0)
+            runOnUiThread {
+                if (newPort > 0) {
+                    if (newPort == serverPort) {
+                        webView.reload() // 同端口：页面重新请求即可
+                    } else {
+                        // 换端口 = 换 origin：保留当前路径/hash 重载，尽量回到原界面
+                        serverPort = newPort
+                        val m = Regex("^(http://127[.]0[.]0[.]1):[0-9]+(.*)$").find(webView.url ?: "")
+                        webView.loadUrl(
+                            if (m != null) m.groupValues[1] + ":" + newPort + m.groupValues[2]
+                            else "http://127.0.0.1:" + newPort + "/"
+                        )
+                    }
+                } else {
+                    android.util.Log.i("podic", "server restart failed")
+                }
+                recovering = false
+            }
+        }.start()
     }
 
     /// 深链接 hash：podic://search?q=hi&lang=en -> /search?q=hi&lang=en（host 当路径段）
