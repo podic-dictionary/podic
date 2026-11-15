@@ -127,8 +127,14 @@ def main():
 
     n_e = n_f = 0
     with open(out_entries, "w", encoding="utf-8") as fe, open(out_forms, "w", encoding="utf-8") as ff:
+        emitted: set[tuple[str, str, str]] = set()  # だめ/ダメ 归一后同值等重复源去重
+
         def emit_form(form_norm: str, entry_norm: str, rule: str):
             nonlocal n_f
+            key = (form_norm, entry_norm, rule)
+            if key in emitted:
+                return
+            emitted.add(key)
             if form_norm and entry_norm and form_norm != entry_norm:
                 ff.write(json.dumps({"form_norm": form_norm, "entry_norm": entry_norm, "rule": rule},
                                     ensure_ascii=False) + "\n")
@@ -191,7 +197,8 @@ def main():
                 knorm = common.norm(k, "ja")
                 emit_form(knorm, enorm, "reading")
                 if "っ" in knorm:
-                    emit_form(knorm.replace("っ", ""), enorm, "reading")
+                    # 促音脱落是查询容错，不是真实读音（App 端 reading 命中提权、approx 不提）
+                    emit_form(knorm.replace("っ", ""), enorm, "reading-approx")
             for kk in kanjis[1:]:
                 emit_form(common.norm(kk, "ja"), enorm, "variant")
 

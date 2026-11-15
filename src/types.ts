@@ -40,7 +40,7 @@ export interface Entry {
   freq: number;
   senses?: Sense[];
   extra?: { tags?: string[]; collins?: number; oxford?: number; refined?: boolean; source?: string };
-  matched_by: "exact" | "form" | "user" | "fts" | "prefix" | "zh" | "zh-fts";
+  matched_by: "exact" | "reading" | "form" | "user" | "fts" | "prefix" | "zh" | "zh-fts";
   rule?: string;
 }
 

@@ -46,6 +46,8 @@ CREATE TABLE form(
   rule      TEXT
 );
 CREATE INDEX idx_form ON form(form_norm);
+  -- 读音前缀联想专用部分索引（日语）：只收录真实读音，短前缀不扫屈折行
+  CREATE INDEX idx_form_reading ON form(form_norm, entry_id) WHERE rule = 'reading';
 
 CREATE TABLE zh_index(
   term_norm TEXT NOT NULL,
@@ -203,12 +205,19 @@ def main():
     form_batch = []
     forms_path = work / "forms.jsonl"
     forms_iter = common.read_jsonl(forms_path) if forms_path.exists() else iter([])
+    seen_form: set[tuple[str, int, str | None]] = set()  # 三元组去重（同音词保留：entry_id 在键里）
     for f in forms_iter:
         if f["form_norm"] == f["entry_norm"]:
             continue
         for eid in norm_to_id.get(f["entry_norm"]) or []:
-            form_batch.append((f["form_norm"], eid, f.get("rule")))
+            key = (f["form_norm"], eid, f.get("rule"))
+            if key not in seen_form:
+                seen_form.add(key)
+                form_batch.append(key)
     db.executemany("INSERT OR IGNORE INTO form(form_norm, entry_id, rule) VALUES (?,?,?)", form_batch)
+    # 能力标记：reading-approx 存在 = 该包已把真实读音与促音容错分开（App 端按此提权）
+    if seen_form and any(r == "reading-approx" for (_, _, r) in seen_form):
+        db.execute("INSERT INTO meta(key, value) VALUES ('ja_reading_rules', '2')")
     n_form = db.execute("SELECT count(*) FROM form").fetchone()[0]
 
     # ---- 例句 ----

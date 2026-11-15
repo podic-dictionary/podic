@@ -95,9 +95,11 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
     };
   }, [onSearch]);
 
-  // 精确命中 = 包内 exact 词条或 AI 补录的 user 词条；form（屈折表指向词根）不算——
-  // 查询词本身没有独立词条时，模糊结果上方提供 AI 补全入口
-  const hasExact = results?.some((e) => e.matched_by === "exact" || e.matched_by === "user") ?? false;
+  // 精确命中 = 包内 exact / 日语读音 reading（假名是词的读法，同音多词条是常态）/
+  // AI 补录 user；form（屈折表指向词根）不算——查询词没有独立词条时才给 AI 补全入口
+  const hasExact = results?.some((e) => e.matched_by === "exact" || e.matched_by === "reading" || e.matched_by === "user") ?? false;
+  // 读音匹配组：日语假名查词的第一条 reading 结果前给分组标签（同音词都在这组）
+  const firstReading = results?.findIndex((e) => e.matched_by === "reading") ?? -1;
 
   return (
     <div className="mx-auto max-w-2xl p-4">
@@ -142,6 +144,13 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         )}
         {results?.map((e, i) => (
           <div key={`${e.lang}-${e.entry_id}-${i}`} className="podic-enter" style={{ animationDelay: `${Math.min(i, 8) * 55}ms` }}>
+            {i === firstReading && (
+              <p className="mb-3 flex items-center gap-2 text-xs text-zinc-400">
+                <span className="inline-block h-px flex-1 bg-zinc-200 dark:bg-zinc-700" aria-hidden />
+                读音「{query}」匹配的词条
+                <span className="inline-block h-px flex-1 bg-zinc-200 dark:bg-zinc-700" aria-hidden />
+              </p>
+            )}
             <EntryCard entry={e} autoExamples={i < 2} />
           </div>
         ))}

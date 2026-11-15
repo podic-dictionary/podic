@@ -84,6 +84,40 @@ fn fts_escape(q: &str) -> String {
     format!("\"{}\"", q.replace('"', "\"\""))
 }
 
+/// 命中等级（升序）：exact 与 reading 同档——日语假名读音是词的等价叫法而非屈折变形
+fn match_level(mb: &str) -> u8 {
+    match mb {
+        "exact" | "reading" => 0,
+        "form" => 1,
+        "user" => 2,
+        "fts" => 3,
+        "prefix" => 4,
+        "zh" => 5,
+        _ => 6,
+    }
+}
+
+/// 去重入桶：同一词条多路命中时保留等级最高的一条（先到不一定最强——
+/// 同一 entry 可能先被屈折 form 命中、后被读音 reading 命中）
+fn push_best(
+    out: &mut Vec<Entry>,
+    idx_of: &mut std::collections::HashMap<(String, i64), usize>,
+    e: Entry,
+) {
+    let key = (e.lang.clone(), e.entry_id);
+    match idx_of.get(&key) {
+        Some(&i) => {
+            if match_level(&e.matched_by) < match_level(&out[i].matched_by) {
+                out[i] = e;
+            }
+        }
+        None => {
+            idx_of.insert(key, out.len());
+            out.push(e);
+        }
+    }
+}
+
 /// 用户词典（AI 补录）条目转 Entry：负 id 避免与包内 id 撞 seen 键
 fn user_entry(ud: &crate::store::UserDictEntry) -> Entry {
     let mut extra = serde_json::Map::new();
@@ -120,9 +154,9 @@ pub fn lookup(
         return Ok(vec![]);
     }
     let limit = limit.clamp(1, 100);
-    // (matched_by 优先级, freq 降序) 排序用的桶
+    // (命中等级, freq 降序) 排序用的桶；idx_of 支持同一词条多路命中保最强
     let mut out: Vec<Entry> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut idx_of: std::collections::HashMap<(String, i64), usize> = std::collections::HashMap::new();
 
     let has_cjk = q.chars().any(|c| {
         matches!(c as u32,
@@ -135,25 +169,35 @@ pub fn lookup(
         // 搭配前端 miss → AI complete → 入库 → 重查命中 matched_by:"user" 的补全闭环
         let has_pack = installed.iter().any(|l| l == lang);
         let norm_q = crate::norm::norm(q, lang);
-        // 日语促音容错：にっほん 也应命中 にほん（构建时已为含 っ 的读音生成脱落变体）
-        let candidates: Vec<String> = if lang == "ja" && norm_q.contains('っ') {
-            vec![norm_q.clone(), norm_q.replace('っ', "")]
+        // 包能力标记：新构建的日语包把真实读音(rule=reading)与促音容错(rule=reading-approx)
+        // 分开；旧包（0.1.2 及以前）两类混在 reading 里，只有命中主读音的才敢提权
+        let ja_reading2 = lang == "ja"
+            && has_pack
+            && conn.query_row(
+                &format!("SELECT value FROM \"{lang}\".meta WHERE key = 'ja_reading_rules'"),
+                [],
+                |r| r.get::<_, String>(0),
+            ).map(|v| v == "2").unwrap_or(false);
+        // 日语促音容错：にっほん 也应命中 にほん（构建时已为含 っ 的读音生成脱落变体）。
+        // approx 标记的候选命中一律算容错级（form），不冒充精确/读音
+        let candidates: Vec<(String, bool)> = if lang == "ja" && norm_q.contains('っ') {
+            vec![(norm_q.clone(), false), (norm_q.replace('っ', ""), true)]
         } else {
-            vec![norm_q.clone()]
+            vec![(norm_q.clone(), false)]
         };
 
-        // ① norm 精确 + ② form 屈折精确 + ②' user_dict（AI 补录）。
+        // ① norm 精确 + ② form 屈折精确（日语读音命中提为 reading 档）+ ②' user_dict（AI 补录）。
         // schema 名统一双引号：支持 `is` 这类 SQL 关键字语言码（ATTACH 处同）
-        for cand in &candidates {
+        for (cand, approx) in &candidates {
             if has_pack {
                 let sql = format!("SELECT {SELECT_ENTRY} FROM \"{lang}\".entry e WHERE e.norm = ?1");
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(rusqlite::params![cand], |r| row_to_entry(lang, "exact", None, r))?;
+                let mb = if *approx { "form" } else { "exact" };
+                let rule = if *approx { Some("sokuon".to_string()) } else { None };
+                let rows = stmt.query_map(rusqlite::params![cand], |r| row_to_entry(lang, mb, rule.clone(), r))?;
                 for r in rows {
                     let e = r?;
-                    if seen.insert((lang.clone(), e.entry_id)) {
-                        out.push(e);
-                    }
+                    push_best(&mut out, &mut idx_of, e);
                 }
 
                 let sql = format!(
@@ -161,15 +205,31 @@ pub fn lookup(
                      WHERE f.form_norm = ?1 ORDER BY e.freq DESC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(rusqlite::params![cand], |r| {
+                let cand2 = cand.clone();
+                let rows = stmt.query_map(rusqlite::params![cand], move |r| {
                     let rule: Option<String> = r.get(9)?;
-                    row_to_entry(lang, "form", rule, r)
+                    // 日语读音命中（rule=reading）：假名是词的读法、同音多词条是常态，
+                    // 视作精确级 matched_by="reading"（前端展示读音匹配组，不出 AI 补全提示）。
+                    // 旧包无能力标记时只有命中主读音的提权，次读音保守按屈折处理
+                    let (mb, rule_out) = if *approx {
+                        // 促音脱落候选命中：一律容错级，rule 覆盖为 sokuon（原始规则此时无意义）
+                        ("form", Some("sokuon".into()))
+                    } else if lang == "ja" && rule.as_deref() == Some("reading") {
+                        let main = r.get::<_, Option<String>>(2)?
+                            .map(|s| crate::norm::norm(&s, "ja"));
+                        if ja_reading2 || main.as_deref() == Some(cand2.as_str()) {
+                            ("reading", rule)
+                        } else {
+                            ("form", rule)
+                        }
+                    } else {
+                        ("form", rule)
+                    };
+                    row_to_entry(lang, mb, rule_out, r)
                 })?;
                 for r in rows {
                     let e = r?;
-                    if seen.insert((lang.clone(), e.entry_id)) {
-                        out.push(e);
-                    }
+                    push_best(&mut out, &mut idx_of, e);
                 }
             }
 
@@ -193,7 +253,9 @@ pub fn lookup(
             .into_iter()
             .flatten()
             {
-                if seen.insert((lang.clone(), -src.id)) && !pack_covers(&src.norm)? {
+                let key = (lang.clone(), -src.id);
+                if !idx_of.contains_key(&key) && !pack_covers(&src.norm)? {
+                    idx_of.insert(key, out.len());
                     out.push(user_entry(&src));
                 }
             }
@@ -216,9 +278,7 @@ pub fn lookup(
                     row_to_entry(lang, "fts", None, r)
                 }) {
                     for r in rows.flatten() {
-                        if seen.insert((lang.clone(), r.entry_id)) {
-                            out.push(r);
-                        }
+                        push_best(&mut out, &mut idx_of, r);
                     }
                 }
             }
@@ -239,9 +299,7 @@ pub fn lookup(
         )?;
         for r in rows {
             let e = r?;
-            if seen.insert((lang.clone(), e.entry_id)) {
-                out.push(e);
-            }
+            push_best(&mut out, &mut idx_of, e);
         }
 
         // ⑤ 中文反查索引（查询含 CJK 时）
@@ -255,18 +313,17 @@ pub fn lookup(
             let rows = stmt.query_map(rusqlite::params![term], |r| row_to_entry(lang, "zh", None, r))?;
             for r in rows {
                 let e = r?;
-                if seen.insert((lang.clone(), e.entry_id)) {
-                    out.push(e);
-                }
+                push_best(&mut out, &mut idx_of, e);
             }
         }
     }
 
-    const PRIO: &[&str] = &["exact", "form", "user", "fts", "prefix", "zh"];
     out.sort_by(|a, b| {
-        let pa = PRIO.iter().position(|m| *m == a.matched_by).unwrap_or(9);
-        let pb = PRIO.iter().position(|m| *m == b.matched_by).unwrap_or(9);
-        pa.cmp(&pb).then(b.freq.partial_cmp(&a.freq).unwrap_or(std::cmp::Ordering::Equal))
+        match_level(&a.matched_by)
+            .cmp(&match_level(&b.matched_by))
+            .then(b.freq.partial_cmp(&a.freq).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.headword.cmp(&b.headword))
+            .then_with(|| a.entry_id.cmp(&b.entry_id))
     });
     out.truncate(limit);
     Ok(out)
@@ -290,15 +347,74 @@ pub fn suggest(
         let lower = crate::norm::norm(p, lang);
         let upper = format!("{lower}\u{10FFFF}");
         if installed.iter().any(|l| l == lang) {
-            let sql = format!(
-                "SELECT e.headword, e.reading, COALESCE(json_extract(e.senses, '$[0].zh'), json_extract(e.senses, '$[0].fr'), json_extract(e.senses, '$[1].zh')) FROM \"{lang}\".entry e \
-                 WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params![lower, upper, limit as i64], |r| {
-                Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)?, gloss: r.get(2)? })
-            })?;
-            out.extend(rows.flatten());
+            // 日语联想并入读音前缀：entry.norm 是汉字词头，只扫它输入假名时候选为空
+            // （build_ja 已把各 kana 读音写进 form，rule=reading/reading-approx）。
+            // 词头前缀与读音前缀合并去重再截断，完整命中与真实读音排前
+            if lang == "ja" {
+                // 查询含 っ 时也用脱落形查读音（词条读音含 っ 的方向由包内变体覆盖）
+                let mut prefixes = vec![lower.clone()];
+                if lower.contains('っ') {
+                    let dropped = lower.replace('っ', "");
+                    if !dropped.is_empty() {
+                        prefixes.push(dropped);
+                    }
+                }
+                let mut ids = std::collections::HashSet::new();
+                let mut hits: Vec<(bool, bool, SuggestItem, i64)> = vec![]; // (完整命中, 真实读音, item, id)
+                for (pi, pref) in prefixes.iter().enumerate() {
+                    let p_upper = format!("{pref}\u{10FFFF}");
+                    // 词头前缀
+                    let sql = format!(
+                        "SELECT e.id, e.headword, e.reading, COALESCE(json_extract(e.senses, '$[0].zh'), json_extract(e.senses, '$[0].fr'), json_extract(e.senses, '$[1].zh')) FROM \"{lang}\".entry e \
+                         WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    let rows = stmt.query_map(rusqlite::params![pref, p_upper, (limit * 2) as i64], |r| {
+                        Ok((r.get::<_, i64>(0)?, SuggestItem { lang: lang.to_string(), headword: r.get(1)?, reading: r.get(2)?, gloss: r.get(3)? }))
+                    })?;
+                    for (id, item) in rows.flatten() {
+                        if ids.insert(id) {
+                            hits.push((item.headword == *pref || crate::norm::norm(&item.headword, "ja") == *pref, true, item, id));
+                        }
+                    }
+                    // 读音前缀（真实读音优先于促音容错变体；approx 候选排末位只在名额富余时补）
+                    let sql = format!(
+                        "SELECT e.id, e.headword, e.reading, COALESCE(json_extract(e.senses, '$[0].zh'), json_extract(e.senses, '$[0].fr'), json_extract(e.senses, '$[1].zh')), \
+                                MIN(f.form_norm = ?3), MAX(f.rule = 'reading'), MAX(f.rule = 'reading-approx') \
+                         FROM \"{lang}\".form f JOIN \"{lang}\".entry e ON e.id = f.entry_id \
+                         WHERE f.form_norm >= ?1 AND f.form_norm < ?2 AND f.rule IN ('reading','reading-approx') \
+                         GROUP BY e.id ORDER BY e.freq DESC LIMIT ?4"
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    let rows = stmt.query_map(rusqlite::params![pref, p_upper, pref, (limit * 3) as i64], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            SuggestItem { lang: lang.to_string(), headword: r.get(1)?, reading: r.get(2)?, gloss: r.get(3)? },
+                            r.get::<_, i64>(4)? == 1, // 完整读音命中
+                            r.get::<_, i64>(5)? == 1, // 真实读音
+                        ))
+                    })?;
+                    for (id, item, full, real) in rows.flatten() {
+                        if ids.insert(id) {
+                            hits.push((full, real && pi == 0, item, id));
+                        }
+                    }
+                }
+                // 完整命中 > 真实读音前缀 > 其他；档内 freq 由 SQL 保证顺序，这里稳定化
+                hits.sort_by(|a, b| (b.0.cmp(&a.0)).then(b.1.cmp(&a.1)).then(a.3.cmp(&b.3)));
+                hits.truncate(limit);
+                out.extend(hits.into_iter().map(|(_, _, item, _)| item));
+            } else {
+                let sql = format!(
+                    "SELECT e.headword, e.reading, COALESCE(json_extract(e.senses, '$[0].zh'), json_extract(e.senses, '$[0].fr'), json_extract(e.senses, '$[1].zh')) FROM \"{lang}\".entry e \
+                     WHERE e.norm >= ?1 AND e.norm < ?2 ORDER BY e.freq DESC LIMIT ?3"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(rusqlite::params![lower, upper, limit as i64], |r| {
+                    Ok(SuggestItem { lang: lang.to_string(), headword: r.get(0)?, reading: r.get(1)?, gloss: r.get(2)? })
+                })?;
+                out.extend(rows.flatten());
+            }
         }
         // 用户词典并入联想（表小，UNIQUE(lang,norm) 索引范围扫描；无包语言唯一来源）
         let sql = "SELECT headword, reading, COALESCE(json_extract(senses, '$[0].zh'), json_extract(senses, '$[0].fr')) FROM user_dict WHERE lang = ?1 AND norm >= ?2 AND norm < ?3 LIMIT 5";
@@ -327,7 +443,7 @@ pub fn reverse(
     }
     let limit = limit.clamp(1, 100);
     let mut out = vec![];
-    let mut seen = std::collections::HashSet::new();
+    let mut idx_of: std::collections::HashMap<(String, i64), usize> = std::collections::HashMap::new();
     for lang in langs {
         check_lang(lang)?;
         if !installed.iter().any(|l| l == lang) {
@@ -341,9 +457,7 @@ pub fn reverse(
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params![t, limit as i64], |r| row_to_entry(lang, "zh", None, r))?;
         for r in rows.flatten() {
-            if seen.insert((lang.clone(), r.entry_id)) {
-                out.push(r);
-            }
+            push_best(&mut out, &mut idx_of, r);
         }
         // FTS 兜底（连续汉字整 token 命中）
         let sql = format!(
@@ -355,9 +469,7 @@ pub fn reverse(
                 row_to_entry(lang, "zh-fts", None, r)
             }) {
                 for r in rows.flatten() {
-                    if seen.insert((lang.clone(), r.entry_id)) {
-                        out.push(r);
-                    }
+                    push_best(&mut out, &mut idx_of, r);
                 }
             }
         }
@@ -441,6 +553,130 @@ mod tests {
         // suggest 联想并入用户词典
         let s = suggest(&conn, &["en".to_string()], &langs, "blor", 10).unwrap();
         assert!(s.iter().any(|x| x.headword == "blorp"));
+    }
+
+    /// 最小 ja 包夹具：可带 meta（ja_reading_rules=2 表示新构建包，缺省模拟旧包）
+    fn ja_fixture(reading_rules2: bool) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::store::init_app_db(&conn).unwrap();
+        conn.execute("ATTACH ':memory:' AS ja", []).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ja.entry(id INTEGER PRIMARY KEY, norm TEXT NOT NULL, headword TEXT NOT NULL,
+                reading TEXT, ipa TEXT, pos TEXT, gender TEXT, freq REAL NOT NULL DEFAULT 0, senses TEXT, extra TEXT);
+             CREATE TABLE ja.form(form_norm TEXT NOT NULL, entry_id INTEGER NOT NULL, rule TEXT);
+             CREATE TABLE ja.meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE ja.zh_index(term TEXT, term_norm TEXT, entry_id INTEGER NOT NULL);
+             CREATE VIRTUAL TABLE ja.entry_fts USING fts5(headword, reading, zh_text);",
+        )
+        .unwrap();
+        if reading_rules2 {
+            conn.execute("INSERT INTO ja.meta(key, value) VALUES ('ja_reading_rules', '2')", [])
+                .unwrap();
+        }
+        conn
+    }
+
+    fn ja_entry(conn: &Connection, norm: &str, headword: &str, reading: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO ja.entry(norm, headword, reading, freq) VALUES (?1, ?2, ?3, 1.0)",
+            rusqlite::params![norm, headword, reading],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn ja_form(conn: &Connection, form_norm: &str, entry_id: i64, rule: &str) {
+        conn.execute(
+            "INSERT INTO ja.form(form_norm, entry_id, rule) VALUES (?1, ?2, ?3)",
+            rusqlite::params![form_norm, entry_id, rule],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn ja_读音命中与同音词() {
+        // 新包（ja_reading_rules=2）：读音命中提为 reading 档，同音词全部返回
+        let conn = ja_fixture(true);
+        let d1 = ja_entry(&conn, "駄目", "駄目", "だめ");
+        let d2 = ja_entry(&conn, "駄眼", "駄眼", "だめ"); // 同音词
+        ja_form(&conn, "だめ", d1, "reading");
+        ja_form(&conn, "だめ", d2, "reading");
+        let d3 = ja_entry(&conn, "溜息", "溜息", "ため");
+        ja_form(&conn, "だめ", d3, "reading-approx"); // 促音容错来源（新包区分开）
+
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "だめ", 20, false).unwrap();
+        let by_id: Vec<(i64, &str)> = items.iter().map(|e| (e.entry_id, e.matched_by.as_str())).collect();
+        assert!(by_id.contains(&(d1, "reading")), "主词条应为 reading 档: {by_id:?}");
+        assert!(by_id.contains(&(d2, "reading")), "同音词也应为 reading 档: {by_id:?}");
+        assert!(by_id.contains(&(d3, "form")), "促音容错来源不提权: {by_id:?}");
+        assert_eq!(items[0].matched_by, "reading");
+
+        // 片假名输入归一后同样命中
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "ダメ", 20, false).unwrap();
+        assert!(items.iter().any(|e| e.entry_id == d1 && e.matched_by == "reading"));
+
+        // 汉字词头查询不受影响
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "駄目", 20, false).unwrap();
+        assert_eq!(items[0].matched_by, "exact");
+    }
+
+    #[test]
+    fn ja_旧包读音保守提权() {
+        // 旧包（无能力标记）：reading 混有促音脱落容错，只有命中主读音的才提权
+        let conn = ja_fixture(false);
+        let d1 = ja_entry(&conn, "駄目", "駄目", "だめ");
+        ja_form(&conn, "だめ", d1, "reading");
+        let a1 = ja_entry(&conn, "あっさり", "あっさり", "あっさり");
+        ja_form(&conn, "あさり", a1, "reading"); // 旧包：脱落变体也叫 reading
+
+        // だめ = 主读音 → 提权
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "だめ", 20, false).unwrap();
+        assert_eq!(items[0].matched_by, "reading");
+
+        // あさり ≠ 主读音（あっさり）→ 保守按 form（且不能把 あっさり 标成精确）
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "あさり", 20, false).unwrap();
+        assert_eq!(items[0].matched_by, "form");
+        assert_eq!(items[0].headword, "あっさり");
+    }
+
+    #[test]
+    fn ja_促音查询容错不冒充精确() {
+        // 查询含 っ：にっほん → にほん(日本读音) 命中算容错级 form，不标 exact/reading
+        let conn = ja_fixture(true);
+        let n1 = ja_entry(&conn, "日本", "日本", "にほん");
+        ja_form(&conn, "にほん", n1, "reading");
+
+        let items = lookup(&conn, &["ja".to_string()], &["ja".to_string()], "にっほん", 20, false).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].matched_by, "form");
+        assert_eq!(items[0].rule.as_deref(), Some("sokuon"));
+
+        // 纯 っ 查询不炸
+        assert!(lookup(&conn, &["ja".to_string()], &["ja".to_string()], "っ", 20, false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ja_suggest_读音前缀() {
+        let conn = ja_fixture(true);
+        let d1 = ja_entry(&conn, "駄目", "駄目", "だめ");
+        let d2 = ja_entry(&conn, "駄眼", "駄眼", "だめ");
+        ja_form(&conn, "だめ", d1, "reading");
+        ja_form(&conn, "だめ", d2, "reading");
+        let t1 = ja_entry(&conn, "たこ焼き", "たこ焼き", "たこやき");
+        ja_form(&conn, "たこやき", t1, "reading");
+
+        // 输入假名前缀能联想出汉字词条（词头 norm 前缀扫不出来）
+        let s = suggest(&conn, &["ja".to_string()], &["ja".to_string()], "だ", 8).unwrap();
+        let heads: Vec<&str> = s.iter().map(|i| i.headword.as_str()).collect();
+        assert!(heads.contains(&"駄目") && heads.contains(&"駄眼"), "同音词都应出现: {heads:?}");
+
+        // 完整读音命中排最前
+        let s = suggest(&conn, &["ja".to_string()], &["ja".to_string()], "だめ", 8).unwrap();
+        assert_eq!(s[0].headword, "駄目");
+
+        // limit 截断生效
+        let s = suggest(&conn, &["ja".to_string()], &["ja".to_string()], "た", 8).unwrap();
+        assert!(s.len() <= 8);
     }
 
     #[test]

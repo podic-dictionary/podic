@@ -139,7 +139,8 @@ export default function EntryCard({ entry, autoExamples = true }: { entry: Entry
         )}
         {rule && (
           <span className="rounded bg-violet-50 px-1.5 py-0.5 text-xs text-violet-700 dark:bg-violet-950 dark:text-violet-400">
-            「{entry.headword}」{rule}形式
+            {/* 日语读音命中：假名是词的读法不是变形，不写「形式」；促音容错才是变形语义 */}
+            {entry.rule === "reading" ? "读音匹配" : `「${entry.headword}」${rule}形式`}
           </span>
         )}
         {entry.extra?.collins ? (

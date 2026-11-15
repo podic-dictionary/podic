@@ -7,6 +7,7 @@ export const POS_LABELS: Record<string, string> = {
 export const RULE_LABELS: Record<string, string> = {
   pl: "复数", past: "过去式", pp: "过去分词", ing: "现在分词", s3: "三单",
   comp: "比较级", sup: "最高级", lemma: "原形",
+  reading: "读音", sokuon: "促音容错",
 };
 
 export const TAG_LABELS: Record<string, string> = {
