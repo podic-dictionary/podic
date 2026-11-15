@@ -41,3 +41,6 @@ tsconfig.tsbuildinfo
 
 # worktree 本地的词典包符号链接
 packs
+
+# sherpa-onnx AAR：构建脚本按 sha256 下载（scripts/build-android.sh）
+android/app/libs/

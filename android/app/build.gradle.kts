@@ -74,3 +74,8 @@ android {
     // .so 随包解压安装（WebView 进程加载更稳）
     packaging { jniLibs { useLegacyPackaging = true } }
 }
+
+dependencies {
+    // sherpa-onnx 官方 AAR（端侧 TTS 推理；模型按需下载不进包）
+    implementation(files("libs/sherpa-onnx.aar"))
+}

@@ -26,6 +26,8 @@ class MainActivity : Activity() {
     /// 系统 TTS：Android WebView 不支持 Web Speech API，喇叭按钮经桥接走原生合成
     private var tts: android.speech.tts.TextToSpeech? = null
     private var ttsReady = false
+    /// 端侧语音引擎（懒初始化：后端端口就绪后才有意义）
+    private var ttsManager: TtsManager? = null
 
     /// WebView 的 destroy 必须先从视图树 detach，attached 状态销毁会留下
     /// 半死的 Chromium surface/输入通道（日志刷 "destroy() called while still attached"）
@@ -73,6 +75,30 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun ttsStop() {
             runOnUiThread { tts?.stop() }
+        }
+
+        /// 统一朗读协议（speech 控制器）：speak/stop/unload 三种 op。
+        /// speak: {op, request_id, text, lang, speed:"normal"|"slow", provider:"auto"|"system"|"offline"}
+        /// 事件回传 window.__podicTtsEvent({request_id, state:"ended"|"cancelled"|"error", message?})
+        @JavascriptInterface
+        fun ttsRequest(json: String) {
+            val req = try {
+                org.json.JSONObject(json)
+            } catch (_: Exception) {
+                return
+            }
+            val mgr = ttsManager ?: return
+            when (req.optString("op")) {
+                "speak" -> mgr.speak(
+                    requestId = req.optString("request_id"),
+                    text = req.optString("text"),
+                    lang = req.optString("lang"),
+                    speed = if (req.optString("speed") == "slow") 0.75f else 1.0f,
+                    provider = req.optString("provider", "auto"),
+                )
+                "stop" -> mgr.stop()
+                "unload" -> mgr.unload()
+            }
         }
 
         /// SPA 页面渲染：加载 url，onPageFinished 后再等 hydration，取 outerHTML 回传
@@ -189,8 +215,10 @@ class MainActivity : Activity() {
             }
             tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) = notifyTtsEnd()
-                override fun onError(utteranceId: String?) = notifyTtsEnd()
+                override fun onDone(utteranceId: String?) = notifyTtsEnd(utteranceId, "ended")
+                override fun onError(utteranceId: String?) = notifyTtsEnd(utteranceId, "error")
+                override fun onStop(utteranceId: String?, interrupted: Boolean) =
+                    notifyTtsEnd(utteranceId, "cancelled")
             })
             val dataDir = File(filesDir, "data").apply { mkdirs() }
             dataDirPath = dataDir.absolutePath
@@ -203,6 +231,13 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (port > 0) {
                     serverPort = port
+                    if (ttsManager == null) {
+                        ttsManager = TtsManager(
+                            portProvider = { serverPort },
+                            emit = ::emitTtsEvent,
+                            systemSpeak = ::systemSpeak,
+                        )
+                    }
                     // 端口进 logcat：「Load failed」排查时 adb logcat 直接可查
                     android.util.Log.i("podic", "server on 127.0.0.1:$port")
                     // 冷启动深链接（podic://search?q=…）拼进初始 URL 的 hash，前端路由直接落到目标页
@@ -214,17 +249,49 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    /// 朗读结束通知 JS（webView 可能未初始化/已销毁，判空防崩）
-    private fun notifyTtsEnd() {
-        if (this::webView.isInitialized) {
-            runOnUiThread {
-                webView.evaluateJavascript("window.dispatchEvent(new Event('podic:tts-end'))", null)
+    /// 朗读结束通知 JS：旧协议（ttsSpeak，utteranceId 固定 "podic"）发全局
+    /// podic:tts-end；新协议（ttsRequest）按 request_id 发 __podicTtsEvent
+    private fun notifyTtsEnd(utteranceId: String?, state: String) {
+        if (utteranceId == "podic") {
+            if (this::webView.isInitialized) {
+                runOnUiThread {
+                    webView.evaluateJavascript("window.dispatchEvent(new Event('podic:tts-end'))", null)
+                }
             }
+            return
         }
+        if (utteranceId != null) emitTtsEvent(utteranceId, state, null)
+    }
+
+    /// 端侧引擎事件注入 JS（webView 可能未初始化/已销毁，判空防崩）
+    private fun emitTtsEvent(requestId: String, state: String, message: String?) {
+        if (!this::webView.isInitialized) return
+        val ev = org.json.JSONObject()
+        ev.put("request_id", requestId)
+        ev.put("state", state)
+        if (message != null) ev.put("message", message)
+        runOnUiThread {
+            webView.evaluateJavascript("window.__podicTtsEvent && window.__podicTtsEvent($ev)", null)
+        }
+    }
+
+    /// 系统 TTS 朗读（TtsManager 的兜底/强制 system 路径）。返回 false = 不可用或无该语言语音
+    private fun systemSpeak(requestId: String, text: String, lang: String, speed: Float): Boolean {
+        val t = tts ?: return false
+        if (!ttsReady) return false
+        val loc = java.util.Locale.forLanguageTag(lang)
+        if (t.isLanguageAvailable(loc) < android.speech.tts.TextToSpeech.LANG_AVAILABLE) return false
+        runOnUiThread {
+            t.language = loc
+            t.setSpeechRate(speed)
+            t.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, requestId)
+        }
+        return true
     }
 
     override fun onDestroy() {
         tts?.shutdown()
+        ttsManager?.shutdown()
         super.onDestroy()
     }
 

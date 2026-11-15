@@ -135,6 +135,9 @@ pub struct TtsInstalled {
     /// 版本目录（壳加载引擎用）
     pub path: String,
     pub installed_at: u64,
+    /// 清单里的引擎构造配置（文件名映射等，按 family 结构不同；壳解析用）
+    #[serde(default)]
+    pub config: Value,
 }
 
 fn tts_root(data_dir: &Path) -> PathBuf {
@@ -382,6 +385,7 @@ pub async fn install_model(
         family: entry.family.clone(),
         path: target.to_string_lossy().into_owned(),
         installed_at: now_secs(),
+        config: entry.config.clone(),
     };
     let cur = models_dir.join("current.json");
     let tmp_cur = models_dir.join("current.json.part");

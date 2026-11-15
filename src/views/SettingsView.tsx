@@ -14,6 +14,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import PacksView from "./PacksView";
+import TtsView from "./TtsView";
 import SettingsSearch from "../components/SettingsSearch";
 import { LANG_PRESETS } from "../components/LanguageSwitcher";
 import { setSettingsDirty } from "../lib/dirtyStore";
@@ -114,7 +115,7 @@ function SubHeader({
   );
 }
 
-export type SettingsSub = null | "ai" | "about" | "packs" | "userdict" | "languages";
+export type SettingsSub = null | "ai" | "about" | "packs" | "userdict" | "languages" | "tts";
 
 /// 语言管理的一行（dnd-kit 可排序）：抓手拖动换序，顺序即切换器渲染顺序
 function SortableLangRow({
@@ -1062,6 +1063,11 @@ export default function SettingsView({
     return <LanguagesPage onBack={() => setSub(null)} curLang={curLang} />;
   }
 
+  // ---- 二级页：语音引擎 ----
+  if (sub === "tts") {
+    return <TtsView onBack={() => setSub(null)} />;
+  }
+
   // ---- 二级页：词典 ----
   if (sub === "packs") {
     return (
@@ -1173,6 +1179,7 @@ export default function SettingsView({
           onClick={() => setSub("languages")}
         />
         <Row label="词典包管理" hint="导入 · 更新 · 卸载" onClick={() => setSub("packs")} />
+        <Row label="语音引擎" hint="离线发音模型 · 下载 · 试听" onClick={() => setSub("tts")} />
         <Row label="创建词典包" hint="LLM 批量生成 · 打包 · 导入教程" onClick={() => openExternal(PACK_GUID_URL)} />
         <Row label="关于 / 数据来源" onClick={() => setSub("about")} />
       </section>

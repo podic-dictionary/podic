@@ -25,6 +25,7 @@ const PAGE_LABELS: { [k in Exclude<SettingsSub, null>]: string } = {
   userdict: "AI 词典",
   languages: "语言",
   packs: "词典",
+  tts: "语音引擎",
   about: "关于",
 };
 
@@ -39,6 +40,8 @@ const ENTRIES: SearchEntry[] = [
   { title: "AI 词典", desc: "阅读时 AI 补录的词条", keywords: ["补录", "词条", "user dict"], sub: "userdict" },
   { title: "语言", desc: "添加任意语言、排序与移出", keywords: ["语言", "添加", "英语", "法语", "日语", "俄语", "德语"], sub: "languages" },
   { title: "词典", desc: "导入 · 更新 · 卸载", keywords: ["词典包", "卸载", "删除", "版本", "词条数"], sub: "packs" },
+  // 语音引擎
+  { title: "语音引擎", desc: "离线发音模型 · 下载 · 试听", keywords: ["tts", "语音", "发音", "朗读", "引擎", "发音", "语速", "慢速", "法语", "日语", "音色"], sub: "tts" },
   // 词典-安装 tab（hash 带 tab 段）
   { title: "更新所有词典", desc: "逐个检查更新并下载安装", keywords: ["更新", "升级", "下载", "检查"], hash: "#/settings/packs/install" },
   { title: "本地导入", desc: "选择 .db 词典包文件导入", keywords: ["导入", "文件", "db", "离线"], hash: "#/settings/packs/install" },

@@ -191,6 +191,12 @@ export interface SettingsView {
   last_view?: string | null;
   /** 每日一句按语言存的难度层偏好 */
   daily_sentence?: { levels_by_lang: Record<string, { mode: string; band?: number }> } | null;
+  /** 端侧 TTS：下载源 / 默认语速 / 语言偏好 */
+  tts?: {
+    source: { mode: string; custom_manifest_url: string };
+    default_speed: string;
+    languages: Record<string, { provider: string }>;
+  } | null;
 }
 
 export const getSettings = () => api<SettingsView>("/settings");
@@ -202,6 +208,11 @@ export const saveSettings = (settings: {
   languages?: LanguageConfig[];
   last_view?: string;
   daily_sentence?: { levels_by_lang: Record<string, { mode: string; band?: number }> };
+  tts?: {
+    source: { mode: string; custom_manifest_url: string };
+    default_speed: string;
+    languages: Record<string, { provider: string }>;
+  };
 }) => api<{ ok: boolean }>("/settings", { method: "POST", body: JSON.stringify(settings), headers: { "Content-Type": "application/json" } });
 
 export const testProvider = (
@@ -340,6 +351,103 @@ export const dailySentence = (body: {
     body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
   });
+
+// ---- 端侧 TTS 引擎 ----
+
+export interface TtsInstalled {
+  model_id: string;
+  revision: number;
+  version: string;
+  languages: string[];
+  family: string;
+  path: string;
+  installed_at: number;
+}
+
+export interface TtsCatalogModel {
+  model_id: string;
+  family: string;
+  languages: string[];
+  name: string;
+  version: string;
+  revision: number;
+  notes: string;
+  package: { url: string; format: string; sha256: string; size_bytes: number; archive_root: string };
+  voices: { id: number; name: string }[];
+  default_voice_id: number;
+  licenses: { id: string; url: string; attribution: string }[];
+}
+
+export const ttsModels = () => api<{ models: TtsInstalled[] }>("/tts/models").then((r) => r.models);
+
+export const ttsCatalog = () =>
+  api<{
+    manifest_url: string;
+    source_mode: string;
+    catalog_revision: number;
+    defaults: Record<string, string>;
+    models: TtsCatalogModel[];
+  }>("/tts/catalog");
+
+export const ttsSpeedTest = (url?: string) =>
+  api<{ ms: number; error?: string }>("/tts/speed-test", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+    headers: { "Content-Type": "application/json" },
+  });
+
+export const ttsDeleteModel = (modelId: string) =>
+  api<{ ok: boolean }>(`/tts/models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
+
+export const ttsTasks = () =>
+  api<{ tasks: { id: string; model_id: string; state: string; error?: string; started_at: number }[] }>("/tts/tasks").then((r) => r.tasks);
+
+export const ttsCancelTask = (id: string) =>
+  api<{ ok: boolean }>(`/tts/tasks/${id}/cancel`, { method: "POST" });
+
+export interface TtsInstallEvent {
+  type: string;
+  task_id?: string;
+  model_id?: string;
+  phase?: string;
+  downloaded?: number;
+  total?: number;
+  message?: string;
+  model?: TtsInstalled;
+}
+
+/** 安装模型（SSE 进度）：正常结束 resolve done 的模型；取消/出错 reject */
+export function ttsInstallStream(
+  modelId: string,
+  onEvent: (e: TtsInstallEvent) => void,
+): { done: Promise<TtsInstalled | null>; cancel: () => Promise<void>; taskId: Promise<string | null> } {
+  let taskId: string | null = null;
+  const done = (async () => {
+    const resp = await fetch("/api/tts/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelId }),
+    });
+    if (!resp.ok || !resp.body) throw new Error(`${resp.status}: ${await resp.text().catch(() => resp.statusText)}`);
+    let installed: TtsInstalled | null = null;
+    await readSSE(resp, (ev) => {
+      const e = ev as unknown as TtsInstallEvent;
+      if (e.task_id) taskId = e.task_id;
+      onEvent(e);
+      if (e.type === "done") installed = e.model ?? null;
+      else if (e.type === "cancelled") return "stop";
+      else if (e.type === "error") throw new Error(e.message || "安装失败");
+    });
+    return installed;
+  })();
+  return {
+    done,
+    taskId: done.then(() => taskId).catch(() => taskId),
+    cancel: async () => {
+      if (taskId) await ttsCancelTask(taskId).catch(() => {});
+    },
+  };
+}
 
 // ---- 阅读：文章 / 用户词典 / 生词标记 ----
 

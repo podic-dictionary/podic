@@ -51,26 +51,32 @@ pub async fn models(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "models": tts::installed_models(&data_dir) })))
 }
 
-/// GET /api/tts/catalog：从当前源拉清单（语言过滤由前端做）
-pub async fn catalog(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    let (manifest_url, source) = {
-        let core = lock(&state);
-        let t = core.settings.tts.clone().unwrap_or_default();
-        (tts::manifest_url_for(&t.source), t.source)
-    };
+/// 拉取并解析清单（catalog / install 共用）
+async fn fetch_manifest(manifest_url: &str) -> Result<tts::TtsManifest, ApiError> {
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
-    let resp = http.get(&manifest_url).send().await.map_err(|e| {
+    let resp = http.get(manifest_url).send().await.map_err(|e| {
         ApiError(StatusCode::BAD_GATEWAY, format!("清单获取失败：{e}"))
     })?;
     if !resp.status().is_success() {
         return Err(ApiError(StatusCode::BAD_GATEWAY, format!("清单返回 {}", resp.status())));
     }
-    let manifest: tts::TtsManifest = resp.json().await.map_err(|e| {
-        ApiError(StatusCode::BAD_GATEWAY, format!("清单解析失败：{e}"))
-    })?;
+    resp.json().await.map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("清单解析失败：{e}")))
+}
+
+/// 当前设置源解析出的（清单地址, 源）
+fn source_of(state: &AppState) -> (String, tts::TtsSource) {
+    let core = lock(state);
+    let t = core.settings.tts.clone().unwrap_or_default();
+    (tts::manifest_url_for(&t.source), t.source)
+}
+
+/// GET /api/tts/catalog：从当前源拉清单（语言过滤由前端做）
+pub async fn catalog(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    let (manifest_url, source) = source_of(&state);
+    let manifest = fetch_manifest(&manifest_url).await?;
     Ok(Json(json!({
         "manifest_url": manifest_url,
         "source_mode": source.mode,
@@ -94,11 +100,7 @@ pub async fn speed_test(
 ) -> ApiResult<Json<Value>> {
     let url = match input.url {
         Some(u) if !u.trim().is_empty() => u,
-        _ => {
-            let core = lock(&state);
-            let t = core.settings.tts.clone().unwrap_or_default();
-            tts::manifest_url_for(&t.source)
-        }
+        _ => source_of(&state).0,
     };
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -129,18 +131,16 @@ pub async fn install(
         return Err(ApiError(StatusCode::BAD_REQUEST, "model_id 必填".into()));
     }
 
-    let (data_dir, entry) = {
-        let core = lock(&state);
-        let data_dir = core.data_dir.clone();
-        drop(core);
-        let entry = tts::TtsModelEntry {
-            model_id: model_id.clone(), family: "supertonic".into(), languages: vec!["ja".into()],
-            name: String::new(), version: String::new(), revision: 1, notes: String::new(),
-            package: tts::TtsPackage { url: String::new(), format: "tar.bz2".into(), sha256: String::new(), size_bytes: 0, archive_root: String::new() },
-            files: vec![], config: serde_json::Value::Null, voices: vec![], default_voice_id: 0, licenses: vec![],
-        };
-        (data_dir, entry)
-    };
+    // 按当前源拉清单找模型条目，并解析实际下载地址（ghproxy 对 github 包加前缀）
+    let (manifest_url, source) = source_of(&state);
+    let manifest = fetch_manifest(&manifest_url).await?;
+    let entry = manifest
+        .models
+        .into_iter()
+        .find(|m| m.model_id == model_id)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, format!("清单里没有模型 {model_id}")))?;
+    let url = tts::resolve_model_url(&source, &manifest_url, &entry.package.url);
+    let data_dir = { lock(&state).data_dir.clone() };
 
     // 同模型互斥
     {
@@ -172,7 +172,7 @@ pub async fn install(
 
     tokio::spawn(async move {
         let tx2 = tx.clone();
-        let r = tts::install_model(&data_dir, &entry, &entry.package.url, stop.clone(), move |p| {
+        let r = tts::install_model(&data_dir, &entry, &url, stop.clone(), move |p| {
             let _ = tx2.send(sse_event(json!({
                 "type": "progress", "task_id": tid,
                 "phase": p.phase, "downloaded": p.downloaded, "total": p.total,

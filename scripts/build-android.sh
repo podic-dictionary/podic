@@ -49,5 +49,15 @@ ls packs/en-dict-*.db | sort -V | tail -1 | xargs cp -t android/app/src/main/ass
 ls -lh android/app/src/main/assets/packs/ || true
 
 echo "[4/4] gradle $GRADLE_TASK"
+# sherpa-onnx AAR 不进 git（大文件约定）：构建前按 sha256 拉取（gh-proxy 加速）
+AAR=android/app/libs/sherpa-onnx.aar
+AAR_SHA=633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
+if [ "$(sha256sum "$AAR" 2>/dev/null | cut -d' ' -f1)" != "$AAR_SHA" ]; then
+  mkdir -p android/app/libs
+  echo "下载 sherpa-onnx 1.13.8 AAR…"
+  curl -sL --fail -o "$AAR" https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar \
+    || curl -sL --fail -o "$AAR" https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
+  echo "$AAR_SHA  $AAR" | sha256sum -c - || { echo "sherpa-onnx AAR 校验失败"; exit 1; }
+fi
 cd android && ./gradlew "$GRADLE_TASK"
 ls -lh "$OUT_DIR"/

@@ -100,6 +100,58 @@ pub extern "C" fn podic_tts_release(model_id: *const std::os::raw::c_char) -> i3
     }
 }
 
+/// JNI（Android 壳）：取已装模型的版本目录，未安装返回 null
+#[no_mangle]
+pub extern "C" fn Java_com_felix021_podic_PodicNative_ttsModelPath(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+    model_id: jni::objects::JString,
+) -> jni::sys::jstring {
+    let Ok(id) = env.get_string(&model_id).map(|s| s.to_string_lossy().into_owned()) else {
+        return std::ptr::null_mut();
+    };
+    let Some(dir) = tts_data_dir() else {
+        return std::ptr::null_mut();
+    };
+    match podic_server::tts_model_path(&dir, &id) {
+        Some(p) => match env.new_string(p.to_string_lossy().into_owned()) {
+            Ok(s) => s.as_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        None => std::ptr::null_mut(),
+    }
+}
+
+fn jni_model_id(env: &mut jni::JNIEnv, model_id: &jni::objects::JString) -> Option<String> {
+    env.get_string(model_id).ok().map(|s| s.to_string_lossy().into_owned())
+}
+
+/// JNI：模型使用引用 +1（壳加载引擎前调用；删除模型时引用>0 后端拒绝）
+#[no_mangle]
+pub extern "C" fn Java_com_felix021_podic_PodicNative_ttsAcquire(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+    model_id: jni::objects::JString,
+) -> i32 {
+    match jni_model_id(&mut env, &model_id) {
+        Some(id) => podic_core::tts::acquire(&id) as i32,
+        None => -1,
+    }
+}
+
+/// JNI：模型使用引用 -1（壳卸载引擎后调用）
+#[no_mangle]
+pub extern "C" fn Java_com_felix021_podic_PodicNative_ttsRelease(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+    model_id: jni::objects::JString,
+) -> i32 {
+    match jni_model_id(&mut env, &model_id) {
+        Some(id) => podic_core::tts::release(&id) as i32,
+        None => -1,
+    }
+}
+
 /// 服务端 data_dir 的进程级记录（FFI 拿不到 AppState，start_server 时写入）
 static TTS_DATA_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
