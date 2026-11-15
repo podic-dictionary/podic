@@ -7,6 +7,8 @@
 - 断点: data/work/{lang}/translated.jsonl 逐词追加，重跑只补缺失
 - 输出: 写回 entries.jsonl（senses[i].zh = 翻译[i]，zh_terms 重建）
 - 协议: anthropic（ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN），与 generate 同款
+- 兜底: 主力 API 拒答（敏感词整批 4xx/stop_reason 异常）→ 本机 llama.cpp
+  （LLAMA_BASE_URL，OpenAI 兼容）逐条重翻；仍失败的记 llama-failed.txt
 
 用法: python3 translate_senses_llm.py --lang fr --language-name 法语 --source-field fr \
           --model glm-5.3-flash [--batch 60] [--concurrency 4] [--limit N] [--dry-run]
@@ -33,6 +35,21 @@ TOKENS_PER_WORD = 300
 
 class ApiReject(Exception):
     pass
+
+
+def llama_call(model: str, system: str, user: str, max_tokens: int) -> str:
+    """本机 llama.cpp（OpenAI 兼容 /v1/chat/completions）兜底调用。
+    qwen3 系模板可能输出 <think>…</think>，剥离后返回"""
+    base = os.environ.get("LLAMA_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
+    body = {"model": model, "max_tokens": max_tokens, "temperature": 0,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    req = urllib.request.Request(f"{base}/v1/chat/completions", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        data = json.load(resp)
+    ch = (data.get("choices") or [{}])[0]
+    text = (ch.get("message") or {}).get("content") or ""
+    return re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
 
 
 def api_call(model: str, system: str, user: str, max_tokens: int) -> str:
@@ -106,6 +123,8 @@ def main():
     ap.add_argument("--work-dir", default="")
     ap.add_argument("--allow-empty", action="store_true",
                     help="senses 全空的词条也处理（由词头+词性生成释义，en 长尾用）")
+    ap.add_argument("--llama-model", default="",
+                    help="兜底 llama.cpp 模型名；空 = 自动取 /v1/models 第一个")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -138,6 +157,18 @@ def main():
     todo = [e for e in todo if e["headword"] not in done]
     common.log(f"断点已有 {len(done)}，剩余 {len(todo)}")
 
+    if not args.llama_model:
+        try:
+            base = os.environ.get("LLAMA_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
+            with urllib.request.urlopen(f"{base}/v1/models", timeout=5) as r:
+                m0 = json.load(r)["models"][0]
+                # llama.cpp 版本差异：id / model / name 三种字段名都见过
+                args.llama_model = m0.get("id") or m0.get("model") or m0.get("name") or ""
+            common.log(f"llama 兜底模型: {args.llama_model}")
+        except Exception:
+            args.llama_model = ""
+            common.log("llama 兜底不可用（拒答词条将记入 llama-failed.txt）")
+
     batch_tokens = args.max_tokens or min(65536, args.batch * TOKENS_PER_WORD + 600)
     if args.dry_run:
         for e in todo[:5]:
@@ -167,7 +198,36 @@ def main():
             try:
                 rows = parse_batch(api_call(args.model, system, user, batch_tokens))
             except ApiReject:
-                return None
+                # 主力拒答（内容审查）：本机 llama 逐条兜底
+                if not args.llama_model:
+                    return None
+                rows = []
+                for e in chunk:
+                    r = None
+                    for attempt in range(2):
+                        try:
+                            ss = e.get("senses", [])
+                            src = " | ".join((s.get(args.source_field) or "")[:160] for s in ss[:4]) \
+                                or "[词]（编写 1-2 条释义）"
+                            out = llama_call(args.llama_model, system,
+                                f"把{args.language_name}词条的释义翻译成简洁的中文词典释义。"
+                                f"输出 {{\"word\": \"{e['headword']}\", \"zh\": [每个义项一句中文]}}，只输出这个 JSON 对象。\n"
+                                f"{e['headword']} :: {src}", 400)
+                            r = parse_batch(f"[{out}]")
+                            if r and r[0]["word"] == e["headword"]:
+                                r = [r[0]]
+                                break
+                            r = None
+                        except Exception as ex:
+                            common.log(f"  [llama] {e['headword']} 第 {attempt + 1} 次失败: {ex}")
+                            r = None
+                    if not r:
+                        with lock:
+                            with open(work / "llama-failed.txt", "a", encoding="utf-8") as f:
+                                f.write(e["headword"] + "\n")
+                        return None  # 一条救不回整批放弃（保持词序校验语义），重跑再试
+                    rows.extend(r)
+                return rows or None
             except Exception as e:
                 common.log(f"  [warn] 批 {idx} 网络错误(第 {attempt + 1} 次): {e}")
                 time.sleep(5 * (attempt + 1))
