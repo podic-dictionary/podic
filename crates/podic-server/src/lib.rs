@@ -154,6 +154,14 @@ pub fn start_background(data_dir: PathBuf, port: i32) -> i32 {
             return -1;
         }
     };
+    // 交给 tokio 前必须置非阻塞（tokio 文档明确要求）。漏设时 iOS 上 accept 到的
+    // 连接也会继承阻塞标志（BSD accept 不补设 O_NONBLOCK，Android accept4 会），
+    // 慢连接的阻塞 I/O 可占住仅有的 2 个 worker，整个后端永久失去响应——
+    // 锁屏/后台恢复后「每日一句永久 Load failed」的根因
+    if let Err(e) = std_listener.set_nonblocking(true) {
+        plog!("podic set_nonblocking: {e}");
+        return -1;
+    }
     let actual = std_listener.local_addr().map(|a| a.port()).unwrap_or(0);
     if STARTED.set(actual).is_err() {
         return STARTED.get().map(|p| *p as i32).unwrap_or(-1);
