@@ -440,6 +440,7 @@ pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value
         "last_view": core.settings.last_view,
         // 每日一句偏好必须回传：前端整份读改写 levels_by_lang，缺了会把其他语言的选择冲掉
         "daily_sentence": core.settings.daily_sentence,
+        "tts": core.settings.tts,
     })))
 }
 
@@ -484,6 +485,7 @@ pub struct SettingsIn {
     /// 每日一句偏好（按语言存难度层选择）；整段替换，前端发完整 levels_by_lang
     #[serde(default)]
     daily_sentence: Option<podic_core::settings::DailySentencePrefs>,
+    tts: Option<podic_core::settings::TtsSettings>,
 }
 
 fn bad_req(msg: &str) -> ApiError {
@@ -567,6 +569,9 @@ pub async fn save_settings(
     }
     if let Some(v) = &input.last_view {
         candidate.last_view = Some(v.trim().to_string());
+    }
+    if let Some(t) = &input.tts {
+        candidate.tts = Some(t.clone());
     }
     if let Some(d) = &input.daily_sentence {
         candidate.daily_sentence = Some(d.clone());

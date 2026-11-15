@@ -9,6 +9,7 @@ pub mod packs;
 pub mod reader;
 pub mod settings;
 pub mod store;
+pub mod tts;
 pub mod update;
 pub mod vocab_test;
 

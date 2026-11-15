@@ -52,6 +52,9 @@ pub struct AppState {
     /// 每日一句抽词域缓存：key = lang|pack_id|version → 分层后的词头域
     /// （en 冷构建 ~250ms；最多存两个语种，词典变更时按 lang 前缀失效）
     pub daily_domains: Arc<Mutex<HashMap<String, Arc<Vec<podic_core::vocab_test::Unit>>>>>,
+    /// TTS 模型安装任务表与取消句柄
+    pub tts_tasks: Arc<crate::tts_routes::TtsTaskStore>,
+    pub tts_cancel: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 pub type SharedCore = AppState;

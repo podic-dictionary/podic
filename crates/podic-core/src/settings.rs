@@ -73,6 +73,33 @@ pub struct DailySentencePrefs {
     pub levels_by_lang: std::collections::HashMap<String, DailyLevelPref>,
 }
 
+/// 端侧 TTS 设置：下载源 + 默认语速 + 按语言的使用偏好
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TtsSettings {
+    #[serde(default)]
+    pub source: crate::tts::TtsSource,
+    /// normal | slow（全局默认；朗读按钮的菜单只覆盖单次）
+    #[serde(default = "default_tts_speed")]
+    pub default_speed: String,
+    /// 按语言：provider = auto | system | offline（auto = 已装模型优先，否则系统）
+    #[serde(default)]
+    pub languages: std::collections::HashMap<String, TtsLangPref>,
+}
+
+fn default_tts_speed() -> String {
+    "normal".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TtsLangPref {
+    #[serde(default = "default_tts_provider")]
+    pub provider: String,
+}
+
+fn default_tts_provider() -> String {
+    "auto".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
@@ -91,6 +118,9 @@ pub struct Settings {
     /// 每日一句偏好（缺省 = 各语言 auto）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_sentence: Option<DailySentencePrefs>,
+    /// 端侧 TTS 引擎设置（缺省 = github 源/原速/auto）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts: Option<TtsSettings>,
 }
 
 impl Default for Settings {
@@ -101,6 +131,7 @@ impl Default for Settings {
             languages: default_languages(),
             last_view: None,
             daily_sentence: None,
+            tts: None,
         }
     }
 }

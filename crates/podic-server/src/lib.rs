@@ -1,6 +1,7 @@
 //! podic-server 库入口：装配 AppState / 路由，供桌面 bin 与移动端壳（podic-mobile）复用。
 
 pub mod daily_routes;
+mod tts_routes;
 pub mod error;
 pub mod log;
 pub mod reader_routes;
@@ -51,6 +52,8 @@ pub fn init_state(data_dir: &Path) -> Result<AppState, Box<dyn std::error::Error
         ai_tasks: Arc::new(Mutex::new(HashMap::new())),
         task_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         daily_domains: Arc::new(Mutex::new(HashMap::new())),
+        tts_tasks: Arc::new(crate::tts_routes::TtsTaskStore::default()),
+        tts_cancel: Arc::new(Mutex::new(HashMap::new())),
     })
 }
 
@@ -97,6 +100,13 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         )
         .route("/api/vocab-tests/{id}/finish", axum::routing::post(vocab_routes::finish_vocab_test))
         .route("/api/daily-sentence", axum::routing::post(daily_routes::daily_sentence))
+        .route("/api/tts/models", axum::routing::get(tts_routes::models))
+        .route("/api/tts/catalog", axum::routing::get(tts_routes::catalog))
+        .route("/api/tts/speed-test", axum::routing::post(tts_routes::speed_test))
+        .route("/api/tts/install", axum::routing::post(tts_routes::install))
+        .route("/api/tts/tasks", axum::routing::get(tts_routes::tasks))
+        .route("/api/tts/tasks/{id}/cancel", axum::routing::post(tts_routes::cancel_task))
+        .route("/api/tts/models/{model_id}", axum::routing::delete(tts_routes::remove))
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))
@@ -324,4 +334,12 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert_eq!(p3, p1, "重启应复用原端口");
     }
+}
+
+/// 已装模型的版本目录（podic-mobile FFI 用）
+pub fn tts_model_path(data_dir: &std::path::Path, model_id: &str) -> Option<std::path::PathBuf> {
+    podic_core::tts::installed_models(data_dir)
+        .into_iter()
+        .find(|m| m.model_id == model_id)
+        .map(|m| std::path::PathBuf::from(m.path))
 }

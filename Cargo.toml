@@ -18,6 +18,8 @@ tower-http = { version = "0.6", features = ["fs", "cors"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 sha2 = "0.10"
 flate2 = "1"
+tar = "0.4"
+bzip2 = { version = "0.4", features = ["static"] }
 unicode-normalization = "0.1"
 
 [profile.release]
