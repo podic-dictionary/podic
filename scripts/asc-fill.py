@@ -341,24 +341,28 @@ AGE_ATTRS = {
     # 2025 新增必填项（漏一个整个 PATCH 409；socialMedia 是布尔型）
     "socialMedia": False,
 }
-api("PATCH", f"/v1/ageRatingDeclarations/{ard_id}",
-    {"data": {"type": "ageRatingDeclarations", "id": ard_id, "attributes": AGE_ATTRS}})
-print("[4] 年龄分级问卷（全否 => 4+）✓")
+ar = api("PATCH", f"/v1/ageRatingDeclarations/{ard_id}",
+    {"data": {"type": "ageRatingDeclarations", "id": ard_id, "attributes": AGE_ATTRS}},
+    raise_on_error=False)
+# 已填过且被版本状态锁定时 409：数据没变，不算失败
+print("[4] 年龄分级问卷（全否 => 4+）✓" if "__err" not in ar else "[4] 年龄分级问卷锁定（沿用已填内容）")
 
 # ---------- 5. 分类 + 隐私政策 + 支持 URL ----------
 # appCategories 的资源 id 就是枚举名（REFERENCE/EDUCATION…），attributes 里没有 name 字段
-api("PATCH", f"/v1/appInfos/{info_id}",
+cat = api("PATCH", f"/v1/appInfos/{info_id}",
     {"data": {"type": "appInfos", "id": info_id, "relationships": {
         "primaryCategory": {"data": {"type": "appCategories", "id": "REFERENCE"}},
-        "secondaryCategory": {"data": {"type": "appCategories", "id": "EDUCATION"}}}}})
-print("[5] 分类 Reference/Education ✓")
+        "secondaryCategory": {"data": {"type": "appCategories", "id": "EDUCATION"}}}}},
+    raise_on_error=False)
+print("[5] 分类 Reference/Education ✓" if "__err" not in cat else "[5] 分类锁定（沿用已填内容）")
 # 隐私政策 URL：appInfoLocalization 属性
 for locale in list(have):
     il = info_by_locale.get(locale)
     if il:
         api("PATCH", f"/v1/appInfoLocalizations/{il}",
             {"data": {"type": "appInfoLocalizations", "id": il,
-                      "attributes": {"privacyPolicyUrl": PRIVACY_URL}}})
+                      "attributes": {"privacyPolicyUrl": PRIVACY_URL}}},
+            raise_on_error=False)
 print("[5] 隐私政策 URL ✓")
 
 # ---------- 6. 关联 build（取 latest VALID，版本无 build 时才挂）----------
