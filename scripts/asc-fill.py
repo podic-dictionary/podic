@@ -131,7 +131,8 @@ def api(method, path, body=None, raw=None, raw_type=None, raise_on_error=True):
 
 # ---------- 1. 找可编辑版本；没有就按 --create-version 建（过审后自动发布）----------
 versions = api("GET", f"/v1/apps/{APP_ID}/appStoreVersions")["data"]
-editable = [v for v in versions if v["attributes"]["appStoreState"] == "PREPARE_FOR_SUBMISSION"]
+# DEVELOPER_REJECTED（撤审换构建）也是可编辑状态
+editable = [v for v in versions if v["attributes"]["appStoreState"] in ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED")]
 if not editable:
     create_ver = opt("--create-version")
     if not create_ver:
