@@ -105,10 +105,17 @@ def main():
     entries, uploads = [], []
     for lang, (_, db_path) in by_lang.items():
         if args.lang and lang not in args.lang:
-            # 非本次目标语言：不重压缩不上传，metainfo 原样并入 manifest（保持全量）
-            prev = fetch_remote_meta(args.tag, lang) if args.upload else \
-                json.load(open(packs_dir / f"{lang}-metainfo.json", encoding="utf-8")) \
-                if (packs_dir / f"{lang}-metainfo.json").exists() else None
+            # 非本次目标语言：不重压缩不上传，metainfo 原样并入 manifest（保持全量）。
+            # 远端与本地取版本更高者：连发多语言时 fetch_remote_meta 会命中
+            # release 资产 CDN 缓存拿到上一版（fr 发完紧接发 ja，ja 跑时把 fr
+            # 覆盖回 0.2.0 的踩踏即此），本地 metainfo 是本机刚写的新值
+            local_meta_path = packs_dir / f"{lang}-metainfo.json"
+            local_prev = json.load(open(local_meta_path, encoding="utf-8")) if local_meta_path.exists() else None
+            remote_prev = fetch_remote_meta(args.tag, lang) if args.upload else None
+            prev = None
+            for cand in (remote_prev, local_prev):
+                if cand and (prev is None or version_key(cand["version"]) > version_key(prev["version"])):
+                    prev = cand
             if prev:
                 entries.append(prev)
             else:
