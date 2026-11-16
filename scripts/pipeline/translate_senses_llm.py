@@ -93,8 +93,10 @@ def parse_batch(text: str) -> list[dict] | None:
         zh = d.get("zh")
         if not isinstance(zh, list) or not zh:
             return None
-        clean = [z.strip() for z in zh if isinstance(z, str) and z.strip()]
-        if not clean:
+        # 空位保留为 ""：模型输出的数组位置与义项一一对应，删空位会让后续
+        # 义的译文整体前移一位（曾把第三义写进第二义），宁可保留占位
+        clean = [z.strip() if isinstance(z, str) else "" for z in zh]
+        if not any(clean):
             return None
         out.append({"word": d["word"].strip(), "zh": clean})
     return out
@@ -197,9 +199,12 @@ def main():
             parts = []
             for i, s in enumerate(ss):
                 src = (s.get(args.source_field) or "")[:160]
+                # 无原文/已译的义也占编号位：数组下标必须与义项位置严格对齐，
+                # 跳过会造成后位义整体前移错位
                 if not src:
-                    continue
-                parts.append(f"{i+1}. {src}" + ("（已译，原样保留）" if s.get("zh") else ""))
+                    parts.append(f"{i+1}. （无原文，原样保留）")
+                else:
+                    parts.append(f"{i+1}. {src}" + ("（已译，原样保留）" if s.get("zh") else ""))
             return "\n".join(parts) or "[词]（编写 1-2 条释义）"
         wl = "\n".join(f"- {e['headword']} :: {src_text(e)}" for e in chunk)
         user = (
@@ -241,12 +246,13 @@ def main():
             for attempt in range(3):
                 try:
                     ss = e.get("senses", [])
-                    src = " | ".join((s.get(args.source_field) or "")[:160] for s in ss[:4]) \
-                        or "[词]（编写 1-2 条释义）"
+                    src = " | ".join(
+                        (s.get(args.source_field) or "（无原文）")[:160] for s in ss
+                    ) or "[词]（编写 1-2 条释义）"
                     out = llama_call(args.llama_model, system,
                         f"把{args.language_name}词条的释义翻译成简洁的中文词典释义。"
                         f"输出 {{\"word\": \"{e['headword']}\", \"zh\": [每个义项一句中文]}}，只输出这个 JSON 对象。\n"
-                        f"{e['headword']} :: {src}", 400)
+                        f"{e['headword']} :: {src}", 1600)
                     r = parse_batch(f"[{out}]")
                     if r and r[0]["word"] == e["headword"]:
                         r = [r[0]]
@@ -289,18 +295,23 @@ def main():
     # 写回 entries.jsonl：senses[i].zh 按义项对应填入（不足则填到首义），
     # zh_terms 重建（翻译后的中文要进反查索引）
     n_filled = 0
+    n_misaligned = 0
     out_lines = []
     for e in entries:
         ss = e.get("senses", [])
         zh_list = done.get(e["headword"])
-        # 义项级：有翻译结果的词条都可写（只补缺 zh 的义项，不动已有）
+        # 义项级：有翻译结果的词条都可写（只补缺 zh 的义项，不动已有）。
+        # 数量与义项数不符 = 模型丢位/多给，按位写回必错位，整词放弃等重跑
         if zh_list:
             if not ss:  # 空词条：构造 senses（pos 保留在词条级）
                 e["senses"] = ss = [{"zh": z} for z in zh_list[:3]]
+            elif len(zh_list) != len(ss):
+                n_misaligned += 1
+                continue
             for i, s in enumerate(ss):
                 if s.get("zh"):
                     continue  # 已有中文的义项不动（本次只补缺）
-                z = zh_list[i] if i < len(zh_list) else (zh_list[-1] if len(ss) == 1 else None)
+                z = zh_list[i]
                 if z:
                     s["zh"] = z
             if any(s.get("zh") for s in ss):
@@ -312,7 +323,7 @@ def main():
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(out_lines) + "\n")
     os.replace(tmp, work / "entries.jsonl")
-    common.log(f"写回 entries.jsonl：补 zh {n_filled} 条")
+    common.log(f"写回 entries.jsonl：补 zh {n_filled} 条，数量不符弃写 {n_misaligned} 词")
 
 
 if __name__ == "__main__":

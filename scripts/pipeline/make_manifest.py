@@ -197,6 +197,19 @@ def main():
 
     # manifest.json 每次都重传（含 updated_at）；db.gz / metainfo 只有变化才在 uploads 里
     files = [str(p) for p in uploads] + [str(packs_dir / "manifest.json")]
+
+    # 死链防线：manifest 里每个最新版的 .db.gz 必须已存在于 release（含本次待传的）。
+    # 非目标语言的条目来自远端/本地 metainfo，本地 metainfo 可能是「上次生成了但
+    # 上传失败」的未发布版本——它指向的资产不在 release 里，manifest 一发就是死链
+    remote_assets = {
+        a["name"] for a in json.loads(gh("release", "view", args.tag, "-R", REPO, "--json", "assets").stdout)["assets"]
+    }
+    remote_assets |= {p.name for p in uploads}
+    missing = [e["file"] for e in entries if e.get("file") and e["file"] not in remote_assets]
+    if missing:
+        common.log(f"[abort] manifest 指向但 release 缺资产：{missing}；先发布对应语言或剔除后再传")
+        sys.exit(1)
+
     gh("release", "upload", args.tag, "-R", REPO, *files, "--clobber")
     common.log(f"[upload] {len(files)} 个文件 -> {args.tag}")
 

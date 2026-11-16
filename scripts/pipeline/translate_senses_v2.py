@@ -37,6 +37,16 @@ from translate_senses_llm import api_call, llama_call, parse_batch, ApiReject, s
 
 MAX_RETRY = 3
 NUM_PREFIX = re.compile(r"^\s*\d{1,2}[\.、]\s*")
+# 字母/缩写原文（Ｓ='S；s'、ＭＰ３='MP3'、'ATA'）：没有可翻的内容，入了队列反而
+# 会被 needs_fix 判为待修、清空断点重跑时拿模型的「翻译」覆盖掉合理的原样保留。
+# 判据：无 CJK/假名、长度 ≤12、且没有 ≥2 连小写拉丁字母（gauge/exterminer 这类
+# 真实释义词必须照常翻译）
+def is_letterish(src: str) -> bool:
+    return (
+        len(src) <= 12
+        and not re.search(r"[一-鿿぀-ヿ]", src)
+        and not re.search(r"[a-zａ-ｚ]{2}", src)
+    )
 
 
 def parse_rows(text: str) -> list[dict] | None:
@@ -120,7 +130,9 @@ def main():
         for s in e.get("senses", []):
             is_zh_src = args.src_field == "zh"
             src = (s.get(args.src_field) or s.get("zh") or "").strip() if is_zh_src else (s.get(args.src_field) or "").strip()
-            if src and (args.force_overwrite or needs_fix(s.get("zh"), src, is_zh_src)):
+            if not src or is_letterish(src):
+                continue
+            if args.force_overwrite or needs_fix(s.get("zh"), src, is_zh_src):
                 n_senses += 1
                 h = hashlib.sha1(src.encode()).hexdigest()[:16]
                 src_map.setdefault(h, src)
@@ -232,10 +244,24 @@ def main():
             pool.submit(run, idx, chunk)
     common.log(f"翻译完成：{stats['ok']}，跳过 {stats['skip']}")
 
-    # 写回：按 src 匹配填 zh；合法 zh 不动；编号残留清洗；zh_terms 全量重建
+    # 写回：按 src 匹配填 zh；合法 zh 不动；编号残留清洗；zh_terms 全量重建。
+    # 范围与收集一致（--words-file/--min-senses/--only-untagged）——否则断点里的
+    # 历史译文会覆盖清单外词条
+    def in_scope(e: dict) -> bool:
+        if words_filter is not None and e["headword"] not in words_filter:
+            return False
+        if args.min_senses and len(e.get("senses", [])) < args.min_senses:
+            return False
+        if args.only_untagged and not any(not (s.get("tags") or s.get("kind")) for s in e.get("senses", [])):
+            return False
+        return True
+
     n_fill = n_strip = 0
     out_lines = []
     for e in entries:
+        if not in_scope(e):
+            out_lines.append(json.dumps(e, ensure_ascii=False))
+            continue
         ss = e.get("senses", [])
         for s in ss:
             is_zh_src = args.src_field == "zh"
