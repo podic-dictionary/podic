@@ -19,6 +19,13 @@
 - 不要把 AI 助手加为 git coauthor。
 - 公开内容（代码/文档/release）不得包含私人 hostname、IP、API key，必要时用占位符。
 
+## 设置读取
+
+- 组件内读设置走 `SettingsContext`；组件外的高频读取（每帧挂载的按钮等）用 `src/lib/settingCache.ts` 的 `makeSettingCache`（版本守卫 + 保存广播）。
+- 禁止手写 `let xCache + xLoading ??= getSettings()` 一次性缓存：在途加载晚归会覆盖刚保存的值，且没有变更通知、UI 无从发现（曾致慢速倍率「设置改 0.5 朗读仍 0.75」）。TTL 自愈型缓存（如 modelsCache 的 30s 过期）不受此限。
+- 保存路径必须「服务器保存成功后 set()」，失败不上屏也不更新缓存（按钮回弹就是失败反馈）。
+- 构建时 `scripts/check-frontend-caches.sh` 挡回归（挂在 `pnpm build`）。
+
 ## 交互反馈
 
 - **用户操作的变化必须能在当前页面直接感知**：按钮点击后要有 loading 态（禁用 + Spinner/文案变化）；操作结果（成功/失败/无数据）用弹窗（`NoticeDialog`）或按钮附近的内联变化展示，不要只写在页面顶端——用户可能根本看不到。

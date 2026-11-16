@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && bash scripts/check-frontend-caches.sh && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

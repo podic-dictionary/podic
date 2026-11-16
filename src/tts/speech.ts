@@ -4,6 +4,7 @@
 // 旧请求的迟到事件被 request_id 过滤
 import type { Lang } from "../types";
 import { getSettings, ttsModels, type TtsInstalled } from "../api";
+import { makeSettingCache } from "../lib/settingCache";
 
 export type SpeechSpeed = "normal" | "slow";
 
@@ -89,48 +90,34 @@ export function setSessionSpeed(s: SpeechSpeed) {
   sessionSpeed = s;
 }
 
-// 持久化的默认语速（settings.tts.default_speed）：读一次缓存，设置页保存时更新
-let defaultSpeedCache: SpeechSpeed | null = null;
-let defaultSpeedLoading: Promise<SpeechSpeed> | null = null;
+// 持久化的默认语速（settings.tts.default_speed）：settingCache（版本守卫+广播）
+const defaultSpeedCache = makeSettingCache<SpeechSpeed>(async () => {
+  const s = await getSettings();
+  return s.tts?.default_speed === "slow" ? "slow" : "normal";
+}, "normal");
 export function defaultSpeed(): Promise<SpeechSpeed> {
-  if (defaultSpeedCache) return Promise.resolve(defaultSpeedCache);
-  defaultSpeedLoading ??= getSettings()
-    .then((s) => {
-      defaultSpeedCache = s.tts?.default_speed === "slow" ? "slow" : "normal";
-      return defaultSpeedCache;
-    })
-    .catch(() => "normal" as SpeechSpeed);
-  return defaultSpeedLoading;
+  return defaultSpeedCache.get();
 }
 export function setDefaultSpeedCache(s: SpeechSpeed) {
-  defaultSpeedCache = s;
+  defaultSpeedCache.set(s);
 }
 
-// 持久化的慢速倍率（settings.tts.slow_rate，0.2~0.9）：读一次缓存 + 变更订阅。
-// 只有缓存+无订阅时，设置页保存失败/时序错开会让所有朗读按钮一直用旧值且
-// 用户无从发现——慢速按钮的倍率标签现在订阅变更实时刷新
-let slowRateCache: number | null = null;
-let slowRateLoading: Promise<number> | null = null;
-const slowRateListeners = new Set<(r: number) => void>();
+// 持久化的慢速倍率（settings.tts.slow_rate，0.2~0.9）：settingCache（版本守卫+广播）。
+// 慢速按钮的倍率标签订阅变更实时刷新，配置错了自己就能看出来
+const slowRateCache = makeSettingCache<number>(async () => {
+  const s = await getSettings();
+  const r = s.tts?.slow_rate;
+  return typeof r === "number" && r >= 0.2 && r <= 0.9 ? r : 0.75;
+}, 0.75);
 export function slowRate(): Promise<number> {
-  if (slowRateCache !== null) return Promise.resolve(slowRateCache);
-  slowRateLoading ??= getSettings()
-    .then((s) => {
-      const r = s.tts?.slow_rate;
-      slowRateCache = typeof r === "number" && r >= 0.2 && r <= 0.9 ? r : 0.75;
-      return slowRateCache;
-    })
-    .catch(() => 0.75);
-  return slowRateLoading;
+  return slowRateCache.get();
 }
 export function setSlowRateCache(r: number) {
-  slowRateCache = r;
-  slowRateListeners.forEach((l) => l(r));
+  slowRateCache.set(r);
 }
 /** 订阅慢速倍率变化（设置页保存成功时触发）；返回取消函数 */
 export function onSlowRateChange(l: (r: number) => void): () => void {
-  slowRateListeners.add(l);
-  return () => slowRateListeners.delete(l);
+  return slowRateCache.subscribe(l);
 }
 
 let seq = 0;
