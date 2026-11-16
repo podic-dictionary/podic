@@ -42,6 +42,7 @@ def llama_call(model: str, system: str, user: str, max_tokens: int) -> str:
     qwen3 系模板可能输出 <think>…</think>，剥离后返回"""
     base = os.environ.get("LLAMA_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
     body = {"model": model, "max_tokens": max_tokens, "temperature": 0,
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     req = urllib.request.Request(f"{base}/v1/chat/completions", json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
