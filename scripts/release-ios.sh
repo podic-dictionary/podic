@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 MAC="${PODIC_MAC:-mbp.x.felix021.cn}"
 RIG='~/code/podic-ios-build'            # Mac 侧工作副本（~ 留给远端 shell 展开，别本地展开）
 RCODESIGN="${RCODESIGN:-$HOME/code/oh-my-term/gitea/oh-my-term/_work/target/apple-codesign-root/bin/rcodesign}"
+[ -x "$RCODESIGN" ] || RCODESIGN="$(command -v rcodesign || true)"   # 旧默认路径没了就退回 PATH 里的 cargo 安装
 SIGNER=~/.config/podic/apple-distribution-signer.pem
 PROFILE=~/.config/podic/podic_appstore.mobileprovision
 ENTITLEMENTS=ios/entitlements.plist

@@ -5,9 +5,10 @@ import { deleteOverlay, getOverlay, saveOverlay, type OverlayEntry } from "../ap
 import ConfirmDialog from "./ConfirmDialog";
 import ModelPicker from "./ModelPicker";
 import Markdown from "./Markdown";
+import SpeakButton from "./SpeakButton";
 import { CopyIcon, TrashIcon } from "./icons";
 import { copyText } from "./clipboard";
-import type { Entry } from "../types";
+import type { Entry, Lang } from "../types";
 import { entrySummary } from "./entrySummary";
 
 const TABS: { id: "explain" | "examples" | "fallback"; label: string; hint: string }[] = [
@@ -44,7 +45,7 @@ function copyableText(tab: string, text: string): string {
   return list.map((s, i) => `${i + 1}. ${s.text}${s.zh ? `\n   ${s.zh}` : ""}`).join("\n");
 }
 
-function ExamplesView({ text }: { text: string }) {
+function ExamplesView({ text, lang }: { text: string; lang: Lang }) {
   const list = useMemo(() => tryParseExamples(text), [text]);
   if (!list) return <Markdown text={text} />;
   return (
@@ -54,7 +55,10 @@ function ExamplesView({ text }: { text: string }) {
           key={i}
           className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
-          <p className="text-zinc-800 dark:text-zinc-100">{s.text}</p>
+          <p className="text-zinc-800 dark:text-zinc-100">
+            {s.text}
+            <SpeakButton text={s.text} lang={lang} />
+          </p>
           {s.zh && <p className="mt-0.5 text-zinc-500 dark:text-zinc-400">{s.zh}</p>}
         </li>
       ))}
@@ -269,7 +273,7 @@ export default function AiPanel({ entry }: { entry: Entry }) {
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       {text && (
         <div className="mt-2">
-          {tab === "examples" ? <ExamplesView text={text} /> : <Markdown text={text} />}
+          {tab === "examples" ? <ExamplesView text={text} lang={entry.lang} /> : <Markdown text={text} />}
         </div>
       )}
 

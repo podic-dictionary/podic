@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import { useSettings } from "../SettingsContext";
 import { completeAndSave, isFailedWord, wordish } from "../lib/aiComplete";
 import ModelPicker from "./ModelPicker";
@@ -9,17 +10,24 @@ export default function FallbackCard({
   query,
   lang,
   onSaved,
+  allowAuto = true,
+  triedRef,
 }: {
   query: string;
   lang: string;
   /** 入库成功后通知父级重查（EntryCard 替换本卡） */
   onSaved: () => void;
+  /** 是否允许自动触发 AI 补全。语言切换的自动重查传 false：用户没主动查过
+   * 这个词，默认烧 AI 不合适，也让「切语言 → 结果闪动」的补全回路失去起点 */
+  allowAuto?: boolean;
+  /** 已自动尝试过的查询键，父级持有：本卡会随重查的 loading 卸载再挂载，
+   * 组件内的记录会清零导致重复自动触发（曾致结果区反复闪烁），提到父级存续 */
+  triedRef: MutableRefObject<Set<string>>;
 }) {
   const { aiChoice, setAiChoice, autoComplete } = useSettings();
   // idle=未触发 | running=AI 生成中 | failed=失败（原因可见，可重试）
   const [phase, setPhase] = useState<"idle" | "running" | "failed">("idle");
   const [errMsg, setErrMsg] = useState("");
-  const startedKey = useRef(""); // 已自动尝试过的查询键（关→开不重复自动触发）
   const inflightKey = useRef(""); // 在途请求的查询键（手动请求中切回自动不会重复发起）
   const qRef = useRef(query); // 过期回调防护：AI 返回时查询已变则只入库、不重查界面
 
@@ -27,7 +35,7 @@ export default function FallbackCard({
   qRef.current = q;
   const eligible = wordish(q, lang);
   const blacklisted = isFailedWord(lang, q);
-  const auto = Boolean(aiChoice.providerId) && eligible && !blacklisted && autoComplete;
+  const auto = allowAuto && Boolean(aiChoice.providerId) && eligible && !blacklisted && autoComplete;
 
   const run = (fresh: boolean, myQ: string) => {
     if (!aiChoice.providerId) return;
@@ -64,8 +72,8 @@ export default function FallbackCard({
 
   useEffect(() => {
     const key = `${lang}:${q}`;
-    if (!auto || startedKey.current === key || inflightKey.current === key) return;
-    startedKey.current = key;
+    if (!auto || triedRef.current.has(key) || inflightKey.current === key) return;
+    triedRef.current.add(key);
     run(false, q); // fresh:false 吃缓存；解析失败的重试才 fresh:true 绕开坏缓存
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, q, auto]);

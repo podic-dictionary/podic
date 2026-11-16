@@ -12,12 +12,17 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // 当前结果是否允许 AI 自动补全（用户主动查词才允许；切语言自动重查/AI 入库后的
+  // 重查不允许——后者曾与 FallbackCard 卸载重挂组成回路，结果区反复闪烁）
+  const [aiAutoAllowed, setAiAutoAllowed] = useState(true);
+  // 已自动补全过的查询键：FallbackCard 随 loading 卸载重挂，键必须由父级持有
+  const autoTried = useRef(new Set<string>());
   const reqSeq = useRef(0); // 主查询竞态防护：慢响应/清空/切语言后旧请求不得写状态
 
   // 切语言：输入框有内容就用新语言重查，否则清空结果
   useEffect(() => {
     if (query.trim()) {
-      onSearch(query);
+      onSearch(query, undefined, false, "auto");
     } else {
       setResults(null);
       setError("");
@@ -26,7 +31,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
   }, [lang]);
 
   const onSearch = useCallback(
-    async (q: string, l?: Lang, exact = false) => {
+    async (q: string, l?: Lang, exact = false, origin: "user" | "auto" = "user") => {
       if (!q.trim()) return;
       // 点了别的语言的历史词条：切语言后由 [lang] effect 用新语言重查
       if (l && l !== lang) {
@@ -35,6 +40,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         return;
       }
       const mine = ++reqSeq.current;
+      setAiAutoAllowed(origin === "user");
       setLoading(true);
       setQuery(q);
       setError("");
@@ -137,10 +143,16 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         {loading && <p className="text-sm text-zinc-400">查询中…</p>}
         {error && <p className="text-sm text-red-500">{error}</p>}
         {results !== null && results.length === 0 && !loading && (
-          <FallbackCard query={query} lang={lang} onSaved={() => onSearch(query)} />
+          <FallbackCard
+            query={query}
+            lang={lang}
+            allowAuto={aiAutoAllowed}
+            triedRef={autoTried}
+            onSaved={() => onSearch(query, undefined, false, "auto")}
+          />
         )}
         {!loading && !error && results !== null && results.length > 0 && !hasExact && (
-          <AiCompleteBar query={query} lang={lang} onSaved={() => onSearch(query)} />
+          <AiCompleteBar query={query} lang={lang} onSaved={() => onSearch(query, undefined, false, "auto")} />
         )}
         {results?.map((e, i) => (
           <div key={`${e.lang}-${e.entry_id}-${i}`} className="podic-enter" style={{ animationDelay: `${Math.min(i, 8) * 55}ms` }}>
