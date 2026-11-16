@@ -17,6 +17,7 @@ zh==外文原文、纯 ASCII zh（ECDICT 英文残留）。
 用法: python3 translate_senses_v2.py --lang ja --src-field en [--model glm-5.3-flash]
       [--batch 40] [--concurrency 4] [--limit N] [--dry-run]
       en 包用 --src-field zh --src-is-zh（zh 本身是英文残留，当原文翻）
+      --limit 只限本轮新翻译的条数；写回会应用断点里的全部历史结果
 """
 
 import argparse
@@ -37,16 +38,9 @@ from translate_senses_llm import api_call, llama_call, parse_batch, ApiReject, s
 
 MAX_RETRY = 3
 NUM_PREFIX = re.compile(r"^\s*\d{1,2}[\.、]\s*")
-# 字母/缩写原文（Ｓ='S；s'、ＭＰ３='MP3'、'ATA'）：没有可翻的内容，入了队列反而
-# 会被 needs_fix 判为待修、清空断点重跑时拿模型的「翻译」覆盖掉合理的原样保留。
-# 判据：无 CJK/假名、长度 ≤12、且没有 ≥2 连小写拉丁字母（gauge/exterminer 这类
-# 真实释义词必须照常翻译）
-def is_letterish(src: str) -> bool:
-    return (
-        len(src) <= 12
-        and not re.search(r"[一-鿿぀-ヿ]", src)
-        and not re.search(r"[a-zａ-ｚ]{2}", src)
-    )
+# 字母/缩写原文（Ｓ='S；s'、ＭＰ３='MP3'）不做收集侧豁免：Ms、COVID-19 这类
+# 缩写有真实可译含义，按大小写猜「无可翻」会误伤。原样保留的正当防线在写回
+# 校验（needs_fix 拒写无汉字/等于原文的译文），Ｓ 们最多浪费一次模型调用
 
 
 def parse_rows(text: str) -> list[dict] | None:
@@ -130,7 +124,7 @@ def main():
         for s in e.get("senses", []):
             is_zh_src = args.src_field == "zh"
             src = (s.get(args.src_field) or s.get("zh") or "").strip() if is_zh_src else (s.get(args.src_field) or "").strip()
-            if not src or is_letterish(src):
+            if not src:
                 continue
             if args.force_overwrite or needs_fix(s.get("zh"), src, is_zh_src):
                 n_senses += 1

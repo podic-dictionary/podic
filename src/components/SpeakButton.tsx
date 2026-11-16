@@ -1,30 +1,99 @@
 import { useEffect, useRef, useState } from "react";
 import type { Lang } from "../types";
 import {
-  hasShellBridge, installedModels, offlineModelFor, onSlowRateChange, slowRate, speak,
-  systemVoiceAvailable, type SpeakHandle,
+  defaultSpeed, hasShellBridge, installedModels, offlineModelFor, onSlowRateChange,
+  peekDefaultSpeed, peekSlowRate, slowRate, speak, systemVoiceAvailable,
+  type SpeakHandle, type SpeechSpeed,
 } from "../tts/speech";
 
-/// 朗读按钮组：喇叭 = 默认语速；带倍率标的喇叭 = 慢速（跟读学习）。
-/// 播放中再点同一按钮停止。通道由 speech 控制器决定：壳内端侧引擎（已装该
-/// 语言模型时）/ 系统 TTS / 浏览器 Web Speech；系统没语音且无模型时壳内显示
-/// 「下载语音」入口（跳设置页），浏览器隐藏。
-/// 慢速按钮的倍率标签实时订阅设置变更（设置页保存成功即刷新，不再出现
+/** 单个朗读按钮（普通/慢速共用）。speaking = 正在播的这一档 */
+function SpeakBtn({
+  speed, speaking, rate, onClick,
+}: {
+  speed: SpeechSpeed;
+  speaking: boolean;
+  /** 慢速实际倍率（标签显示）；普通档无标 */
+  rate?: number;
+  onClick: (speed: SpeechSpeed) => void;
+}) {
+  const isSlow = speed === "slow";
+  return (
+    <button
+      onClick={() => onClick(speed)}
+      title={
+        speaking
+          ? `停止${isSlow ? "慢速" : ""}朗读`
+          : isSlow
+            ? `慢速朗读（当前 ${rate}×，可在 设置→语音引擎 调整）`
+            : "按默认语速朗读"
+      }
+      aria-label={isSlow ? "慢速朗读" : "朗读发音"}
+      className={`inline-flex select-none items-center gap-0.5 align-middle transition-colors ${
+        isSlow ? "rounded-md px-1 py-0.5" : "p-1.5 -m-1.5"
+      } ${
+        speaking
+          ? isSlow
+            ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+            : "text-emerald-600 dark:text-emerald-400"
+          : "text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+      } ${isSlow && !speaking ? "hover:bg-zinc-100 dark:hover:bg-zinc-800" : ""}`}
+    >
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden>
+        <path d="M3 9v6h4l5 5V4L7 9H3z" />
+        {isSlow ? (
+          /* 蜗牛壳旋纹：逐圈放大的四分之一圆弧，与普通喇叭的声波明显区分 */
+          speaking ? (
+            <path d="M16.2 9.7a3 3 0 1 0 3 4.3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          ) : (
+            <path
+              d="M15.6 12.6a1 1 0 0 1 1-1 1.8 1.8 0 0 1 1.8 1.8 2.6 2.6 0 0 1-2.6 2.6 3.4 3.4 0 0 1-3.4-3.4 4.2 4.2 0 0 1 4.2-4.2 5 5 0 0 1 5 5"
+              fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+            />
+          )
+        ) : (
+          speaking ? null : (
+            <path d="M16.5 12a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z" />
+          )
+        )}
+      </svg>
+      {isSlow && <span className="text-[10px] font-medium leading-none tabular-nums">{rate}×</span>}
+      {speaking && (
+        <span className="flex items-end gap-[2px]" aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="podic-wave w-[2.5px] rounded-full bg-current"
+              style={{ height: 13, animationDelay: `${i * 0.15}s` }}
+            />
+          ))}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/// 朗读按钮组：喇叭 = 默认语速（设置里的「默认语速」为慢速时同样生效）；
+/// 蜗牛纹喇叭 + 倍率标（如 0.75×）= 慢速。同一按钮播放中再点停止，点另一个
+/// 按钮直接切换。通道由 speech 控制器决定：壳内端侧引擎（已装该语言模型时）/
+/// 系统 TTS / 浏览器 Web Speech；系统没语音且无模型时壳内显示「下载语音」入口。
+/// 慢速倍率标签实时订阅设置变更（设置页保存成功即刷新，不再出现
 /// 「设置改了 0.5 按钮还是 0.75」这种无从发现的陈旧缓存）
 export default function SpeakButton({ text, lang }: { text: string; lang: Lang }) {
-  // 播放中的按钮：null = 未播放 | "normal" | "slow"
-  const [speaking, setSpeaking] = useState<"normal" | "slow" | null>(null);
+  // 播放中的档位：null = 未播放（与实际语速解耦：普通按钮也可能按设置的默认慢速播）
+  const [speaking, setSpeaking] = useState<SpeechSpeed | null>(null);
   // null = 系统没暴露语音清单，无从判断（默认展示）；false = 确认无该语言语音
   const [hasVoice, setHasVoice] = useState<boolean | null>(null);
   const [hasModel, setHasModel] = useState(false);
-  // 慢速倍率标签（0.75 兜底展示，slowRate() 到位后刷新；订阅保存变更）
-  const [rate, setRate] = useState(0.75);
+  // 慢速倍率标签：先取已加载值（无则 0.75 兜底展示），订阅保存变更刷新
+  const [rate, setRate] = useState(() => peekSlowRate() ?? 0.75);
   const handleRef = useRef<SpeakHandle | null>(null);
-  // 卸载后异步语速才返回时，不得再开播
+  // 卸载后异步返回不得再开播；StrictMode 会 setup→cleanup→setup 重放，
+  // setup 必须复位（否则开发模式一次重放就把按钮永久废掉）
   const aliveRef = useRef(true);
   const inShell = hasShellBridge();
 
   useEffect(() => {
+    aliveRef.current = true;
     let alive = true;
     // 端侧模型只对壳有意义（浏览器无引擎可播）；模型装好后 30s 缓存内即可见
     if (inShell) {
@@ -48,6 +117,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     synth?.addEventListener?.("voiceschanged", recheck);
     return () => {
       alive = false;
+      aliveRef.current = false;
       window.clearTimeout(t);
       unsubRate();
       synth?.removeEventListener?.("voiceschanged", recheck);
@@ -69,12 +139,19 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   const showDownload = inShell && hasVoice === false && !hasModel;
   if (hasVoice === false && !hasModel && !inShell) return null;
 
-  const start = async (speed: "normal" | "slow") => {
+  const start = async (speed: SpeechSpeed) => {
     if (!aliveRef.current) return;
-    // 慢速倍率取当前 state（订阅刷新过），不等待异步——点了就要响
-    const h = speak({ text, lang, speed, rate, provider: "auto" });
-    if (!h) return;
+    // 语速/倍率先取已加载值，未加载完成才等异步（首挂载极小窗口）；
+    // 期间组件卸载/再点由 aliveRef 与 handleRef 校验兜住
+    const ds = peekDefaultSpeed() ?? (await defaultSpeed());
+    const useSpeed = speed === "normal" ? ds : "slow";
+    const useRate = useSpeed === "slow" ? (peekSlowRate() ?? (await slowRate())) : undefined;
+    if (!aliveRef.current) return;
+    // 先停旧再播新：浏览器路径 synth.cancel() 是全局的，先 speak 后 cancel 会把新句一并杀掉
     handleRef.current?.cancel();
+    handleRef.current = null;
+    const h = speak({ text, lang, speed: useSpeed, rate: useRate, provider: "auto" });
+    if (!h) return;
     handleRef.current = h;
     setSpeaking(speed);
     const state = await h.done;
@@ -85,15 +162,14 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     }
   };
 
-  const stop = () => {
-    handleRef.current?.cancel();
-    handleRef.current = null;
-    setSpeaking(null);
-  };
-
-  const onClick = (speed: "normal" | "slow") => {
-    if (speaking) stop();
-    else void start(speed);
+  const onClick = (speed: SpeechSpeed) => {
+    if (speaking === speed) {
+      handleRef.current?.cancel();
+      handleRef.current = null;
+      setSpeaking(null);
+    } else {
+      void start(speed); // 播放另一档：直接切换（start 内先停旧句）
+    }
   };
 
   // 「下载语音」入口：系统无语音也没装模型，引导去 TTS 引擎页
@@ -116,55 +192,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
 
   return (
     <span className="inline-flex items-center align-middle" role="group" aria-label="朗读发音">
-      <button
-        onClick={() => onClick("normal")}
-        title={speaking === "normal" ? "停止朗读" : "按默认语速朗读"}
-        aria-label="朗读发音"
-        className={`inline-flex select-none items-center p-1.5 -m-1.5 align-middle transition-colors ${
-          speaking === "normal"
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400"
-        }`}
-      >
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden>
-          <path d="M3 9v6h4l5 5V4L7 9H3z" />
-          {speaking !== "normal" && (
-            <path d="M16.5 12a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z" />
-          )}
-        </svg>
-        {speaking === "normal" && (
-          <span className="flex items-end gap-[2px]" aria-hidden>
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="podic-wave w-[2.5px] rounded-full bg-current"
-                style={{ height: 13, animationDelay: `${i * 0.15}s` }}
-              />
-            ))}
-          </span>
-        )}
-      </button>
-      <button
-        onClick={() => onClick("slow")}
-        title={speaking === "slow" ? "停止慢速朗读" : `慢速朗读（当前 ${rate}×，可在 设置→语音引擎 调整）`}
-        aria-label="慢速朗读"
-        className={`inline-flex select-none items-center gap-0.5 rounded-md px-1 py-0.5 align-middle transition-colors ${
-          speaking === "slow"
-            ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
-            : "text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800 dark:hover:text-emerald-400"
-        }`}
-      >
-        {/* 慢速 icon：喇叭 + 蜗牛壳旋纹（与默认喇叭区分；数字倍率直接可见 */}
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden>
-          <path d="M3 9v6h4l5 5V4L7 9H3z" />
-          {speaking !== "slow" ? (
-            <path d="M15.6 8.2a4.3 4.3 0 1 0 3.4 6.9l-1.1-1a2.8 2.8 0 1 1-.6-4.2l.9-1.3a4.3 4.3 0 0 0-2.6-.9z" />
-          ) : (
-            <path d="M14.5 7.5a5 5 0 1 0 3.9 8.1l-1.3-1a3.3 3.3 0 1 1-.7-5l1-1.4a5 5 0 0 0-2.9-.7z" />
-          )}
-        </svg>
-        <span className="text-[10px] font-medium leading-none tabular-nums">{rate}×</span>
-      </button>
+      <SpeakBtn speed="normal" speaking={speaking === "normal"} onClick={onClick} />
+      <SpeakBtn speed="slow" speaking={speaking === "slow"} rate={rate} onClick={onClick} />
     </span>
   );
 }

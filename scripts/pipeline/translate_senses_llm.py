@@ -301,12 +301,15 @@ def main():
         ss = e.get("senses", [])
         zh_list = done.get(e["headword"])
         # 义项级：有翻译结果的词条都可写（只补缺 zh 的义项，不动已有）。
-        # 数量与义项数不符 = 模型丢位/多给，按位写回必错位，整词放弃等重跑
+        # 数量与义项数不符 = 模型丢位/多给，按位写回必错位——原样保留整词
+        # （含已有 zh 与 zh_terms）计入输出，等断点重翻；曾用 continue 跳过
+        # append 把整条词条从输出文件里删掉（1,133 条险些静默丢失）
         if zh_list:
             if not ss:  # 空词条：构造 senses（pos 保留在词条级）
                 e["senses"] = ss = [{"zh": z} for z in zh_list[:3]]
             elif len(zh_list) != len(ss):
                 n_misaligned += 1
+                out_lines.append(json.dumps(e, ensure_ascii=False))
                 continue
             for i, s in enumerate(ss):
                 if s.get("zh"):

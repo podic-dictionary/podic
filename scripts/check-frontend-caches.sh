@@ -6,7 +6,9 @@
 # 均曾真实发生（慢速倍率「设置改 0.5 长按仍 0.75」）。TTL 自愈型缓存（modelsCache）豁免。
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bad=$(grep -rn --include='*.ts' --include='*.tsx' -E '\?\?= (getSettings|api)\(' src/ \
+# 两种已知形态：`x ??= getSettings(` 与 `x = getSettings().then`（直接赋值建缓存）。
+# 残留盲区（await 赋值、间接包装等）靠评审与 AGENTS.md 约定兜底，本脚本拦大头
+bad=$(grep -rn --include='*.ts' --include='*.tsx' -E '(\?\?=\s*getSettings\(|=\s*getSettings\(\)\s*\.\s*then)' src/ \
   | grep -v 'src/lib/settingCache.ts' || true)
 if [ -n "$bad" ]; then
   echo "✗ 发现手写一次性设置缓存，请改用 src/lib/settingCache.ts 的 makeSettingCache："

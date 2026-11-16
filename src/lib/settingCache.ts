@@ -22,6 +22,16 @@ export function makeSettingCache<T>(load: () => Promise<T>, fallback: T): Settin
   let version = 0;
   let inFlight: Promise<T> | null = null;
   const listeners = new Set<(v: T) => void>();
+  // 单个订阅者抛异常不得断掉对其他订阅者的广播，也不能把 set()/加载链变成 reject
+  const notify = (v: T) => {
+    listeners.forEach((l) => {
+      try {
+        l(v);
+      } catch {
+        // 订阅方自己的问题，吞掉；组件 setter 正常不会抛
+      }
+    });
+  };
 
   const get = (): Promise<T> => {
     if (value !== null) return Promise.resolve(value);
@@ -32,7 +42,7 @@ export function makeSettingCache<T>(load: () => Promise<T>, fallback: T): Settin
           (loaded) => {
             if (version === startVersion) {
               value = loaded;
-              listeners.forEach((l) => l(loaded));
+              notify(loaded);
             }
             // set() 已在加载期间写入：await 的调用方拿到新值而非陈旧加载结果
             return value ?? loaded;
@@ -53,7 +63,7 @@ export function makeSettingCache<T>(load: () => Promise<T>, fallback: T): Settin
     value = v;
     version++; // 作废在途加载：晚归的旧结果不得覆盖刚保存的值
     inFlight = null;
-    listeners.forEach((l) => l(v));
+    notify(v);
   };
 
   const subscribe = (l: (v: T) => void) => {

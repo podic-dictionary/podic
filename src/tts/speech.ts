@@ -98,6 +98,10 @@ const defaultSpeedCache = makeSettingCache<SpeechSpeed>(async () => {
 export function defaultSpeed(): Promise<SpeechSpeed> {
   return defaultSpeedCache.get();
 }
+/** 默认语速的已加载值（未加载完成时 null）——朗读点击即用时避免异步空窗 */
+export function peekDefaultSpeed(): SpeechSpeed | null {
+  return defaultSpeedCache.peek();
+}
 export function setDefaultSpeedCache(s: SpeechSpeed) {
   defaultSpeedCache.set(s);
 }
@@ -111,6 +115,10 @@ const slowRateCache = makeSettingCache<number>(async () => {
 }, 0.75);
 export function slowRate(): Promise<number> {
   return slowRateCache.get();
+}
+/** 慢速倍率的已加载值（未加载完成时 null）——慢速按钮点击即用时避免异步空窗 */
+export function peekSlowRate(): number | null {
+  return slowRateCache.peek();
 }
 export function setSlowRateCache(r: number) {
   slowRateCache.set(r);
