@@ -15,14 +15,23 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
   // 当前结果是否允许 AI 自动补全（用户主动查词才允许；切语言自动重查/AI 入库后的
   // 重查不允许——后者曾与 FallbackCard 卸载重挂组成回路，结果区反复闪烁）
   const [aiAutoAllowed, setAiAutoAllowed] = useState(true);
+  // 结果是用哪个语言查到的。切语言后首轮渲染时 lang 已变、结果还是旧语言的，
+  // FallbackCard 的自动补全 effect 比 [lang] 重查 effect 先跑，会把旧语言下
+  // 「词形可用」的查询直接发给新语言的 AI——allowAuto 里比对 resultLang 挡住
+  const [resultLang, setResultLang] = useState<Lang>(lang);
   // 已自动补全过的查询键：FallbackCard 随 loading 卸载重挂，键必须由父级持有
   const autoTried = useRef(new Set<string>());
   const reqSeq = useRef(0); // 主查询竞态防护：慢响应/清空/切语言后旧请求不得写状态
+  // 跨语言转交的查询来源（点生词本词条等用户主动行为）：[lang] effect 重查时用它
+  // 还原 user 语义，用完复位；普通的语言切换保持 auto
+  const pendingOrigin = useRef<"user" | "auto">("auto");
 
   // 切语言：输入框有内容就用新语言重查，否则清空结果
   useEffect(() => {
     if (query.trim()) {
-      onSearch(query, undefined, false, "auto");
+      const origin = pendingOrigin.current;
+      pendingOrigin.current = "auto";
+      onSearch(query, undefined, false, origin);
     } else {
       setResults(null);
       setError("");
@@ -35,6 +44,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
       if (!q.trim()) return;
       // 点了别的语言的历史词条：切语言后由 [lang] effect 用新语言重查
       if (l && l !== lang) {
+        pendingOrigin.current = origin; // 用户主动点的词，切过去仍算主动查询
         setQuery(q);
         onLangChange(l);
         return;
@@ -62,6 +72,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
         }
         if (mine !== reqSeq.current) return; // 期间已切查询/清空/切语言：丢弃
         setResults(items);
+        setResultLang(lang);
         // 有结果的查询记入历史（词头 + 首条释义摘要）
         if (items.length > 0) {
           const first = items[0];
@@ -78,6 +89,17 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
     },
     [lang, onLangChange],
   );
+
+  // AI 入库后的重查统一走「最新闭包 + 当前查询」：FallbackCard/AiCompleteBar 卸载后
+  // 迟到的完成回调握着的是旧 onSearch（旧 lang/query 闭包），直接调会把过期查询拉
+  // 回界面——经 ref 取最新实现即可，requery 身份稳定也不引起子卡多余重渲染
+  const onSearchRef = useRef(onSearch);
+  onSearchRef.current = onSearch;
+  const queryRef = useRef(query);
+  queryRef.current = query;
+  const requery = useCallback(() => {
+    onSearchRef.current(queryRef.current, undefined, false, "auto");
+  }, []);
 
   // 其他视图发起的查词（如生词本点词）：切语言逻辑由 onSearch 内部处理
   useEffect(() => {
@@ -146,13 +168,13 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
           <FallbackCard
             query={query}
             lang={lang}
-            allowAuto={aiAutoAllowed}
+            allowAuto={aiAutoAllowed && resultLang === lang}
             triedRef={autoTried}
-            onSaved={() => onSearch(query, undefined, false, "auto")}
+            onSaved={requery}
           />
         )}
         {!loading && !error && results !== null && results.length > 0 && !hasExact && (
-          <AiCompleteBar query={query} lang={lang} onSaved={() => onSearch(query, undefined, false, "auto")} />
+          <AiCompleteBar query={query} lang={lang} onSaved={requery} />
         )}
         {results?.map((e, i) => (
           <div key={`${e.lang}-${e.entry_id}-${i}`} className="podic-enter" style={{ animationDelay: `${Math.min(i, 8) * 55}ms` }}>

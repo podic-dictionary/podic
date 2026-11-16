@@ -18,6 +18,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   // 长按已触发慢速：随后的 click 事件要吞掉（长按结束必发 click）
   const slowFiredRef = useRef(false);
   const pressTimer = useRef<number | undefined>(undefined);
+  // 卸载后异步语速（defaultSpeed/slowRate 首次要拉设置）才返回时，不得再开播
+  const aliveRef = useRef(true);
   const inShell = hasShellBridge();
 
   useEffect(() => {
@@ -43,8 +45,15 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     };
   }, [lang, inShell]);
 
-  // 卸载时停止播放
-  useEffect(() => () => handleRef.current?.cancel(), []);
+  // 卸载时停止播放；长按计时器与异步 start 请求一并作废
+  useEffect(
+    () => () => {
+      aliveRef.current = false;
+      window.clearTimeout(pressTimer.current);
+      handleRef.current?.cancel();
+    },
+    [],
+  );
 
   if (!text) return null;
 
@@ -53,6 +62,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   if (hasVoice === false && !hasModel && !inShell) return null;
 
   const start = async (speed: SpeechSpeed, rate?: number) => {
+    if (!aliveRef.current) return; // 语速异步返回时组件已卸载：不开播
     const h = speak({ text, lang, speed, rate, provider: "auto" });
     if (!h) return;
     handleRef.current?.cancel();
@@ -77,7 +87,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
     pressTimer.current = window.setTimeout(() => {
       slowFiredRef.current = true;
       // 慢速倍率可调（设置→语音引擎）：异步取缓存值再播，徽标用 handle.rate
-      void slowRate().then((r) => start("slow", r));
+      void slowRate().then((r) => { if (aliveRef.current) start("slow", r); });
     }, 450);
   };
   const clearPress = () => window.clearTimeout(pressTimer.current);
@@ -87,7 +97,7 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
       return;
     }
     if (speaking) stop();
-    else void defaultSpeed().then(start);
+    else void defaultSpeed().then((sp) => { if (aliveRef.current) start(sp); });
   };
 
   // 「下载语音」入口：系统无语音也没装模型，引导去 TTS 引擎页

@@ -73,6 +73,10 @@ export default function FallbackCard({
   useEffect(() => {
     const key = `${lang}:${q}`;
     if (!auto || triedRef.current.has(key) || inflightKey.current === key) return;
+    // 键集合封顶（插入序淘汰最旧）：SearchView 常驻不卸载，无界增长没有必要
+    if (triedRef.current.size >= 300) {
+      triedRef.current.delete(triedRef.current.values().next().value as string);
+    }
     triedRef.current.add(key);
     run(false, q); // fresh:false 吃缓存；解析失败的重试才 fresh:true 绕开坏缓存
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,7 +131,9 @@ export default function FallbackCard({
           {aiChoice.providerId && eligible && (
             <div className="action-row mt-2">
               <button
-                onClick={() => run(false, q)}
+                /* 已知解析失败的词（会话内记过失败）服务端缓存多半是坏输出，
+                   首次手动点击就 fresh 绕开，别让用户失败两次才真正重生成 */
+                onClick={() => run(isFailedWord(lang, q), q)}
                 className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-700"
               >
                 AI 补全
