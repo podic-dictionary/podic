@@ -63,8 +63,10 @@ def parse_rows(text: str) -> list[dict] | None:
 
 
 def needs_fix(zh: str | None, src: str, src_is_zh: bool = False) -> bool:
-    """zh 无效判定：空 / 等于原文 / 纯 ASCII（英文残留）/ 带义项编号前缀。
-    src_is_zh（en 包：zh 本身是英文残留当原文翻）时跳过 ==src 判断——恒真无意义"""
+    """zh 无效判定：空 / 等于原文 / 无汉字（英文残留）/ 带义项编号前缀。
+    src_is_zh（en 包：zh 本身是英文残留当原文翻）时跳过 ==src 判断——恒真无意义。
+    无汉字判定不能用 isascii()：模型回吐时常混全角标点（"dad；daddy"），
+    isascii() 为 False 会漏判——ja 37 条片假名残留即此漏网"""
     if not src:
         return False
     z = (zh or "").strip()
@@ -72,7 +74,7 @@ def needs_fix(zh: str | None, src: str, src_is_zh: bool = False) -> bool:
         return True
     if not src_is_zh and z == src.strip():
         return True
-    if z.isascii() and len(z) >= 1:
+    if not re.search(r"[一-鿿]", z):
         return True
     if NUM_PREFIX.match(z):
         return True
@@ -94,16 +96,23 @@ def main():
                     help="写回时 src 有翻译即覆盖（修复形式合法但语义错位的 v1 产物）")
     ap.add_argument("--only-untagged", action="store_true",
                     help="只处理含无 tags 义项的词条（v1 LLM 批翻产物无 tags，原生数据有）")
+    ap.add_argument("--words-file", default="",
+                    help="只处理清单里的 headword（每行一个；v1 translated.jsonl 可直接提取）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     work = common.WORK / args.lang
     entries = [json.loads(l) for l in open(work / "entries.jsonl", encoding="utf-8") if l.strip()]
+    words_filter = None
+    if args.words_file:
+        words_filter = {l.strip() for l in open(args.words_file, encoding="utf-8") if l.strip()}
 
     # 收集需翻的唯一义项原文
     src_map: dict[str, str] = {}  # sha1[:16] -> src
     n_senses = 0
     for e in entries:
+        if words_filter is not None and e["headword"] not in words_filter:
+            continue
         if args.min_senses and len(e.get("senses", [])) < args.min_senses:
             continue
         if args.only_untagged and not any(not (s.get("tags") or s.get("kind")) for s in e.get("senses", [])):
@@ -238,7 +247,9 @@ def main():
             if src and (args.force_overwrite or not zh or needs_fix(zh, src)):
                 h = hashlib.sha1(src.encode()).hexdigest()[:16]
                 z = done.get(h)
-                if z and z != s.get("zh"):
+                # 覆盖前校验译文有效：glm 对部分词会原样返回（fr 49 条中文被
+                # 法文覆盖的回归根源），无效译文宁可保留原值
+                if z and z != s.get("zh") and not needs_fix(z, src):
                     s["zh"] = z
                     n_fill += 1
         if any(s.get("zh") for s in ss):

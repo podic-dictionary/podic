@@ -133,12 +133,12 @@ def main():
     todo = []
     for e in entries:
         ss = e.get("senses", [])
-        if not any(s.get("zh") for s in ss):
-            # 有外文释义 -> 翻译；senses 全空（en 长尾词）-> 由词头直接生成
-            if ss and any(s.get(args.source_field) for s in ss):
-                todo.append(e)
-            elif not ss and args.allow_empty:
-                todo.append(e)
+        # 义项级补齐：任一义项有外文无中文即处理（覆盖整词无 zh 与
+        # 「前几义已译、后几义留空」的历史半译词条）
+        if ss and any(s.get(args.source_field) and not s.get("zh") for s in ss):
+            todo.append(e)
+        elif not ss and args.allow_empty:
+            todo.append(e)
     if args.limit > 0:
         todo = todo[: args.limit]
     common.log(f"总 {len(entries)} 词条，待翻译 {len(todo)}（senses.{args.source_field} -> zh）")
@@ -154,7 +154,12 @@ def main():
                     done[d["word"]] = d["zh"]
                 except Exception:
                     pass
-    todo = [e for e in todo if e["headword"] not in done]
+    # 断点 = 该词完整翻过；若词条仍有缺 zh 的义项（历史半译写回），从断点移除重翻
+    todo = [
+        e for e in todo
+        if e["headword"] not in done
+        or any(s.get(args.source_field) and not s.get("zh") for s in e.get("senses", []))
+    ]
     common.log(f"断点已有 {len(done)}，剩余 {len(todo)}")
 
     if not args.llama_model:
@@ -186,12 +191,21 @@ def main():
             if not ss:  # 空词条：给词头+词性让模型编写
                 pos = "/".join(e.get("pos") or []) or "?"
                 return f"[{pos}]（编写 1-2 条释义）"
-            return " | ".join((s.get(args.source_field) or "")[:160] for s in ss[:4])
+            # 全部义项编号列出（历史 [:4] 截断曾致义项错位/后段留空）；
+            # 已有 zh 的义项标注，模型只补缺项但保持编号对齐
+            parts = []
+            for i, s in enumerate(ss):
+                src = (s.get(args.source_field) or "")[:160]
+                if not src:
+                    continue
+                parts.append(f"{i+1}. {src}" + ("（已译，原样保留）" if s.get("zh") else ""))
+            return "\n".join(parts) or "[词]（编写 1-2 条释义）"
         wl = "\n".join(f"- {e['headword']} :: {src_text(e)}" for e in chunk)
         user = (
             f"把以下{args.language_name}词条的释义翻译成简洁的中文词典释义（保留术语准确性，去掉冗长修辞）；"
             f"标了词性的无释义词条则直接编写中文释义。"
-            f"每个词输出 {{\"word\": 词, \"zh\": [每个义项一句中文]}}，输出 JSON 数组顺序与输入一致。\n\n{wl}"
+            f"每个词输出 {{\"word\": 词, \"zh\": [每个义项一条中文，数量与输入义项严格一致，已译义项原样保留]]}}，"
+            f"输出 JSON 数组顺序与输入一致。\n\n{wl}"
         )
         rows = None
         for attempt in range(MAX_RETRY):
@@ -278,10 +292,13 @@ def main():
     for e in entries:
         ss = e.get("senses", [])
         zh_list = done.get(e["headword"])
-        if zh_list and not any(s.get("zh") for s in ss):
+        # 义项级：有翻译结果的词条都可写（只补缺 zh 的义项，不动已有）
+        if zh_list:
             if not ss:  # 空词条：构造 senses（pos 保留在词条级）
                 e["senses"] = ss = [{"zh": z} for z in zh_list[:3]]
             for i, s in enumerate(ss):
+                if s.get("zh"):
+                    continue  # 已有中文的义项不动（本次只补缺）
                 z = zh_list[i] if i < len(zh_list) else (zh_list[-1] if len(ss) == 1 else None)
                 if z:
                     s["zh"] = z
