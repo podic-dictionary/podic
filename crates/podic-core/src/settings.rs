@@ -94,7 +94,7 @@ pub struct TtsSettings {
     /// normal | slow（全局默认；朗读按钮的菜单只覆盖单次）
     #[serde(default = "default_tts_speed")]
     pub default_speed: String,
-    /// 慢速朗读倍率（0.5~0.9，步长 0.1）：长按朗读按钮与试听·慢速的实际倍速
+    /// 慢速朗读倍率（0.2~0.9）：慢速朗读按钮与试听·慢速的实际倍速
     #[serde(default = "default_tts_slow_rate")]
     pub slow_rate: f64,
     /// 按语言：provider = auto | system | offline（auto = 已装模型优先，否则系统）

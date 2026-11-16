@@ -300,7 +300,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       {/* 默认语速 */}
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">默认朗读语速</h2>
-        <p className="mt-0.5 text-xs text-zinc-400">朗读按钮点一下使用的语速；长按永远读慢速</p>
+        <p className="mt-0.5 text-xs text-zinc-400">无倍率标喇叭使用的语速；带倍率标的喇叭永远是慢速</p>
         <div className="mt-2">
           <Seg
             value={(settings?.default_speed === "slow" ? "slow" : "normal")}
@@ -317,12 +317,12 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">慢速朗读倍率</h2>
         <p className="mt-0.5 text-xs text-zinc-400">
-          长按朗读按钮（词条、例句、每日一句通用）按此倍率放慢，跟读学习发音用；试听·慢速同此倍率
+          带倍率标的慢速喇叭按钮（词条、例句、每日一句通用）按此倍率放慢，跟读学习发音用；试听·慢速同此倍率，改完按钮上的倍率即时刷新
         </p>
         <div className="mt-2">
           <Seg
             value={String(settings?.slow_rate ?? 0.75)}
-            options={[0.5, 0.6, 0.7, 0.75, 0.8, 0.9].map((r) => ({ id: String(r), label: `${r}×` }))}
+            options={[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9].map((r) => ({ id: String(r), label: `${r}×` }))}
             onChange={(v) => void saveTts({ slow_rate: Number(v) })}
           />
         </div>
@@ -332,9 +332,9 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">朗读按钮怎么用</h2>
         <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-zinc-400">
-          <li>· 点一下喇叭：按「默认语速」朗读，播放中再点停止</li>
-          <li>· 长按喇叭（约半秒）：按「慢速倍率」放慢重读，适合跟读辨音</li>
-          <li>· 词条头词、每条例句、每日一句的喇叭都支持这两种操作</li>
+          <li>· 喇叭：按「默认语速」朗读，播放中再点停止</li>
+          <li>· 带倍率标的喇叭（如 0.75×）：按「慢速倍率」放慢重读，适合跟读辨音；倍率可在本页调整</li>
+          <li>· 词条头词、每条例句、每日一句的朗读按钮都是这两个</li>
         </ul>
       </section>
       </>
