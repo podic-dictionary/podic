@@ -389,22 +389,26 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
           {engineLangs.length === 0 && <p className="py-2 text-xs text-zinc-400">暂无可选语言（未装模型且系统无语音）</p>}
           {engineLangs.map((l) => {
             const rawPref = settings?.languages?.[l]?.provider;
-            const pref = rawPref === "system" || rawPref === "offline" ? rawPref : "auto";
+            const hasModel = Boolean(installed?.some((m) => m.languages.includes(l)));
+            // 模型已删（或从未装）：离线档无从生效，回落自动展示（保存的偏好
+            // 不动，装回模型即恢复）
+            const pref = rawPref === "system" || (rawPref === "offline" && hasModel) ? rawPref : "auto";
             return (
               <div key={l} className="py-2.5 first:pt-1 last:pb-0">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
-                  <Seg
-                    value={pref}
-                    options={[
-                      { id: "auto", label: "自动" },
-                      { id: "offline", label: "离线引擎" },
-                      { id: "system", label: "系统 TTS" },
-                    ]}
-                    onChange={(v) => void saveTts({
-                      languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
-                    })}
-                  />
+                  {/* 自动 */}
+                  <button
+                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "auto" } } })}
+                    aria-pressed={pref === "auto"}
+                    className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
+                      pref === "auto"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-600 dark:bg-emerald-950 dark:text-emerald-300"
+                        : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    自动
+                  </button>
                   {/* 自动档的实际引擎一眼可见：有已装模型走端侧，否则系统 */}
                   {pref === "auto" && (
                     <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
@@ -415,6 +419,67 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                       → {installed?.some((m) => m.languages.includes(l)) ? "离线引擎" : "系统 TTS"}
                     </span>
                   )}
+                  {/* 离线引擎：装了模型才有这个档 */}
+                  {hasModel && (
+                  <button
+                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "offline" } } })}
+                    aria-pressed={pref === "offline"}
+                    className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
+                      pref === "offline"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-600 dark:bg-emerald-950 dark:text-emerald-300"
+                        : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    离线引擎
+                  </button>
+                  )}
+                  {/* 系统 TTS 与音色连体：音色属于系统 TTS，非该档置灰 */}
+                  {inShell ? (
+                    <button
+                      onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "system" } } })}
+                      aria-pressed={pref === "system"}
+                      className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
+                        pref === "system"
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-600 dark:bg-emerald-950 dark:text-emerald-300"
+                          : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                      }`}
+                    >
+                      系统 TTS
+                    </button>
+                  ) : (
+                    <div className={`flex items-stretch overflow-hidden rounded-lg border transition-colors ${
+                      pref === "system"
+                        ? "border-emerald-500 dark:border-emerald-600"
+                        : "border-zinc-200 dark:border-zinc-700"
+                    }`}>
+                      <button
+                        onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "system" } } })}
+                        aria-pressed={pref === "system"}
+                        className={`border-r border-zinc-200 bg-white px-2 py-1 text-xs whitespace-nowrap transition-colors dark:border-zinc-700 dark:bg-zinc-900 ${
+                          pref === "system"
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                            : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                        }`}
+                      >
+                        系统 TTS
+                      </button>
+                      <select
+                        value={settings?.languages?.[l]?.voice ?? pickSystemVoice(l)?.name ?? ""}
+                        onChange={(e) => {
+                          const prev = settings?.languages?.[l] ?? { provider: "auto" };
+                          void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...prev, voice: e.target.value || undefined } } });
+                        }}
+                        disabled={pref !== "system"}
+                        title={pref === "system" ? "系统 TTS 的音色" : "切到「系统 TTS」后可选择音色"}
+                        className="min-w-0 max-w-28 truncate border-0 bg-white px-1.5 text-xs text-zinc-600 outline-none disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-900 dark:text-zinc-300"
+                      >
+                        {listSystemVoices(l).map((v) => (
+                          <option key={v.name} value={v.name}>{v.name}</option>
+                        ))}
+                        {!listSystemVoices(l).length && <option value="">（无系统语音）</option>}
+                      </select>
+                    </div>
+                  )}
                   <button
                     onClick={() => void listenLang(l)}
                     disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
@@ -423,27 +488,6 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                     {listenBusy === `lang:${l}` ? "停止" : "试听"}
                   </button>
                 </div>
-                {/* 音色只对系统 TTS 有意义：非 system 档置灰；saved 音色自动档回退系统时仍生效 */}
-                {!inShell && (
-                  <div className="mt-1.5 flex items-center gap-2 pl-[76px]">
-                    <span className="shrink-0 text-xs text-zinc-400">音色</span>
-                    <select
-                      value={settings?.languages?.[l]?.voice ?? pickSystemVoice(l)?.name ?? ""}
-                      onChange={(e) => {
-                        const prev = settings?.languages?.[l] ?? { provider: "auto" };
-                        void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...prev, voice: e.target.value || undefined } } });
-                      }}
-                      disabled={pref !== "system"}
-                      title={pref === "system" ? "系统 TTS 的音色（自动挑在 macOS 会撞辅助功能怪音，选定后不再变）" : "切到「系统 TTS」档后可选择音色"}
-                      className="min-w-0 max-w-44 flex-1 truncate rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-xs text-zinc-600 outline-none disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-                    >
-                      {listSystemVoices(l).map((v) => (
-                        <option key={v.name} value={v.name}>{v.name}</option>
-                      ))}
-                      {!listSystemVoices(l).length && <option value="">（无系统语音）</option>}
-                    </select>
-                  </div>
-                )}
               </div>
             );
           })}
