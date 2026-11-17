@@ -9,7 +9,7 @@ import { parseHash } from "../lib/router";
 import UpdateSourcePicker, { type SourcePreset } from "../components/UpdateSourcePicker";
 import { ChevronLeftIcon, SpinnerIcon, TrashIcon } from "../components/icons";
 import { langDisplayName } from "../langNames";
-import { setDefaultSpeedCache, setSlowRateCache, setLangPrefsCache, invalidateModelsCache, slowRate, speak, systemVoiceAvailable, hasShellBridge, unloadEngine } from "../tts/speech";
+import { setDefaultSpeedCache, setSlowRateCache, setLangPrefsCache, invalidateModelsCache, pickSystemVoice, slowRate, speak, systemVoiceAvailable, hasShellBridge, unloadEngine } from "../tts/speech";
 
 /** 与后端 DEFAULT_TTS_MANIFEST_URL / GHPROXY_PREFIX 一致（测速候选地址用） */
 const TTS_MANIFEST_URL = "https://github.com/podic-dictionary/tts/releases/latest/download/tts-metainfo.json";
@@ -60,6 +60,14 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
   const [delErr, setDelErr] = useState("");
   const [listenBusy, setListenBusy] = useState<string | null>(null);
   const inShell = hasShellBridge();
+  // 系统 voices 异步加载：加载完成（或变化）后重算行内显示的语音名
+  const [voicesTick, setVoicesTick] = useState(0);
+  useEffect(() => {
+    const onVoices = () => setVoicesTick((t) => t + 1);
+    window.speechSynthesis?.addEventListener?.("voiceschanged", onVoices);
+    if (window.speechSynthesis?.getVoices?.().length) setVoicesTick(1);
+    return () => window.speechSynthesis?.removeEventListener?.("voiceschanged", onVoices);
+  }, []);
 
   // 三 tab（朗读/模型/更新源）：hash 驱动（#/settings/tts/models、…/source），
   // 刷新/直链可恢复；切走再切回时 hash 已变（如 #/search），用 sessionStorage
@@ -404,6 +412,11 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                     languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
                   })}
                 />
+                {!inShell && voicesTick > 0 && (
+                  <span className="hidden max-w-24 truncate text-[10px] text-zinc-400 sm:inline" title="系统 TTS 将使用的语音">
+                    {pickSystemVoice(l)?.name}
+                  </span>
+                )}
                 <button
                   onClick={() => void listenLang(l)}
                   disabled={listenBusy !== null && listenBusy !== `lang:${l}`}

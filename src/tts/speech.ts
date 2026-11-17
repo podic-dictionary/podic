@@ -282,6 +282,9 @@ export function speak(opts: {
     const tag = LANG_TAGS[String(opts.lang)] ?? String(opts.lang);
     const u = new SpeechSynthesisUtterance(opts.text);
     u.lang = tag;
+    // 显式挑 voice：只设 lang 时浏览器自动挑会撞 novelty 语音（whisper 等）
+    const pick = pickSystemVoice(String(opts.lang));
+    if (pick && pick.lang.replace("_", "-").toLowerCase().startsWith(tag.toLowerCase())) u.voice = pick;
     u.rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
     const end = new Promise<TtsEvent["state"]>((resolve) => {
       u.onend = () => resolve("ended");
@@ -321,6 +324,25 @@ export function hasShellBridge(): boolean {
 /// 请求壳卸载端侧引擎并释放使用引用（删除模型前调，避免后端 409）
 export function unloadEngine() {
   void callBridge("ttsRequest", JSON.stringify({ op: "unload" }));
+}
+
+/// macOS 的 novelty/语音辅助功能语音（Whisper、Eloquence 系老合成音等）：
+/// lang 标记与正常语音相同，Web Speech 自动挑 voice 时会撞上——听感像
+/// 气声/机械音（「像 whisper 的声调」即撞中 Whisper）。挑 voice 时排除
+const NOVELTY_VOICE = /whisper|bad news|good news|bahh|bells|boing|bubbles|cellos|deranged|hysterical|junior|organ|ralph|superstar|trinoids|wobble|zarvox|eloquence|rocko|sandy|shelley|maged|grandma|grandpa|reed|flo|eddy|albert/i;
+
+/// 挑系统语音：精确语言匹配（localService 优先）> 语言前缀匹配，全程
+/// 排除 novelty 名单；无匹配返回 null（由调用方决定回退）
+export function pickSystemVoice(lang: string): SpeechSynthesisVoice | null {
+  const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
+  if (!synth) return null;
+  const voices = synth.getVoices().filter((v) => !NOVELTY_VOICE.test(v.name));
+  const tag = (LANG_TAGS[lang] ?? lang).toLowerCase();
+  const base = tag.split("-")[0];
+  const exact = voices.filter((v) => v.lang.replace("_", "-").toLowerCase().startsWith(tag));
+  const loose = voices.filter((v) => v.lang.replace("_", "-").toLowerCase().startsWith(base));
+  return exact.find((v) => v.localService) ?? exact[0]
+    ?? loose.find((v) => v.localService) ?? loose[0] ?? null;
 }
 
 /// 系统 TTS 有没有该语言的语音（null = 无法判断）。壳走 ttsAvailable，
