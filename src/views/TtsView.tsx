@@ -80,12 +80,18 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       if (t === "models" || t === "source") {
         setTabState(t);
         try { sessionStorage.setItem("podic.tts.tab", t); } catch { /* 同上 */ }
+      } else {
+        // 第三段消失 = 回朗读 tab（点 tab 后 hashchange 到这里；直链兜底同）。
+        // 存储不动：这里只是「当前页回朗读」，别抹掉深层记忆
+        setTabState("speech");
       }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const setTab = (t: "speech" | "models" | "source") => {
+    // 立即切状态：hash 第三段消失（回朗读）时 onHash 的分支靠不上，不能只依赖事件
+    setTabState(t);
     window.location.hash = `#/settings/tts${t === "speech" ? "" : `/${t}`}`;
     try { sessionStorage.setItem("podic.tts.tab", t); } catch { /* 同上 */ }
   };
