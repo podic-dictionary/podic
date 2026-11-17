@@ -114,6 +114,11 @@ fn default_tts_slow_rate() -> f64 {
 pub struct TtsLangPref {
     #[serde(default = "default_tts_provider")]
     pub provider: String,
+    /// 系统 TTS 指定音色名（浏览器 speechSynthesis 的 voice 名）；
+    /// 不填 = 自动挑（默认音色优先，排除辅助功能语音）。浏览器自动挑
+    /// 在 macOS 会撞 Whisper/唱歌系怪音，用户显式选定后不再猜
+    #[serde(default)]
+    pub voice: Option<String>,
 }
 
 fn default_tts_provider() -> String {

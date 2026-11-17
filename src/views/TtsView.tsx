@@ -9,7 +9,7 @@ import { parseHash } from "../lib/router";
 import UpdateSourcePicker, { type SourcePreset } from "../components/UpdateSourcePicker";
 import { ChevronLeftIcon, SpinnerIcon, TrashIcon } from "../components/icons";
 import { langDisplayName } from "../langNames";
-import { setDefaultSpeedCache, setSlowRateCache, setLangPrefsCache, invalidateModelsCache, pickSystemVoice, slowRate, speak, systemVoiceAvailable, hasShellBridge, unloadEngine } from "../tts/speech";
+import { setDefaultSpeedCache, setSlowRateCache, setLangPrefsCache, invalidateModelsCache, listSystemVoices, pickSystemVoice, slowRate, speak, systemVoiceAvailable, hasShellBridge, unloadEngine } from "../tts/speech";
 
 /** 与后端 DEFAULT_TTS_MANIFEST_URL / GHPROXY_PREFIX 一致（测速候选地址用） */
 const TTS_MANIFEST_URL = "https://github.com/podic-dictionary/tts/releases/latest/download/tts-metainfo.json";
@@ -23,7 +23,7 @@ interface TtsSettingsState {
   source: { mode: string; custom_manifest_url: string };
   default_speed: string;
   slow_rate?: number;
-  languages: Record<string, { provider: string }>;
+  languages: Record<string, { provider: string; voice?: string }>;
 }
 
 /** 试听例句（按模型首个支持语言） */
@@ -405,14 +405,25 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                   })}
                 />
                 {!inShell && (
-                  <span className="max-w-24 truncate text-[10px] text-zinc-400" title="系统 TTS 将使用的语音（音色怪说明挑到了辅助功能语音，点试听对比）">
-                    系统:{pickSystemVoice(l)?.name ?? "…"}
-                  </span>
+                  <select
+                    value={settings?.languages?.[l]?.voice ?? pickSystemVoice(l)?.name ?? ""}
+                    onChange={(e) => {
+                      const prev = settings?.languages?.[l] ?? { provider: "auto" };
+                      void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...prev, voice: e.target.value || undefined } } });
+                    }}
+                    title="系统 TTS 的音色（浏览器自动挑在 macOS 会撞辅助功能怪音，选定后不再变）"
+                    className="ml-auto min-w-0 max-w-32 flex-1 truncate rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-xs text-zinc-600 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                  >
+                    {(listSystemVoices(l).length ? listSystemVoices(l) : []).map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                    {!listSystemVoices(l).length && <option value="">（无系统语音）</option>}
+                  </select>
                 )}
                 <button
                   onClick={() => void listenLang(l)}
                   disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
-                  className="ml-auto shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+                  className="shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
                 >
                   {listenBusy === `lang:${l}` ? "停止" : "试听"}
                 </button>
