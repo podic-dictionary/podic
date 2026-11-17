@@ -103,7 +103,9 @@ export default function TranslateView() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go();
+            // 同 SearchBar：输入法组合中的回车（上屏）不触发翻译
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)
+              && !e.nativeEvent.isComposing && e.keyCode !== 229) go();
           }}
           placeholder="输入要翻译的文本…（Ctrl+Enter 翻译）"
           className="h-36 w-full resize-none rounded-2xl border border-zinc-200/80 bg-white/80 p-4 text-[15px] outline-none backdrop-blur transition-all duration-300 focus:border-emerald-400/70 focus:bg-white focus:shadow-[0_0_0_4px_rgb(16_185_129/0.08)] lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:focus:bg-zinc-900 dark:focus:shadow-[0_0_0_4px_rgb(16_185_129/0.1)]"

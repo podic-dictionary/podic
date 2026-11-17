@@ -321,7 +321,10 @@ export default function ReadingView({
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && grabUrl()}
+            onKeyDown={(e) => {
+              // 同 SearchBar：输入法上屏回车不触发抓取
+              if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) grabUrl();
+            }}
             placeholder="或粘贴文章链接（公众号 / 新闻页），自动抓正文"
             className={`${inputCls} min-w-0 flex-1`}
           />

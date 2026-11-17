@@ -97,7 +97,13 @@ export default function SearchBar({
         ref={inputRef}
         value={query}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && go(query)}
+        onKeyDown={(e) => {
+          // 输入法组合中的回车是「上屏」不是「搜索」：组合期间 React 不回写
+          // state，query 还是旧值，此时 setState 会与 IME 待提交文本打架，
+          // 上屏后内容翻倍（bonjourbonjour）。Safari 上屏后的首键只有
+          // keyCode=229 可辨，两个条件都要查
+          if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) go(query);
+        }}
         onFocus={() => {
           setHistory(getHistory());
           setOpen(true);
