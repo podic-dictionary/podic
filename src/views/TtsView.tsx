@@ -428,7 +428,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                     —— 徽标与档位按钮文字重复（两个「离线引擎」）曾致困惑） */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <button
-                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "auto" } } })}
+                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...settings?.languages?.[l], provider: "auto" } } })}
                     aria-pressed={pref === "auto"}
                     title="自动：装了模型走模型合成，否则系统 TTS"
                     className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
@@ -442,7 +442,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                   {/* 离线引擎：装了模型才有这个档 */}
                   {hasModel && (
                   <button
-                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "offline" } } })}
+                    onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...settings?.languages?.[l], provider: "offline" } } })}
                     aria-pressed={pref === "offline"}
                     className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
                       pref === "offline"
@@ -456,7 +456,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                   {/* 系统 TTS 与音色连体：音色属于系统 TTS，非该档置灰 */}
                   {inShell ? (
                     <button
-                      onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "system" } } })}
+                      onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...settings?.languages?.[l], provider: "system" } } })}
                       aria-pressed={pref === "system"}
                       className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
                         pref === "system"
@@ -473,7 +473,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                         : "border-zinc-200 dark:border-zinc-700"
                     }`}>
                       <button
-                        onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "system" } } })}
+                        onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...settings?.languages?.[l], provider: "system" } } })}
                         aria-pressed={pref === "system"}
                         className={`border-r border-zinc-200 bg-white px-2 py-1 text-xs whitespace-nowrap transition-colors dark:border-zinc-700 dark:bg-zinc-900 ${
                           pref === "system"
