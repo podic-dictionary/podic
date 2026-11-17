@@ -107,7 +107,7 @@ fn default_tts_speed() -> String {
 }
 
 fn default_tts_slow_rate() -> f64 {
-    0.75
+    0.5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

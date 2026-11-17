@@ -73,7 +73,7 @@ function SpeakBtn({
 }
 
 /// 朗读按钮组：喇叭 = 默认语速（设置里的「默认语速」为慢速时同样生效）；
-/// 蜗牛纹喇叭 + 倍率标（如 0.75×）= 慢速。同一按钮播放中再点停止，点另一个
+/// 蜗牛纹喇叭 + 倍率标（如 0.50×）= 慢速。同一按钮播放中再点停止，点另一个
 /// 按钮直接切换。通道由 speech 控制器决定：壳内端侧引擎（已装该语言模型时）/
 /// 系统 TTS；浏览器优先 server 侧端侧引擎（server 合成 wav），回退 Web Speech；
 /// 系统没语音且无模型时壳内显示「下载语音」入口。
@@ -85,8 +85,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   // null = 系统没暴露语音清单，无从判断（默认展示）；false = 确认无该语言语音
   const [hasVoice, setHasVoice] = useState<boolean | null>(null);
   const [hasModel, setHasModel] = useState(false);
-  // 慢速倍率标签：先取已加载值（无则 0.75 兜底展示），订阅保存变更刷新
-  const [rate, setRate] = useState(() => peekSlowRate() ?? 0.75);
+  // 慢速倍率标签：先取已加载值（无则 0.5 兜底展示），订阅保存变更刷新
+  const [rate, setRate] = useState(() => peekSlowRate() ?? 0.5);
   const handleRef = useRef<SpeakHandle | null>(null);
   // 卸载后异步返回不得再开播；StrictMode 会 setup→cleanup→setup 重放，
   // setup 必须复位（否则开发模式一次重放就把按钮永久废掉）

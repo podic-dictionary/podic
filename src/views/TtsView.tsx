@@ -115,7 +115,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       setSettings(s.tts ?? {
         source: { mode: "github", custom_manifest_url: "" },
         default_speed: "normal",
-        slow_rate: 0.75,
+        slow_rate: 0.5,
         languages: {},
       });
     }).catch(() => {});
@@ -374,19 +374,19 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         <div className="mt-2 flex items-center gap-3">
           <div className="flex items-center overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
             <button
-              onClick={() => void saveTts({ slow_rate: Math.max(20, Math.round((settings?.slow_rate ?? 0.75) * 100) - 5) / 100 })}
-              disabled={(settings?.slow_rate ?? 0.75) <= 0.2}
+              onClick={() => void saveTts({ slow_rate: Math.max(20, Math.round((settings?.slow_rate ?? 0.5) * 100) - 5) / 100 })}
+              disabled={(settings?.slow_rate ?? 0.5) <= 0.2}
               aria-label="降低倍率"
               className="px-3.5 py-2 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               −
             </button>
             <span className="min-w-16 text-center text-sm font-medium tabular-nums text-zinc-700 dark:text-zinc-200">
-              {(settings?.slow_rate ?? 0.75).toFixed(2)}×
+              {(settings?.slow_rate ?? 0.5).toFixed(2)}×
             </span>
             <button
-              onClick={() => void saveTts({ slow_rate: Math.min(90, Math.round((settings?.slow_rate ?? 0.75) * 100) + 5) / 100 })}
-              disabled={(settings?.slow_rate ?? 0.75) >= 0.9}
+              onClick={() => void saveTts({ slow_rate: Math.min(90, Math.round((settings?.slow_rate ?? 0.5) * 100) + 5) / 100 })}
+              disabled={(settings?.slow_rate ?? 0.5) >= 0.9}
               aria-label="提高倍率"
               className="px-3.5 py-2 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
@@ -518,7 +518,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         <h2 className="text-sm font-medium text-zinc-500">朗读按钮怎么用</h2>
         <ul className="mt-1.5 space-y-1 text-xs leading-relaxed text-zinc-400">
           <li>· 喇叭：按「默认语速」朗读，播放中再点停止</li>
-          <li>· 带倍率标的喇叭（如 0.75×）：按「慢速倍率」放慢重读，适合跟读辨音；倍率可在本页调整</li>
+          <li>· 带倍率标的喇叭（如 0.50×）：按「慢速倍率」放慢重读，适合跟读辨音；倍率可在本页调整</li>
           <li>· 词条头词、每条例句、每日一句的朗读按钮都是这两个</li>
         </ul>
       </section>

@@ -111,8 +111,8 @@ export function setDefaultSpeedCache(s: SpeechSpeed) {
 const slowRateCache = makeSettingCache<number>(async () => {
   const s = await getSettings();
   const r = s.tts?.slow_rate;
-  return typeof r === "number" && r >= 0.2 && r <= 0.9 ? r : 0.75;
-}, 0.75);
+  return typeof r === "number" && r >= 0.2 && r <= 0.9 ? r : 0.5;
+}, 0.5);
 export function slowRate(): Promise<number> {
   return slowRateCache.get();
 }
@@ -175,7 +175,7 @@ export function speak(opts: {
   lang: Lang | string;
   speed: SpeechSpeed;
   provider?: "auto" | "system" | "offline";
-  /** 慢速倍率（settings.tts.slow_rate）；缺省 0.75。调用方经 slowRate() 取后传入 */
+  /** 慢速倍率（settings.tts.slow_rate）；缺省 0.5。调用方经 slowRate() 取后传入 */
   rate?: number;
 }): SpeakHandle | null {
   const requestId = `sp${++seq}`;
@@ -192,7 +192,7 @@ export function speak(opts: {
     });
     const send = (op: string): boolean =>
       tryBridge("ttsRequest", JSON.stringify({ op, request_id: requestId, ...payload }));
-    const rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
+    const rate = opts.speed === "slow" ? (opts.rate ?? 0.5) : 1.0;
     const payload = {
       text: opts.text,
       lang: String(opts.lang),
@@ -272,7 +272,7 @@ export function speak(opts: {
       const a = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
       a.preservesPitch = true;
       a.webkitPreservesPitch = true;
-      a.playbackRate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
+      a.playbackRate = opts.speed === "slow" ? (opts.rate ?? 0.5) : 1.0;
       const end = new Promise<TtsEvent["state"]>((resolve) => {
         a.onended = () => resolve("ended");
         a.onerror = () => resolve("error");
@@ -293,7 +293,7 @@ export function speak(opts: {
     // 显式挑 voice：只设 lang 时浏览器自动挑会撞 novelty 语音（whisper 等）
     const pick = pickSystemVoice(String(opts.lang));
     if (pick) u.voice = pick;
-    u.rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
+    u.rate = opts.speed === "slow" ? (opts.rate ?? 0.5) : 1.0;
     const end = new Promise<TtsEvent["state"]>((resolve) => {
       u.onend = () => resolve("ended");
       u.onerror = () => resolve("error");
