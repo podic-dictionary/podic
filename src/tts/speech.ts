@@ -227,20 +227,75 @@ export function speak(opts: {
     }
     return { requestId, done, cancel: () => void tryBridge("ttsStop") };
   }
-  // 浏览器：Web Speech（无 request_id，本地 Promise 近似）
-  const synth = window.speechSynthesis;
-  if (!synth) return null;
-  const tag = LANG_TAGS[String(opts.lang)] ?? String(opts.lang);
-  const u = new SpeechSynthesisUtterance(opts.text);
-  u.lang = tag;
-  u.rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
-  const done = new Promise<TtsEvent["state"]>((resolve) => {
-    u.onend = () => resolve("ended");
-    u.onerror = () => resolve("error");
-  });
-  synth.cancel();
-  synth.speak(u);
-  return { requestId, done, cancel: () => synth.cancel() };
+  // 浏览器：优先 server 侧端侧引擎（网页没有壳桥，但连的 podic-server 就
+  // 管着模型，POST /api/tts/synthesize 拿 wav 用 <audio> 播——Windows 没
+  // fr/ja 系统语音也能读）；无该语言模型/失败/用户强制系统时回退 Web Speech
+  const provider = resolveProvider(opts.lang, opts.provider);
+  const ctrl = { cancelled: false };
+  let audio: HTMLAudioElement | null = null;
+  let objectUrl: string | null = null;
+  const done = (async (): Promise<TtsEvent["state"]> => {
+    let wav: ArrayBuffer | null = null;
+    if (provider !== "system") {
+      try {
+        const models = await installedModels();
+        if (offlineModelFor(models, String(opts.lang))) {
+          const resp = await fetch("/api/tts/synthesize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: opts.text, lang: String(opts.lang) }),
+          });
+          if (resp.ok) wav = await resp.arrayBuffer();
+        }
+      } catch { /* 网络/服务异常：走系统语音 */ }
+    }
+    if (ctrl.cancelled) return "cancelled";
+    if (wav) {
+      objectUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+      audio = new Audio(objectUrl);
+      // 慢速由播放端变速不变调完成（preservesPitch 默认 true，Safari 旧属性兜底）
+      const a = audio as HTMLAudioElement & { webkitPreservesPitch?: boolean };
+      a.preservesPitch = true;
+      a.webkitPreservesPitch = true;
+      a.playbackRate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
+      const end = new Promise<TtsEvent["state"]>((resolve) => {
+        a.onended = () => resolve("ended");
+        a.onerror = () => resolve("error");
+      });
+      try {
+        await a.play();
+      } catch {
+        return "error";
+      }
+      return end;
+    }
+    // 回退：Web Speech（无 request_id，本地 Promise 近似）
+    const synth = window.speechSynthesis;
+    if (!synth) return "error";
+    const tag = LANG_TAGS[String(opts.lang)] ?? String(opts.lang);
+    const u = new SpeechSynthesisUtterance(opts.text);
+    u.lang = tag;
+    u.rate = opts.speed === "slow" ? (opts.rate ?? 0.75) : 1.0;
+    const end = new Promise<TtsEvent["state"]>((resolve) => {
+      u.onend = () => resolve("ended");
+      u.onerror = () => resolve("error");
+    });
+    synth.cancel();
+    if (ctrl.cancelled) return "cancelled";
+    synth.speak(u);
+    return end;
+  })();
+  const cancel = () => {
+    ctrl.cancelled = true;
+    if (audio) {
+      audio.pause();
+      audio.onended = null;
+      audio.onerror = null;
+    }
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    window.speechSynthesis?.cancel(); // 回退路径的 Web Speech 同样要停
+  };
+  return { requestId, done, cancel };
 }
 
 const LANG_TAGS: Record<string, string> = {

@@ -75,7 +75,8 @@ function SpeakBtn({
 /// 朗读按钮组：喇叭 = 默认语速（设置里的「默认语速」为慢速时同样生效）；
 /// 蜗牛纹喇叭 + 倍率标（如 0.75×）= 慢速。同一按钮播放中再点停止，点另一个
 /// 按钮直接切换。通道由 speech 控制器决定：壳内端侧引擎（已装该语言模型时）/
-/// 系统 TTS / 浏览器 Web Speech；系统没语音且无模型时壳内显示「下载语音」入口。
+/// 系统 TTS；浏览器优先 server 侧端侧引擎（server 合成 wav），回退 Web Speech；
+/// 系统没语音且无模型时壳内显示「下载语音」入口。
 /// 慢速倍率标签实时订阅设置变更（设置页保存成功即刷新，不再出现
 /// 「设置改了 0.5 按钮还是 0.75」这种无从发现的陈旧缓存）
 export default function SpeakButton({ text, lang }: { text: string; lang: Lang }) {
@@ -95,12 +96,11 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
   useEffect(() => {
     aliveRef.current = true;
     let alive = true;
-    // 端侧模型只对壳有意义（浏览器无引擎可播）；模型装好后 30s 缓存内即可见
-    if (inShell) {
-      void installedModels().then((ms) => {
-        if (alive) setHasModel(Boolean(offlineModelFor(ms, lang)));
-      });
-    }
+    // 端侧模型：壳内本地引擎播；浏览器走 server 侧合成（/api/tts/synthesize），
+    // 两边都据此显示按钮。模型装好后 30s 缓存内即可见
+    void installedModels().then((ms) => {
+      if (alive) setHasModel(Boolean(offlineModelFor(ms, lang)));
+    });
     // 预热按语言引擎偏好，首次点击即生效（speak 内 peek 覆盖 auto）
     void ensureLangPrefs();
     void slowRate().then((r) => {

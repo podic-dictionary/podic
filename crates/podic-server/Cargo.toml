@@ -19,3 +19,4 @@ tokio-stream.workspace = true
 sha2.workspace = true
 dom_smoothie = "0.18.2"
 reqwest = { workspace = true, features = ["http2"] }
+libloading = "0.9.1"

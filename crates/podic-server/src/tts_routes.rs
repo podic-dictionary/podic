@@ -51,6 +51,37 @@ pub async fn models(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "models": tts::installed_models(&data_dir) })))
 }
 
+#[derive(Deserialize)]
+pub struct SynthesizeIn {
+    pub text: String,
+    pub lang: String,
+}
+
+/// POST /api/tts/synthesize：server 侧用已装端侧模型合成 wav。
+/// 网页版没有壳桥，靠这条路径用上端侧引擎（Windows 无 fr/ja 系统语音也能读）；
+/// 壳内仍走原生桥（同机更短路径），不会请求这里。速度恒为原速——变速
+/// 不变调由播放端做（前端 preservesPitch / 壳 AudioTrack）
+pub async fn synthesize(
+    State(state): State<AppState>,
+    Json(body): Json<SynthesizeIn>,
+) -> Result<(axum::http::HeaderMap, Vec<u8>), ApiError> {
+    let text = body.text.trim().to_string();
+    if text.is_empty() || text.len() > 2000 {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "text 为空或超长".into()));
+    }
+    let data_dir = { lock(&state).data_dir.clone() };
+    // 合成是 CPU 密集的同步调用（几秒级），放阻塞线程池不占 async worker
+    let wav = tokio::task::spawn_blocking(move || {
+        crate::tts_synth::synthesize(&data_dir, &text, &body.lang)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("合成任务失败: {e}")))?
+    .map_err(|e| ApiError(StatusCode::NOT_FOUND, e))?;
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("audio/wav"));
+    Ok((headers, wav))
+}
+
 /// 拉取并解析清单（catalog / install 共用）
 async fn fetch_manifest(manifest_url: &str) -> Result<tts::TtsManifest, ApiError> {
     let http = reqwest::Client::builder()

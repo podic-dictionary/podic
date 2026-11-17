@@ -2,6 +2,7 @@
 
 pub mod daily_routes;
 mod tts_routes;
+mod tts_synth;
 pub mod error;
 pub mod log;
 pub mod reader_routes;
@@ -102,6 +103,7 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .route("/api/vocab-tests/{id}/finish", axum::routing::post(vocab_routes::finish_vocab_test))
         .route("/api/daily-sentence", axum::routing::post(daily_routes::daily_sentence))
         .route("/api/tts/models", axum::routing::get(tts_routes::models))
+        .route("/api/tts/synthesize", axum::routing::post(tts_routes::synthesize))
         .route("/api/tts/catalog", axum::routing::get(tts_routes::catalog))
         .route("/api/tts/speed-test", axum::routing::post(tts_routes::speed_test))
         .route("/api/tts/install", axum::routing::post(tts_routes::install))
