@@ -413,30 +413,32 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
             const pref = rawPref === "system" || (rawPref === "offline" && hasModel) ? rawPref : "auto";
             return (
               <div key={l} className="py-2.5 first:pt-1 last:pb-0">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
-                  {/* 自动 */}
+                {/* 行1：语言名 + 试听（试听不再与档位挤一行换行） */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
+                  <button
+                    onClick={() => void listenLang(l)}
+                    disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
+                    className="shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+                  >
+                    {listenBusy === `lang:${l}` ? "停止" : "试听"}
+                  </button>
+                </div>
+                {/* 行2：档位（自动按钮内嵌实际引擎：模型/系统，不再另挂徽标
+                    —— 徽标与档位按钮文字重复（两个「离线引擎」）曾致困惑） */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <button
                     onClick={() => void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { provider: "auto" } } })}
                     aria-pressed={pref === "auto"}
+                    title="自动：装了模型走模型合成，否则系统 TTS"
                     className={`rounded-lg border px-2 py-1 text-xs whitespace-nowrap transition-colors ${
                       pref === "auto"
                         ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-600 dark:bg-emerald-950 dark:text-emerald-300"
                         : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
                     }`}
                   >
-                    自动
+                    {pref === "auto" ? `自动（${hasModel ? "模型" : "系统"}）` : "自动"}
                   </button>
-                  {/* 自动档的实际引擎一眼可见：有已装模型走端侧，否则系统 */}
-                  {pref === "auto" && (
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
-                      installed?.some((m) => m.languages.includes(l))
-                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                        : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                    }`}>
-                      → {installed?.some((m) => m.languages.includes(l)) ? "离线引擎" : "系统 TTS"}
-                    </span>
-                  )}
                   {/* 离线引擎：装了模型才有这个档 */}
                   {hasModel && (
                   <button
@@ -498,13 +500,6 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                       </select>
                     </div>
                   )}
-                  <button
-                    onClick={() => void listenLang(l)}
-                    disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
-                    className="ml-auto shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
-                  >
-                    {listenBusy === `lang:${l}` ? "停止" : "试听"}
-                  </button>
                 </div>
               </div>
             );
