@@ -388,7 +388,8 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         <div className="mt-2 divide-y divide-zinc-100 dark:divide-zinc-800">
           {engineLangs.length === 0 && <p className="py-2 text-xs text-zinc-400">暂无可选语言（未装模型且系统无语音）</p>}
           {engineLangs.map((l) => {
-            const pref = settings?.languages?.[l]?.provider === "system" ? "system" : "auto";
+            const rawPref = settings?.languages?.[l]?.provider;
+            const pref = rawPref === "system" || rawPref === "offline" ? rawPref : "auto";
             return (
               <div key={l} className="flex items-center gap-3 py-2.5 first:pt-1 last:pb-0">
                 <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
