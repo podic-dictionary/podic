@@ -235,7 +235,15 @@ export function speak(opts: {
   const ctrl = { cancelled: false };
   let audio: HTMLAudioElement | null = null;
   let objectUrl: string | null = null;
-  const done = (async (): Promise<TtsEvent["state"]> => {
+  // done 的 resolve 提到 cancel 可及处：audio.pause() 后 onend 不再来、
+  // synth.cancel() 后事件缺失时，内部链会永远挂起——await done 的调用方
+  // （listenBusy/speaking 状态）从此卡死，按钮停在「停止」刷新才能救。
+  // cancel 里直接 settle("cancelled") 收口（Promise 二次 resolve 无害）
+  let settle: (s: TtsEvent["state"]) => void = () => {};
+  const done = new Promise<TtsEvent["state"]>((resolve) => {
+    settle = resolve;
+  });
+  const run = async (): Promise<TtsEvent["state"]> => {
     let wav: ArrayBuffer | null = null;
     let noModel = false;
     if (provider !== "system") {
@@ -294,7 +302,11 @@ export function speak(opts: {
     if (ctrl.cancelled) return "cancelled";
     synth.speak(u);
     return end;
-  })();
+  };
+  run().then(
+    (s) => settle(s),
+    () => settle("error"),
+  );
   const cancel = () => {
     ctrl.cancelled = true;
     if (audio) {
@@ -304,6 +316,7 @@ export function speak(opts: {
     }
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     window.speechSynthesis?.cancel(); // 回退路径的 Web Speech 同样要停
+    settle("cancelled"); // 收口挂起的内部链（浏览器不保证 cancel 后补发事件）
   };
   return { requestId, done, cancel };
 }
