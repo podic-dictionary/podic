@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Lang } from "../types";
 import {
-  defaultSpeed, hasShellBridge, installedModels, offlineModelFor, onSlowRateChange,
+  defaultSpeed, ensureLangPrefs, hasShellBridge, installedModels, offlineModelFor, onSlowRateChange,
   peekDefaultSpeed, peekSlowRate, slowRate, speak, systemVoiceAvailable,
   type SpeakHandle, type SpeechSpeed,
 } from "../tts/speech";
@@ -101,6 +101,8 @@ export default function SpeakButton({ text, lang }: { text: string; lang: Lang }
         if (alive) setHasModel(Boolean(offlineModelFor(ms, lang)));
       });
     }
+    // 预热按语言引擎偏好，首次点击即生效（speak 内 peek 覆盖 auto）
+    void ensureLangPrefs();
     void slowRate().then((r) => {
       if (alive) setRate(r);
     });

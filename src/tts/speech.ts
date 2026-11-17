@@ -128,6 +128,26 @@ export function onSlowRateChange(l: (r: number) => void): () => void {
   return slowRateCache.subscribe(l);
 }
 
+// 按语言引擎偏好（settings.tts.languages[lang].provider）：auto = 模型优先、
+// 没装回系统；system = 强制系统 TTS（系统语音更好听时的选择）。SpeakButton
+// 挂载即预热，设置页保存成功即 set，speak 时 peek 即时生效
+export type TtsLangPrefs = Record<string, { provider: string }>;
+const langPrefsCache = makeSettingCache<TtsLangPrefs>(async () => {
+  const s = await getSettings();
+  return s.tts?.languages ?? {};
+}, {});
+/** 预热/等待加载（SpeakButton effect 调，让首次点击前就有值） */
+export function ensureLangPrefs(): Promise<TtsLangPrefs> {
+  return langPrefsCache.get();
+}
+export function setLangPrefsCache(prefs: TtsLangPrefs) {
+  langPrefsCache.set(prefs);
+}
+function resolveProvider(lang: string | Lang, provider?: string): string {
+  if (provider !== "auto") return provider ?? "auto";
+  return langPrefsCache.peek()?.[String(lang)]?.provider === "system" ? "system" : "auto";
+}
+
 let seq = 0;
 const resolvers = new Map<string, (s: TtsEvent["state"]) => void>();
 function resolveActive(id: string, state: TtsEvent["state"]) {
@@ -177,7 +197,7 @@ export function speak(opts: {
       lang: String(opts.lang),
       speed: opts.speed,
       rate,
-      provider: opts.provider ?? "auto",
+      provider: resolveProvider(opts.lang, opts.provider),
     };
     if (!send("speak")) {
       listeners.delete(on);

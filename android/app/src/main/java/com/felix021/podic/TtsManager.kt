@@ -3,6 +3,7 @@ package com.felix021.podic
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.PlaybackParams
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
@@ -64,7 +65,10 @@ class TtsManager(
             stopCurrent = false
             val audio = try {
                 val gc = GenerationConfig()
-                gc.speed = speed
+                // 倍速不进模型：sherpa VITS 的 speed 只调 duration 采样方差，
+                // 0.75 几乎无感、0.2 时快时慢（用户实测两按钮没差别即此）。
+                // 统一原速合成，播放端 AudioTrack.setPlaybackParams 精确线性倍速
+                gc.speed = 1.0f
                 // supertonic 多语言模型靠 extra 指定语言；其他 family 忽略
                 if (model.family == "supertonic") gc.extra = mapOf("lang" to lang)
                 eng.generateWithConfig(text, gc)
@@ -76,7 +80,7 @@ class TtsManager(
                 emit(requestId, "cancelled", null)
                 return@execute
             }
-            val finished = play(audio.samples, audio.sampleRate)
+            val finished = play(audio.samples, audio.sampleRate, speed)
             emit(requestId, if (finished) "ended" else "cancelled", null)
         }
     }
@@ -179,8 +183,9 @@ class TtsManager(
         return OfflineTtsConfig(model = mc)
     }
 
-    /// 阻塞播放，返回 true=自然播完，false=被打断
-    private fun play(samples: FloatArray, rate: Int): Boolean {
+    /// 阻塞播放，返回 true=自然播完，false=被打断。
+    /// speed 走 setPlaybackParams（框架自带 sonic 变速不变调），倍速精确线性
+    private fun play(samples: FloatArray, rate: Int, speed: Float = 1.0f): Boolean {
         if (samples.isEmpty()) return true
         val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         val track = AudioTrack.Builder()
@@ -203,6 +208,9 @@ class TtsManager(
         currentTrack = track
         return try {
             track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+            if (speed > 0 && kotlin.math.abs(speed - 1f) > 0.01f) {
+                track.playbackParams = PlaybackParams().setSpeed(speed).setPitch(1f)
+            }
             track.play()
             // 播放头停滞看门狗：正常播放时播放头按采样率推进；音频路由异常
             // （蓝牙断连、输出设备休眠等）会让它停住——不能陪它等一辈子，

@@ -30,7 +30,7 @@ const viewOf = (p?: string): View =>
   (VIEWS.some((v) => v.id === p) ? p : "search") as View;
 const subOf = (s?: string): SettingsSub =>
   (SETTINGS_SUBS as readonly string[]).includes(s ?? "") ? (s as SettingsSub) : null;
-const hashUrl = (v: View, s: SettingsSub | null) => `#/${v}${s ? `/${s}` : ""}`;
+const hashUrl = (v: View, s: SettingsSub | null) => `#/${v}${v === "settings" && s ? `/${s}` : ""}`;
 
 const VIEWS: {
   id: View;
@@ -114,8 +114,7 @@ export default function App() {
     markNav(); // 用户主动导航（tab 点击 / hash 跳转 / 原生返回），记忆校正不再介入
     if (mainRef.current) scrollPos.current[view] = mainRef.current.scrollTop;
     setView(v);
-    if (v !== "settings") setSettingsSub(null);
-    // 阅读态不因切 tab 清掉：回阅读 tab 还在原文章里
+    // 设置子页/阅读态/生词本子页都不因切 tab 清掉：回对应 tab 回到最后停留的页面
   };
 
   useEffect(() => {

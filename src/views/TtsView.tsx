@@ -9,7 +9,7 @@ import { parseHash } from "../lib/router";
 import UpdateSourcePicker, { type SourcePreset } from "../components/UpdateSourcePicker";
 import { ChevronLeftIcon, SpinnerIcon, TrashIcon } from "../components/icons";
 import { langDisplayName } from "../langNames";
-import { setDefaultSpeedCache, setSlowRateCache, invalidateModelsCache, slowRate, speak, hasShellBridge, unloadEngine } from "../tts/speech";
+import { setDefaultSpeedCache, setSlowRateCache, setLangPrefsCache, invalidateModelsCache, slowRate, speak, systemVoiceAvailable, hasShellBridge, unloadEngine } from "../tts/speech";
 
 /** 与后端 DEFAULT_TTS_MANIFEST_URL / GHPROXY_PREFIX 一致（测速候选地址用） */
 const TTS_MANIFEST_URL = "https://github.com/podic-dictionary/tts/releases/latest/download/tts-metainfo.json";
@@ -61,21 +61,33 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
   const [listenBusy, setListenBusy] = useState<string | null>(null);
   const inShell = hasShellBridge();
 
-  // 三 tab（朗读/模型/更新源）：hash 驱动（#/settings/tts/models、…/source），刷新/直链可恢复
-  const [tab, setTabState] = useState<"speech" | "models" | "source">(() => {
+  // 三 tab（朗读/模型/更新源）：hash 驱动（#/settings/tts/models、…/source），
+  // 刷新/直链可恢复；切走再切回时 hash 已变（如 #/search），用 sessionStorage
+  // 记住停留的 tab（会话级，重启不残留）
+  const readTab = (): "speech" | "models" | "source" => {
     const t = parseHash().path[2];
-    return t === "models" || t === "source" ? t : "speech";
-  });
+    if (t === "models" || t === "source") return t;
+    try {
+      const s = sessionStorage.getItem("podic.tts.tab");
+      if (s === "models" || s === "source") return s;
+    } catch { /* 隐私模式 sessionStorage 不可用 */ }
+    return "speech";
+  };
+  const [tab, setTabState] = useState<"speech" | "models" | "source">(readTab);
   useEffect(() => {
     const onHash = () => {
       const t = parseHash().path[2];
-      setTabState(t === "models" || t === "source" ? t : "speech");
+      if (t === "models" || t === "source") {
+        setTabState(t);
+        try { sessionStorage.setItem("podic.tts.tab", t); } catch { /* 同上 */ }
+      }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const setTab = (t: "speech" | "models" | "source") => {
     window.location.hash = `#/settings/tts${t === "speech" ? "" : `/${t}`}`;
+    try { sessionStorage.setItem("podic.tts.tab", t); } catch { /* 同上 */ }
   };
 
   const reloadModels = useCallback(() => {
@@ -167,6 +179,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
     setSettings(next);
     if (patch.default_speed) setDefaultSpeedCache(patch.default_speed === "slow" ? "slow" : "normal");
     if (typeof patch.slow_rate === "number") setSlowRateCache(patch.slow_rate);
+    if (patch.languages) setLangPrefsCache(patch.languages);
     if (patch.source) void reloadCatalog();
   };
 
@@ -233,6 +246,8 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
     const lang = m.languages[0] ?? "en";
     const text = SAMPLE_TEXT[lang] ?? "Hello, this is a sample pronunciation.";
     setListenBusy(key);
+    // 壳的朗读是串行队列：不先停旧的，新的要等旧句播完才响
+    listenHandle.current?.cancel();
     const rate = speed === "slow" ? await slowRate() : undefined;
     const h = speak({ text, lang, speed, rate, provider: "offline" });
     if (!h) {
@@ -246,6 +261,35 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       setListenBusy(null);
     }
   };
+
+  /// 按语言试听：用该行当前选择的引擎（自动 = 模型优先无则系统）播一句例句
+  const listenLang = async (lang: string) => {
+    const key = `lang:${lang}`;
+    if (listenBusy === key) {
+      listenHandle.current?.cancel();
+      return;
+    }
+    const provider = settings?.languages?.[lang]?.provider === "system" ? "system" : "auto";
+    setListenBusy(key);
+    listenHandle.current?.cancel();
+    const h = speak({ text: SAMPLE_TEXT[lang] ?? SAMPLE_TEXT.en, lang, speed: "normal", provider });
+    if (!h) {
+      setListenBusy(null);
+      return;
+    }
+    listenHandle.current = h;
+    await h.done;
+    if (listenHandle.current === h) {
+      listenHandle.current = null;
+      setListenBusy(null);
+    }
+  };
+
+  /// 引擎选择行：已装模型的语言 ∪ 系统 TTS 可用的语言（都没有的语言无从选）
+  const engineLangs = Array.from(new Set([
+    ...(installed ?? []).flatMap((m) => m.languages),
+    ...Object.keys(SAMPLE_TEXT).filter((l) => systemVoiceAvailable(l) === true),
+  ])).sort();
 
   const doDelete = async (modelId: string) => {
     setDelErr("");
@@ -327,6 +371,45 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
           />
         </div>
       </section>
+
+      {/* 按语言选引擎：壳内才有意义（浏览器只有系统 Web Speech 一条路） */}
+      {inShell && (
+      <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
+        <h2 className="text-sm font-medium text-zinc-500">按语言选择引擎</h2>
+        <p className="mt-0.5 text-xs text-zinc-400">
+          默认（自动）：装了端侧模型用模型（离线、不联网），没装走系统 TTS；觉得系统语音更好听的语言可强制走系统
+        </p>
+        <div className="mt-2 divide-y divide-zinc-100 dark:divide-zinc-800">
+          {engineLangs.length === 0 && <p className="py-2 text-xs text-zinc-400">暂无可选语言（未装模型且系统无语音）</p>}
+          {engineLangs.map((l) => {
+            const pref = settings?.languages?.[l]?.provider === "system" ? "system" : "auto";
+            return (
+              <div key={l} className="flex items-center gap-3 py-2.5 first:pt-1 last:pb-0">
+                <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
+                <Seg
+                  value={pref}
+                  options={[
+                    { id: "auto", label: "自动" },
+                    { id: "system", label: "系统 TTS" },
+                  ]}
+                  onChange={(v) => void saveTts({
+                    languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
+                  })}
+                />
+                <button
+                  onClick={() => void listenLang(l)}
+                  disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
+                  className="ml-auto shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+                >
+                  {listenBusy === `lang:${l}` ? "停止" : "试听"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs text-zinc-400">试听按该行当前选择播一句例句，两个引擎对比着选</p>
+      </section>
+      )}
 
       {/* 用法说明 */}
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
