@@ -391,42 +391,59 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
             const rawPref = settings?.languages?.[l]?.provider;
             const pref = rawPref === "system" || rawPref === "offline" ? rawPref : "auto";
             return (
-              <div key={l} className="flex items-center gap-3 py-2.5 first:pt-1 last:pb-0">
-                <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
-                <Seg
-                  value={pref}
-                  options={[
-                    { id: "auto", label: "自动" },
-                    { id: "offline", label: "离线引擎" },
-                    { id: "system", label: "系统 TTS" },
-                  ]}
-                  onChange={(v) => void saveTts({
-                    languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
-                  })}
-                />
-                {!inShell && (
-                  <select
-                    value={settings?.languages?.[l]?.voice ?? pickSystemVoice(l)?.name ?? ""}
-                    onChange={(e) => {
-                      const prev = settings?.languages?.[l] ?? { provider: "auto" };
-                      void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...prev, voice: e.target.value || undefined } } });
-                    }}
-                    title="系统 TTS 的音色（浏览器自动挑在 macOS 会撞辅助功能怪音，选定后不再变）"
-                    className="ml-auto min-w-0 max-w-32 flex-1 truncate rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-xs text-zinc-600 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              <div key={l} className="py-2.5 first:pt-1 last:pb-0">
+                <div className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
+                  <Seg
+                    value={pref}
+                    options={[
+                      { id: "auto", label: "自动" },
+                      { id: "offline", label: "离线引擎" },
+                      { id: "system", label: "系统 TTS" },
+                    ]}
+                    onChange={(v) => void saveTts({
+                      languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
+                    })}
+                  />
+                  {/* 自动档的实际引擎一眼可见：有已装模型走端侧，否则系统 */}
+                  {pref === "auto" && (
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
+                      installed?.some((m) => m.languages.includes(l))
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                        : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                    }`}>
+                      → {installed?.some((m) => m.languages.includes(l)) ? "离线引擎" : "系统 TTS"}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => void listenLang(l)}
+                    disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
+                    className="ml-auto shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
                   >
-                    {(listSystemVoices(l).length ? listSystemVoices(l) : []).map((v) => (
-                      <option key={v.name} value={v.name}>{v.name}</option>
-                    ))}
-                    {!listSystemVoices(l).length && <option value="">（无系统语音）</option>}
-                  </select>
+                    {listenBusy === `lang:${l}` ? "停止" : "试听"}
+                  </button>
+                </div>
+                {/* 音色只对系统 TTS 有意义：非 system 档置灰；saved 音色自动档回退系统时仍生效 */}
+                {!inShell && (
+                  <div className="mt-1.5 flex items-center gap-2 pl-[76px]">
+                    <span className="shrink-0 text-xs text-zinc-400">音色</span>
+                    <select
+                      value={settings?.languages?.[l]?.voice ?? pickSystemVoice(l)?.name ?? ""}
+                      onChange={(e) => {
+                        const prev = settings?.languages?.[l] ?? { provider: "auto" };
+                        void saveTts({ languages: { ...(settings?.languages ?? {}), [l]: { ...prev, voice: e.target.value || undefined } } });
+                      }}
+                      disabled={pref !== "system"}
+                      title={pref === "system" ? "系统 TTS 的音色（自动挑在 macOS 会撞辅助功能怪音，选定后不再变）" : "切到「系统 TTS」档后可选择音色"}
+                      className="min-w-0 max-w-44 flex-1 truncate rounded-lg border border-zinc-200 bg-white px-1.5 py-1 text-xs text-zinc-600 outline-none disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                    >
+                      {listSystemVoices(l).map((v) => (
+                        <option key={v.name} value={v.name}>{v.name}</option>
+                      ))}
+                      {!listSystemVoices(l).length && <option value="">（无系统语音）</option>}
+                    </select>
+                  </div>
                 )}
-                <button
-                  onClick={() => void listenLang(l)}
-                  disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
-                  className="shrink-0 rounded-lg border border-emerald-500/70 px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
-                >
-                  {listenBusy === `lang:${l}` ? "停止" : "试听"}
-                </button>
               </div>
             );
           })}
