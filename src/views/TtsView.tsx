@@ -275,7 +275,8 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       listenHandle.current?.cancel();
       return;
     }
-    const provider = settings?.languages?.[lang]?.provider === "system" ? "system" : "auto";
+    const raw = settings?.languages?.[lang]?.provider;
+    const provider = raw === "system" || raw === "offline" ? raw : "auto";
     setListenBusy(key);
     listenHandle.current?.cancel();
     const h = speak({ text: SAMPLE_TEXT[lang] ?? SAMPLE_TEXT.en, lang, speed: "normal", provider });
@@ -382,7 +383,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">按语言选择引擎</h2>
         <p className="mt-0.5 text-xs text-zinc-400">
-          默认（自动）：装了端侧模型用模型（{inShell ? "离线、不联网" : "由本机服务端合成"}），没装走系统 TTS；觉得系统语音更好听的语言可强制走系统
+          自动：装了端侧模型用模型（{inShell ? "离线、不联网" : "由本机服务端合成"}），没装走系统 TTS；离线引擎 = 只用下载的模型（未装时朗读报错不回退）；系统 TTS = 强制走系统
         </p>
         <div className="mt-2 divide-y divide-zinc-100 dark:divide-zinc-800">
           {engineLangs.length === 0 && <p className="py-2 text-xs text-zinc-400">暂无可选语言（未装模型且系统无语音）</p>}
@@ -395,6 +396,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                   value={pref}
                   options={[
                     { id: "auto", label: "自动" },
+                    { id: "offline", label: "离线引擎" },
                     { id: "system", label: "系统 TTS" },
                   ]}
                   onChange={(v) => void saveTts({

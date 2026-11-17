@@ -145,7 +145,8 @@ export function setLangPrefsCache(prefs: TtsLangPrefs) {
 }
 function resolveProvider(lang: string | Lang, provider?: string): string {
   if (provider !== "auto") return provider ?? "auto";
-  return langPrefsCache.peek()?.[String(lang)]?.provider === "system" ? "system" : "auto";
+  const pref = langPrefsCache.peek()?.[String(lang)]?.provider;
+  return pref === "system" || pref === "offline" ? pref : "auto";
 }
 
 let seq = 0;
@@ -236,6 +237,7 @@ export function speak(opts: {
   let objectUrl: string | null = null;
   const done = (async (): Promise<TtsEvent["state"]> => {
     let wav: ArrayBuffer | null = null;
+    let noModel = false;
     if (provider !== "system") {
       try {
         const models = await installedModels();
@@ -246,9 +248,14 @@ export function speak(opts: {
             body: JSON.stringify({ text: opts.text, lang: String(opts.lang) }),
           });
           if (resp.ok) wav = await resp.arrayBuffer();
+          else noModel = true; // 404（未装/合成失败）：offline 档不回退，报错
+        } else {
+          noModel = true;
         }
-      } catch { /* 网络/服务异常：走系统语音 */ }
+      } catch { /* 网络异常：auto 走系统语音，offline 报错 */ }
     }
+    // 离线引擎档：强制只用模型，没有就明确失败（不悄悄回退系统）
+    if (provider === "offline" && noModel) return "error";
     if (ctrl.cancelled) return "cancelled";
     if (wav) {
       objectUrl = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
