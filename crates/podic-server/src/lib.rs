@@ -111,6 +111,26 @@ pub fn build_router(state: AppState, dist_dir: &Path) -> axum::Router {
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024 * 1024))
         .with_state(state)
         .fallback_service(tower_http::services::ServeDir::new(dist_dir))
+        // HTML 不带 no-cache 时浏览器会 heuristic 缓存 index.html，pnpm build 后
+        // 用户端还引用旧 hash 的 JS——「改完 8787 没更新」即此。带 hash 的
+        // /assets/* 文件名即版本，保持默认缓存策略
+        .layer(axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                let mut res = next.run(req).await;
+                let is_html = res
+                    .headers()
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| v.starts_with("text/html"));
+                if is_html {
+                    res.headers_mut().insert(
+                        axum::http::header::CACHE_CONTROL,
+                        axum::http::HeaderValue::from_static("no-cache"),
+                    );
+                }
+                res
+            },
+        ))
         // 请求日志（打到 logcat）：真机卡死排查时，最后一个无响应的请求直接指向卡点；
         // 慢请求（>1s）单独标注。axum 的 layer 只覆盖在它之前注册的路由，必须在链尾
         .layer(axum::middleware::from_fn(
