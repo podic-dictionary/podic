@@ -144,11 +144,14 @@ pub fn tokenize(lang: &str, text: &str, vocab: Option<&HashSet<String>>) -> Vec<
                     continue;
                 }
                 if c.is_alphanumeric() {
-                    // 收词：字母数字 + 词内撇号/连字符（两侧都是字母才算词内）
+                    // 收词：字母数字 + 词内撇号/连字符（两侧都是字母才算词内）。
+                    // 汉字/假名在 Rust 里 is_alphanumeric() 也是 true（Unicode
+                    // 字母类），必须显式排除——否则「Anthropic与湿实验…」整段
+                    // 被吞成一个词（中英混排阅读分词曾现此 bug）
                     let mut j = i + 1;
                     while j < cs.len() {
                         let x = cs[j];
-                        if x.is_alphanumeric() {
+                        if x.is_alphanumeric() && !is_cjk(x) {
                             j += 1;
                         } else if is_intra_word(x)
                             && j > i
