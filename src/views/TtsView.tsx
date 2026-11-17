@@ -370,12 +370,30 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         <p className="mt-0.5 text-xs text-zinc-400">
           带倍率标的慢速喇叭按钮（词条、例句、每日一句通用）按此倍率放慢，跟读学习发音用；试听·慢速同此倍率，改完按钮上的倍率即时刷新
         </p>
-        <div className="mt-2">
-          <Seg
-            value={String(settings?.slow_rate ?? 0.75)}
-            options={[0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.9].map((r) => ({ id: String(r), label: `${r}×` }))}
-            onChange={(v) => void saveTts({ slow_rate: Number(v) })}
-          />
+        {/* 步进器（0.2~0.9、步进 0.05，整数运算避免浮点尾差）：窄屏放不下九段横排 */}
+        <div className="mt-2 flex items-center gap-3">
+          <div className="flex items-center overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+            <button
+              onClick={() => void saveTts({ slow_rate: Math.max(20, Math.round((settings?.slow_rate ?? 0.75) * 100) - 5) / 100 })}
+              disabled={(settings?.slow_rate ?? 0.75) <= 0.2}
+              aria-label="降低倍率"
+              className="px-3.5 py-2 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              −
+            </button>
+            <span className="min-w-16 text-center text-sm font-medium tabular-nums text-zinc-700 dark:text-zinc-200">
+              {(settings?.slow_rate ?? 0.75).toFixed(2)}×
+            </span>
+            <button
+              onClick={() => void saveTts({ slow_rate: Math.min(90, Math.round((settings?.slow_rate ?? 0.75) * 100) + 5) / 100 })}
+              disabled={(settings?.slow_rate ?? 0.75) >= 0.9}
+              aria-label="提高倍率"
+              className="px-3.5 py-2 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              +
+            </button>
+          </div>
+          <span className="text-xs text-zinc-400">0.20×–0.90×</span>
         </div>
       </section>
 
