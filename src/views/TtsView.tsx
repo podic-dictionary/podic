@@ -378,12 +378,13 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
         </div>
       </section>
 
-      {/* 按语言选引擎：壳内才有意义（浏览器只有系统 Web Speech 一条路） */}
-      {inShell && (
+      {/* 按语言选引擎：浏览器没有端侧引擎，选择只在 App 内生效（网页版置灰展示） */}
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
         <h2 className="text-sm font-medium text-zinc-500">按语言选择引擎</h2>
         <p className="mt-0.5 text-xs text-zinc-400">
-          默认（自动）：装了端侧模型用模型（离线、不联网），没装走系统 TTS；觉得系统语音更好听的语言可强制走系统
+          {inShell
+            ? "默认（自动）：装了端侧模型用模型（离线、不联网），没装走系统 TTS；觉得系统语音更好听的语言可强制走系统"
+            : "仅在 App 内生效：浏览器没有端侧引擎，网页版始终走系统语音"}
         </p>
         <div className="mt-2 divide-y divide-zinc-100 dark:divide-zinc-800">
           {engineLangs.length === 0 && <p className="py-2 text-xs text-zinc-400">暂无可选语言（未装模型且系统无语音）</p>}
@@ -394,6 +395,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                 <span className="w-16 shrink-0 text-sm text-zinc-600 dark:text-zinc-300">{langDisplayName(l)}</span>
                 <Seg
                   value={pref}
+                  disabled={!inShell}
                   options={[
                     { id: "auto", label: "自动" },
                     { id: "system", label: "系统 TTS" },
@@ -402,6 +404,7 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                     languages: { ...(settings?.languages ?? {}), [l]: { provider: v } },
                   })}
                 />
+                {inShell && (
                 <button
                   onClick={() => void listenLang(l)}
                   disabled={listenBusy !== null && listenBusy !== `lang:${l}`}
@@ -409,13 +412,13 @@ export default function TtsView({ onBack }: { onBack: () => void }) {
                 >
                   {listenBusy === `lang:${l}` ? "停止" : "试听"}
                 </button>
+                )}
               </div>
             );
           })}
         </div>
-        <p className="mt-2 text-xs text-zinc-400">试听按该行当前选择播一句例句，两个引擎对比着选</p>
+        {inShell && <p className="mt-2 text-xs text-zinc-400">试听按该行当前选择播一句例句，两个引擎对比着选</p>}
       </section>
-      )}
 
       {/* 用法说明 */}
       <section className="podic-card mt-4 rounded-2xl bg-white/85 p-4 dark:bg-zinc-900/80">
