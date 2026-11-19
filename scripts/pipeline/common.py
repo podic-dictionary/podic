@@ -71,6 +71,11 @@ SOURCES = {
         "file": "fr-extract.jsonl.gz",
         "cc": {"name": "French Wiktionary (wiktextract)", "url": "https://kaikki.org/dictionary/French", "license": "CC BY-SA 3.0"},
     },
+    "wikidata": {
+        # 地名（国家/主要城市/首都）的结构化数据：法语词头 + 中文名，脚本按需查询并缓存
+        "url": "https://www.wikidata.org",
+        "cc": {"name": "Wikidata", "url": "https://www.wikidata.org", "license": "CC0 1.0"},
+    },
     # jmdict 系：下载 URL 由 download_all.py 按最新 release 动态填充；
     # 静态条目保证单独跑 build_pack 时 meta.sources 也有致谢（ja 包曾因此为空）
     "jmdict_eng": {
