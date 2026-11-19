@@ -10,32 +10,13 @@ import { CopyIcon, TrashIcon } from "./icons";
 import { copyText } from "./clipboard";
 import type { Entry, Lang } from "../types";
 import { entrySummary } from "./entrySummary";
+import { tryParseExamples } from "./aiExamples";
 
 const TABS: { id: "explain" | "examples" | "fallback"; label: string; hint: string }[] = [
   { id: "explain", label: "深度讲解", hint: "词义 · 词源 · 辨析 · 搭配" },
   { id: "examples", label: "生成例句", hint: "5 个例句 + 中文翻译" },
   { id: "fallback", label: "补全释义", hint: "词典缺释义时兜底" },
 ];
-
-function tryParseExamples(text: string): { text: string; zh?: string }[] | null {
-  let t = text.trim();
-  if (t.startsWith("```")) {
-    const m = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-    t = m ? m[1].trim() : t.replace(/```/g, "");
-  }
-  try {
-    const data: { sentences?: { text: string; zh?: string }[] } = JSON.parse(t);
-    if (Array.isArray(data.sentences)) {
-      return data.sentences.filter((s) => s && typeof s.text === "string");
-    }
-  } catch {
-    // JSON 不完整（输出被截断等）：抢救其中已完整的句子对象，不整段回退原文
-    const saved = [...t.matchAll(/\{\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"zh"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g)]
-      .map((m) => ({ text: JSON.parse(`"${m[1]}"`) as string, zh: JSON.parse(`"${m[2]}"`) as string }));
-    if (saved.length > 0) return saved;
-  }
-  return null;
-}
 
 /// 拷贝用文本：渲染成什么样就拷什么样（例句 tab 原文是 JSON，转成 markdown 列表）
 function copyableText(tab: string, text: string): string {

@@ -1,9 +1,20 @@
-import { useEffect, useState } from "react";
-import { addFavorite, examples, removeFavorite } from "../api";
+import { useEffect, useRef, useState } from "react";
+import {
+  addFavorite,
+  aiRun,
+  examples,
+  getOverlay,
+  removeFavorite,
+  saveOverlay,
+  type AiStreamHandle,
+} from "../api";
+import { useSettings } from "../SettingsContext";
 import type { Entry, Sentence } from "../types";
 import { GENDER_LABELS, POS_LABELS, RULE_LABELS, TAG_LABELS } from "./labels";
 import AiPanel from "./AiPanel";
 import SpeakButton from "./SpeakButton";
+import { tryParseExamples, type AiExample } from "./aiExamples";
+import { entrySummary } from "./entrySummary";
 
 function Ipa({ ipa }: { ipa: Entry["ipa"] }) {
   if (!ipa) return null;
@@ -57,6 +68,13 @@ function Senses({ entry }: { entry: Entry }) {
 function Examples({ entry, auto }: { entry: Entry; auto: boolean }) {
   const [sentences, setSentences] = useState<Sentence[] | null>(null);
   const [expanded, setExpanded] = useState(auto);
+  // 词典没例句时在同一位置展示 AI 生成的例句（标注来源）；overlay 已缓存则直接读
+  const [aiList, setAiList] = useState<AiExample[] | null>(null);
+  const [aiState, setAiState] = useState<"idle" | "running" | "error">("idle");
+  const { providers, aiChoice } = useSettings();
+  const aiTextRef = useRef("");
+  const aiHandleRef = useRef<AiStreamHandle | null>(null);
+  const empty = sentences !== null && sentences.length === 0;
 
   useEffect(() => {
     if (!expanded) return;
@@ -69,7 +87,65 @@ function Examples({ entry, auto }: { entry: Entry; auto: boolean }) {
     };
   }, [entry.lang, entry.entry_id, expanded]);
 
-  // 未展开（前两条之外按需加载）且没有例句时整块不展示
+  // 确认词典无例句才查 AI overlay，别给有例句的词条白发请求
+  useEffect(() => {
+    if (!expanded || !empty) return;
+    let alive = true;
+    getOverlay(entry.lang, entry.headword)
+      .then((r) => {
+        if (!alive) return;
+        const c = r.overlays?.examples?.content;
+        const list = c ? tryParseExamples(c) : null;
+        setAiList(list?.length ? list : null);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [expanded, empty, entry.lang, entry.headword]);
+
+  // 卸载时取消未完成的生成，避免请求和 setState 落到已卸载组件
+  useEffect(() => () => aiHandleRef.current?.cancel(), []);
+
+  const generate = () => {
+    if (aiState === "running") return;
+    aiTextRef.current = "";
+    setAiState("running");
+    aiHandleRef.current = aiRun(
+      {
+        task: "examples",
+        text: entry.headword,
+        context: entrySummary(entry),
+        provider_id: aiChoice.providerId,
+        model: aiChoice.model,
+      },
+      (d) => {
+        aiTextRef.current += d;
+      },
+    );
+    aiHandleRef.current.done
+      .then(() => {
+        const full = aiTextRef.current;
+        const list = full.trim() ? tryParseExamples(full) : null;
+        if (!list?.length) {
+          setAiState("error");
+          return;
+        }
+        setAiList(list);
+        setAiState("idle");
+        // 落 overlay 缓存：下次查同一个词直接展示，不用再等 AI
+        void saveOverlay({
+          lang: entry.lang,
+          headword: entry.headword,
+          kind: "examples",
+          content: full,
+          model: aiChoice.model,
+        }).catch(() => {});
+      })
+      .catch(() => setAiState("error"));
+  };
+
+  // 未展开（前两条之外按需加载）
   if (!expanded) {
     return (
       <button
@@ -80,7 +156,50 @@ function Examples({ entry, auto }: { entry: Entry; auto: boolean }) {
       </button>
     );
   }
-  if (!sentences || sentences.length === 0) return null;
+  const aiShown = empty ? aiList : null;
+  const aiBadge = (
+    <span className="ml-1.5 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-normal text-violet-600 dark:bg-violet-950/60 dark:text-violet-400">
+      AI 生成
+    </span>
+  );
+  if (aiShown?.length) {
+    return (
+      <section className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+        <h3 className="eyebrow text-zinc-400">
+          例句{aiBadge}
+        </h3>
+        <ul className="mt-2.5 space-y-2.5 border-l border-violet-200/70 pl-3.5 dark:border-violet-800/60">
+          {aiShown.map((s, i) => (
+            <li key={i}>
+              <p className="font-dict text-[15px] leading-relaxed text-zinc-700 dark:text-zinc-200">
+                {s.text}
+                <SpeakButton text={s.text} lang={entry.lang} />
+              </p>
+              {s.zh && <p className="mt-0.5 text-sm text-zinc-400">{s.zh}</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+  // 词典没例句：有 AI Provider 时在原位给生成入口，没有就保持原来的不展示
+  if (empty) {
+    if (providers.length === 0) return null;
+    return (
+      <section className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+        <h3 className="eyebrow text-zinc-400">例句</h3>
+        <button
+          onClick={generate}
+          disabled={aiState === "running"}
+          className="mt-2 flex items-center gap-1.5 rounded-lg border border-dashed border-violet-300/80 px-3 py-2 text-xs text-violet-600 transition-colors hover:border-violet-400 hover:bg-violet-50/50 disabled:opacity-60 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950/30"
+        >
+          <span aria-hidden>✦</span>
+          {aiState === "running" ? "AI 正在写例句…" : aiState === "error" ? "生成失败，点此重试" : "词典暂无例句，用 AI 生成"}
+        </button>
+      </section>
+    );
+  }
+  if (!sentences?.length) return null;
   return (
     <section className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
       <h3 className="eyebrow text-zinc-400">例句</h3>
@@ -180,7 +299,7 @@ export default function EntryCard({ entry, autoExamples = true }: { entry: Entry
         </div>
       )}
 
-      {/* 例句（独立块，无例句不展示；前两条之外按需加载） */}
+      {/* 例句（独立块；词典无例句时原位给 AI 生成入口，生成后标注 AI 生成） */}
       <Examples entry={entry} auto={autoExamples} />
 
       <AiPanel entry={entry} />
