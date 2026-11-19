@@ -280,7 +280,10 @@ export default function App() {
       const v = viewOf(r.path[0]);
       const s = v === "settings" ? subOf(r.path[1]) : null;
       if (v !== view) switchView(v);
-      else if (s !== settingsSub) setSettingsSub(s);
+      // 子页要跟 hash 同时生效：只在「同 view」时设 sub 的话，从查词页点「下载语音」
+      // 跳 #/settings/tts 会只切到设置首页（switchView 不清 sub，但本次会话从没有
+      // 过 sub 就一直是 null）
+      if (v === "settings" && s !== settingsSub) setSettingsSub(s);
       const q = r.params.get("q");
       if (v === "search" && q) {
         requestAnimationFrame(() =>
