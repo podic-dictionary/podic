@@ -53,6 +53,10 @@ def parse_translation(translation: str):
         line = line.strip()
         if not line:
             continue
+        # ECDICT 偶有整行重复（abjugate 同一释义出现两次），同 zh 同词性同标签只留一条
+        if any(s["zh"] == line and s["pos"] == pos_list and (s.get("tags") or []) == tags
+               for s in senses):
+            continue
         kind = "phrase" if tags and not pos_list else "def"
         sense = {"pos": pos_list, "zh": line, "kind": kind}
         if tags:

@@ -3,10 +3,13 @@
 行格式: 繁體 簡體 [pin1 yin1] /English1/English2/
 策略：跳过单字中文条目（字头释义噪声大，同 build_fr_cfdict）；英文释义清洗
 （去 to 前缀/括注）后只收无空格的单词，按 headword 精确匹配（casefold）；
-同词条同简体去重，也跳过 zh_terms 里已有的词，每词条上限 8。
+同词条同简体去重，也跳过已有同中文释义的词条，每词条上限 8。
+--rebuild：先摘掉上一轮追加的 CEDICT 义项再重算（修复历史产物用；en 包没有
+精修义项继承标签的问题，可以整条摘除）。
 输出：改写 data/work/en/entries.jsonl（追加 senses + zh_terms）
 """
 
+import argparse
 import gzip
 import json
 import re
@@ -27,7 +30,27 @@ def clean_en_def(defn: str) -> str:
     return d.strip()
 
 
+def strip_cedict(entry: dict) -> bool:
+    """摘掉上一轮追加的 CEDICT 义项，并重排 zh_terms 的 sense_idx"""
+    old = entry.get("senses") or []
+    keep = [i for i, s in enumerate(old) if "CEDICT" not in (s.get("tags") or [])]
+    if len(keep) == len(old):
+        return False
+    remap = {o: n for n, o in enumerate(keep)}
+    entry["senses"] = [old[i] for i in keep]
+    entry["zh_terms"] = [
+        [row[0], remap[row[1]], *row[2:]]
+        for row in entry.get("zh_terms") or []
+        if len(row) > 1 and row[1] in remap
+    ]
+    return True
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild", action="store_true", help="先摘掉已有 CEDICT 义项再重算")
+    args = ap.parse_args()
+
     path = common.RAW / "cedict.txt.gz"
     if not path.exists():
         common.log("缺少 data/raw/cedict.txt.gz，先运行 download_all.py")
@@ -35,9 +58,18 @@ def main():
 
     entries_path = common.WORK / "en" / "entries.jsonl"
     entries = list(common.read_jsonl(entries_path))
+    if args.rebuild:
+        n_strip = sum(strip_cedict(e) for e in entries)
+        common.log(f"[rebuild] 摘除 CEDICT 义项的词条 {n_strip}")
     by_head: dict[str, dict] = {}
     for e in entries:
         by_head.setdefault(e["headword"].casefold(), e)
+    # 幂等：已有 CEDICT 义项的条目视为已处理（en 包没有精修义项继承该标签，可安全判重）
+    done_heads = {
+        e["headword"].casefold()
+        for e in entries
+        if any("CEDICT" in (s.get("tags") or []) for s in e.get("senses") or [])
+    }
 
     n_match = n_skip = n_single = 0
     seen: set = set()
@@ -66,6 +98,8 @@ def main():
                         continue
                     if not re.fullmatch(r"[A-Za-z'’-]+", d):
                         continue
+                    if d.casefold() in done_heads:
+                        continue
                     entry = by_head.get(d.casefold())
                     if entry is None:
                         continue
@@ -74,9 +108,10 @@ def main():
                     if key in seen:
                         continue
                     seen.add(key)
-                    # ECDICT 已有的 zh_terms 里已有该词则不重复挂
+                    # ECDICT 已有该中文词（义项或反查索引里）就不重复挂
                     existing = {row[0] for row in entry.get("zh_terms") or []}
-                    if simp in existing:
+                    existing_zh = {(s.get("zh") or "").strip() for s in entry.get("senses") or []}
+                    if simp in existing or simp in existing_zh:
                         continue
                     if per_entry.get(head, 0) >= MAX_PER_ENTRY:
                         continue
