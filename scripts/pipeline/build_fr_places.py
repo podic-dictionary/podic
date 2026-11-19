@@ -11,6 +11,11 @@ fr.wiktionary 补丁只收多词短语与缩写（见 build_fr_wiktionary.py 的
 法语词头取 fr label，中文释义取 zh-hans → zh-cn → zh 的 label；地名 IPA 从已下载的
 fr.wiktionary 抽取里按词头匹配（可选，文件缺失则跳过）。
 
+词频取 OpenSubtitles 2018 法语 5 万词频表（FrequencyWords），按名次映射到 Lexique
+的词频分布上：地名不该被硬编码成高频词（曾按人口赋 0.5~0.6，导致 1500+ 地名挤进
+词汇测试的高频层，每日一句几乎全是城市名）；语料里没出现的地名 freq=0，自然退出
+词频域，但仍可精确检索。
+
 输出：重建 data/work/fr/entries.jsonl 里 source=wikidata 的地名条目（每轮先摘旧条目），
 同词头已存在则跳过，不覆盖词典原有词条。
 原始查询结果缓存 data/raw/fr-places.jsonl，重跑不重复打 Wikidata。
@@ -18,7 +23,6 @@ fr.wiktionary 抽取里按词头匹配（可选，文件缺失则跳过）。
 
 import gzip
 import json
-import math
 import sys
 import urllib.parse
 import urllib.request
@@ -121,6 +125,40 @@ def fetch_places() -> dict[str, dict]:
 
 
 KIND_RANK = {"capital": 2, "city": 1, "country": 0}
+
+
+def load_place_freq(entries: list[dict], heads: set[str]) -> dict[str, float]:
+    """地名 -> Lexique 尺度词频：按 OpenSubtitles 词频表里的名次映射到 Lexique 分布。
+
+    两份语料词频尺度不同，直接搬 count 会把常驻高频虚词换算偏；按名次取 Lexique
+    同百分位的词频值，无需猜语料总量。语料里没出现的地名不给频次（返回缺失），
+    由调用方赋 0——它们退出词频域，但检索不受影响。
+    """
+    src = common.RAW / "fr_50k.txt"
+    if not src.exists():
+        src = common.download("fr_freqwords")
+    ranks: dict[str, int] = {}
+    n = 0
+    for line in open(src, encoding="utf-8"):
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        n += 1
+        ranks.setdefault(parts[0].casefold(), n)
+    lex = sorted(
+        (e.get("freq") or 0.0 for e in entries if e.get("extra", {}).get("source") != "wikidata"),
+        reverse=True,
+    )
+    lex = [f for f in lex if f > 0]
+    if not lex or not n:
+        return {}
+    out: dict[str, float] = {}
+    for h in heads:
+        r = ranks.get(h.casefold())
+        if r:
+            idx = min(len(lex) - 1, int(r / n * len(lex)))
+            out[h] = round(lex[idx], 6)
+    return out
 
 
 def merge_heads(places: dict[str, dict]) -> dict[str, dict]:
@@ -236,6 +274,7 @@ def main():
     existing_heads = {e["headword"].casefold() for e in entries}
 
     ipa_map = load_ipa({p["fr"] for p in places.values()})
+    freq_map = load_place_freq(entries, {p["fr"] for p in places.values()})
 
     out = []
     seen: set[str] = set()
@@ -254,16 +293,14 @@ def main():
             zh = zh[:-1]  # 北京市/东京都 -> 北京/东京（释义里的通名后缀没必要）
         if kind == "country":
             gloss = f"{zh}（国家）"
-            freq = 0.5
+            freq = freq_map.get(head, 0.0)
         else:
             country = p.get("country_zh") or p.get("country_fr")
             if kind == "capital":
                 gloss = f"{zh}（{country}首都）" if country else f"{zh}（首都）"
             else:
                 gloss = f"{zh}（{country}城市）" if country else f"{zh}（城市）"
-            # 人口 -> 0..1（对数），让大城市在模糊检索里靠前
-            pop = p.get("pop") or 0
-            freq = round(min(0.6, math.log10(max(pop, 1)) / 7.0), 6)
+            freq = freq_map.get(head, 0.0)
         out.append({
             "headword": head,
             "norm": n,

@@ -25,6 +25,13 @@ SOURCES = {
         "file": "",
         "cc": {"name": "FrequencyWords (OpenSubtitles 2018)", "url": "https://github.com/hermitdave/FrequencyWords", "license": "MIT"},
     },
+    "fr_freqwords": {
+        # OpenSubtitles 2018 法语 5 万词频表：给地名这类 Lexique 不收的专有名词
+        # 一个真实语料里的频次，避免按人口硬编码 freq 把它们顶进高频层
+        "url": "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/fr/fr_50k.txt",
+        "file": "fr_50k.txt",
+        "cc": {"name": "FrequencyWords (OpenSubtitles 2018)", "url": "https://github.com/hermitdave/FrequencyWords", "license": "MIT"},
+    },
     "llm_defs": {
         # 词条释义由 LLM 生成（词头/频次来自开放语料，释义是模型产出）
         "url": "",

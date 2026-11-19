@@ -47,9 +47,20 @@ def main():
     for e in entries:
         by_head.setdefault(e["headword"].casefold(), e)
 
+    # 幂等：已有 CFDICT 义项的条目视为已处理过（重跑不重复追加）。
+    # 注意不能按标签删除旧义项：refined 合并时精修义项会继承原义项的 tags，
+    # 其中 1.2 万条带 CFDICT 标签，删除会把精修结果一起清掉
+    done_heads = {
+        e["headword"].casefold()
+        for e in entries
+        if any("CFDICT" in (s.get("tags") or []) for s in e.get("senses") or [])
+    }
+
     n_match = n_skip = n_single = 0
-    seen = set()
-    per_entry: dict[str, int] = {}
+    # 同一法语释义（如 « avoir »）会被多个中文词头反查命中，它们指向同一个义项：
+    # 按释义合并中文词，一个释义只产出一个义项（否则翻译阶段会把同一个外文原文
+    # 译成同一句中文，出现 5 条相同释义）
+    per_head: dict[str, dict[str, dict]] = {}
     MAX_PER_ENTRY = 12  # CFDICT 反向同义词太多时取前 N（文件序≈常用序）
     for raw in open(path, encoding="utf-8"):
         line = raw.strip()
@@ -74,27 +85,36 @@ def main():
                 continue
             if not re.fullmatch(r"[A-Za-zÀ-ÿ'’-]+", cleaned):
                 continue
+            if cleaned.casefold() in done_heads:
+                continue
             entry = by_head.get(cleaned.casefold())
             if entry is None:
                 continue
             head = entry["headword"]
-            key = (head, simp, d)
-            if key in seen:
-                continue
-            seen.add(key)
-            if per_entry.get(head, 0) >= MAX_PER_ENTRY:
-                continue
-            per_entry[head] = per_entry.get(head, 0) + 1
+            glosses = per_head.setdefault(head, {})
+            g = glosses.get(cleaned.casefold())
+            if g is None:
+                if len(glosses) >= MAX_PER_ENTRY:
+                    continue
+                g = glosses[cleaned.casefold()] = {"fr": d, "zh": [], "trads": []}
+            if simp not in g["zh"]:
+                g["zh"].append(simp)
+            if trad != simp and trad not in g["trads"] and trad not in g["zh"]:
+                g["trads"].append(trad)
+
+    for head, glosses in per_head.items():
+        entry = by_head[head]
+        for g in glosses.values():
             entry.setdefault("senses", []).append({
-                "zh": simp,
-                "fr": d,
+                "zh": "；".join(g["zh"]),
+                "fr": g["fr"],
                 "kind": "phrase",
                 "tags": ["CFDICT"],
             })
             sense_idx = len(entry["senses"]) - 1
-            entry.setdefault("zh_terms", []).append([simp, sense_idx, "cfdict"])
-            if trad != simp:
-                entry["zh_terms"].append([trad, sense_idx, "cfdict"])
+            entry.setdefault("zh_terms", [])
+            for term in g["zh"] + g["trads"]:
+                entry["zh_terms"].append([term, sense_idx, "cfdict"])
             n_match += 1
 
     with open(entries_path, "w", encoding="utf-8") as f:

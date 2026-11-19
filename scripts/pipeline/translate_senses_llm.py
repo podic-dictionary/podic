@@ -102,12 +102,17 @@ def parse_batch(text: str) -> list[dict] | None:
     return out
 
 
+_ZH_POS_PREFIX = re.compile(r"^(?:n|v|adj|adv)(?:\.(?:m|f|pl))?\.\s*")
+
+
 def split_zh(zh: str) -> list[str]:
     t = re.sub(r"[（(][^）)]*[）)]", "", zh)
     res = []
     for seg in re.split(r"[；;]", t):
         for w in re.split(r"[，,、]", seg):
             w = w.strip().strip("。，,、")
+            # 反查词条不该带词性标记：「v. 前进」查「前进」命不中
+            w = _ZH_POS_PREFIX.sub("", w).strip()
             if 2 <= len(w) <= 8:
                 res.append(w)
     return res
