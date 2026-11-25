@@ -53,6 +53,74 @@ def get_token(opener):
         os.unlink(pem.name)
 
 
+def resumable_upload(opener, tok, eid, path, chunk=8 << 20, retries=6):
+    """分块断点续传上传 AAB。
+
+    一次 140MB 的 uploadType=media 走代理常见「发完没响应/SSL EOF」（2026-11-25 连踩两次，
+    22 分钟挂死）；resumable 协议每块独立请求，断点由 Range 头对齐，单块失败只重传该块。
+    """
+    total = os.path.getsize(path)
+    req = urllib.request.Request(
+        f"{UPBASE}/edits/{eid}/bundles?uploadType=resumable", method="POST", data=b"",
+        headers={"Authorization": "Bearer " + tok,
+                 "X-Upload-Content-Type": "application/octet-stream",
+                 "X-Upload-Content-Length": str(total),
+                 "Content-Length": "0"})
+    resp = opener.open(req)
+    url = resp.headers["Location"]
+    print(f"resumable: {total/1048576:.1f}MB，chunk {chunk>>20}MB")
+
+    off = 0
+    with open(path, "rb") as f:
+        while off < total:
+            f.seek(off)
+            data = f.read(chunk)
+            end = off + len(data) - 1
+            for attempt in range(1, retries + 1):
+                try:
+                    r = urllib.request.Request(
+                        url, method="PUT", data=data,
+                        headers={"Authorization": "Bearer " + tok,
+                                 "Content-Type": "application/octet-stream",
+                                 "Content-Length": str(len(data)),
+                                 "Content-Range": f"bytes {off}-{end}/{total}"})
+                    body = opener.open(r, timeout=180).read()
+                    up = json.loads(body) if body else {}
+                    print(f"上传完成 versionCode={up.get('versionCode')}")
+                    return up
+                except urllib.error.HTTPError as e:
+                    # 308 = 还没传完；Range 头告诉服务器已经收了多少
+                    if e.code == 308:
+                        rng = e.headers.get("Range")
+                        off = int(rng.split("-")[1]) + 1 if rng else off
+                        break
+                    if e.code in (401, 403, 404):
+                        sys.exit(f"!! 上传块被拒 {e.code}: {e.read().decode()[:300]}")
+                    print(f"  块 {off}-{end} 失败 {e.code}（第 {attempt} 次），重试")
+                except Exception as e:  # noqa: BLE001 网络层异常种类多，统一重试
+                    print(f"  块 {off}-{end} 网络异常 {type(e).__name__}: {e}（第 {attempt} 次），重试")
+                time.sleep(min(2 ** attempt, 30))
+                # 询问服务器已收到哪，避免盲目重发整块
+                q = urllib.request.Request(
+                    url, method="PUT", data=b"",
+                    headers={"Authorization": "Bearer " + tok,
+                             "Content-Length": "0",
+                             "Content-Range": f"bytes */{total}"})
+                try:
+                    body = opener.open(q, timeout=60).read()
+                    return json.loads(body) if body else {}
+                except urllib.error.HTTPError as e2:
+                    if e2.code == 308:
+                        rng = e2.headers.get("Range")
+                        off = int(rng.split("-")[1]) + 1 if rng else off
+                        break
+            else:
+                sys.exit(f"!! 块 {off}-{end} 重试 {retries} 次仍失败")
+        else:
+            return {}
+    sys.exit("!! 上传结束但未拿到 bundle 信息")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", choices=["internal", "alpha", "beta", "production"])
@@ -63,10 +131,12 @@ def main():
     ap.add_argument("--notes-en", dest="notes_en")
     args = ap.parse_args()
 
-    if "PODIC_PROXY" not in os.environ:
-        sys.exit("缺 PODIC_PROXY（Google API 需走代理）")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler(
-        {"https": os.environ["PODIC_PROXY"], "http": os.environ["PODIC_PROXY"]}))
+    # 中国大陆机器需 PODIC_PROXY 走代理；海外机器可直连
+    if os.environ.get("PODIC_PROXY"):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler(
+            {"https": os.environ["PODIC_PROXY"], "http": os.environ["PODIC_PROXY"]}))
+    else:
+        opener = urllib.request.build_opener()
     tok = get_token(opener)
 
     def api(method, url, body=None, raw=None, ctype="application/json"):
@@ -103,8 +173,7 @@ def main():
             sys.exit(f"发布模式缺 {k}")
     eid = api("POST", BASE + "/edits", {})["id"]
     print("edit:", eid)
-    up = api("POST", f"{UPBASE}/edits/{eid}/bundles?uploadType=media",
-             raw=open(args.aab, "rb").read(), ctype="application/octet-stream")
+    up = resumable_upload(opener, tok, eid, args.aab)
     if str(up.get("versionCode")) != str(args.version_code):
         sys.exit(f"上传的 versionCode={up.get('versionCode')} 与预期 {args.version_code} 不符"
                  "（aab 的 versionCode 先于参数，以 aab 为准改参数）")
