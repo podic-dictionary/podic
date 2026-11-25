@@ -4,6 +4,7 @@ import { langDisplayName } from "../langNames";
 import { useAiStream } from "../hooks/useAiStream";
 import ModelPicker from "../components/ModelPicker";
 import Markdown from "../components/Markdown";
+import { XIcon } from "../components/icons";
 import { copyText } from "../components/clipboard";
 
 
@@ -31,6 +32,7 @@ export default function TranslateView() {
   const [input, setInput] = useState("");
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<number | null>(null); // 反馈复位定时器：连点时旧定时器不提前清掉新反馈
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const { text, running, error, run, cancel } = useAiStream();
 
   // 新译文开始流式输出时清掉上一份译文的「已复制」残留
@@ -99,17 +101,30 @@ export default function TranslateView() {
 
       {/* 输入/译文：手机固定高度让按钮留在首屏，桌面铺满 */}
       <div className="mt-3 grid grid-rows-2 gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:grid-rows-1">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            // 同 SearchBar：输入法组合中的回车（上屏）不触发翻译
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)
-              && !e.nativeEvent.isComposing && e.keyCode !== 229) go();
-          }}
-          placeholder="输入要翻译的文本…（Ctrl+Enter 翻译）"
-          className="h-36 w-full resize-none rounded-2xl border border-zinc-200/80 bg-white/80 p-4 text-[15px] outline-none backdrop-blur transition-all duration-300 focus:border-emerald-400/70 focus:bg-white focus:shadow-[0_0_0_4px_rgb(16_185_129/0.08)] lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:focus:bg-zinc-900 dark:focus:shadow-[0_0_0_4px_rgb(16_185_129/0.1)]"
-        />
+        <div className="relative h-36 w-full lg:h-full">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              // 同 SearchBar：输入法组合中的回车（上屏）不触发翻译
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)
+                && !e.nativeEvent.isComposing && e.keyCode !== 229) go();
+            }}
+            placeholder="输入要翻译的文本…（Ctrl+Enter 翻译）"
+            className="h-full w-full resize-none rounded-2xl border border-zinc-200/80 bg-white/80 p-4 pr-12 text-[15px] outline-none backdrop-blur transition-all duration-300 focus:border-emerald-400/70 focus:bg-white focus:shadow-[0_0_0_4px_rgb(16_185_129/0.08)] dark:border-zinc-700/70 dark:bg-zinc-900/70 dark:focus:bg-zinc-900 dark:focus:shadow-[0_0_0_4px_rgb(16_185_129/0.1)]"
+          />
+          {input && (
+            <button
+              onClick={() => { setInput(""); inputRef.current?.focus(); }}
+              title="清空"
+              aria-label="清空输入"
+              className="absolute right-2 top-2 rounded-lg p-1.5 text-zinc-300 transition-colors hover:bg-zinc-100/80 hover:text-zinc-500 dark:text-zinc-600 dark:hover:bg-zinc-800/80 dark:hover:text-zinc-400"
+            >
+              <XIcon size={16} />
+            </button>
+          )}
+        </div>
         <div className="flex h-36 w-full flex-col rounded-2xl border border-zinc-200/80 bg-white/80 backdrop-blur lg:h-full dark:border-zinc-700/70 dark:bg-zinc-900/70">
           {/* 工具行：复制按钮固定在顶部，不遮正文、不随滚动走 */}
           <div className="flex h-8 shrink-0 items-center justify-end px-3">

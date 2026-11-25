@@ -94,6 +94,8 @@ export default function App() {
       localStorage.setItem("podic.lang", l);
     } catch { /* 静默 */ }
   }, []);
+  // 顶栏点语言后跳到查词页并聚焦输入框的次数（SearchBar 监听变化聚焦）
+  const [searchFocusSeq, setSearchFocusSeq] = useState(0);
   const { fontScale, hand, languages, loaded: settingsLoaded, lastView } = useSettings();
 
   // 注册表校验：当前语言被移出列表（多端同步/重置）后回退首项并持久化；每次列表变化重跑
@@ -115,6 +117,13 @@ export default function App() {
     if (mainRef.current) scrollPos.current[view] = mainRef.current.scrollTop;
     setView(v);
     // 设置子页/阅读态/生词本子页都不因切 tab 清掉：回对应 tab 回到最后停留的页面
+  };
+
+  // 顶栏点语言 = 「用这个语言查词」：在任何页面都切到查词并聚焦输入框
+  const switchLangToSearch = (l: Lang) => {
+    setLang(l);
+    switchView("search");
+    setSearchFocusSeq((n) => n + 1);
   };
 
   useEffect(() => {
@@ -540,7 +549,7 @@ export default function App() {
           {/* 印章 / 语言切换 / 返回 是独立子元素，justify-between 才能把控件推到拇指侧 */}
           <button className="seal" aria-label="每日一句" title="每日一句" onClick={openDaily}>典</button>
           {view !== "reading" && (
-            <LanguageSwitcher value={lang} onChange={setLang} languages={languages} />
+            <LanguageSwitcher value={lang} onChange={switchLangToSearch} languages={languages} />
           )}
           {view === "reading" && articleId !== null && (
             <button
@@ -577,7 +586,9 @@ export default function App() {
         >
           {VIEWS.map((v) => (
             <div key={v.id} className="h-full" style={{ display: view === v.id ? "block" : "none" }}>
-              {v.id === "search" && <SearchView lang={lang} onLangChange={setLang} />}
+              {v.id === "search" && (
+                <SearchView lang={lang} onLangChange={setLang} focusSeq={searchFocusSeq} />
+              )}
               {v.id === "translate" && <TranslateView />}
               {v.id === "reading" && (
                 <ReadingView lang={lang} articleId={articleId} setArticleId={setArticleId} />

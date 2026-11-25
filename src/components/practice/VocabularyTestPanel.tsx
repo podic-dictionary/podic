@@ -42,12 +42,43 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   // 布尔锁靠 idx effect 解锁挡不住跨事件的快速连点（评审 R14），时间窗与
   // 题目切换解耦，末题提交失败也自然恢复可答（评审 N01）
   const lockUntilRef = useRef(0);
-  const langRef = useRef("");
+
+  /** 服务端时间戳是 UTC（sqlite datetime('now')），按本地时区显示到分钟 */
+  const fmtDateTime = (s?: string | null) => {
+    if (!s) return "";
+    const d = new Date(s.replace(" ", "T") + "Z");
+    if (isNaN(d.getTime())) return s.slice(0, 16);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  /** 拉全部已装语言的历史合并倒序（各语言一次请求，失败的语言按空处理） */
+  const loadHistory = async (ls: { lang: string }[]) => {
+    const req = ++historyReqRef.current;
+    setHistoryLoading(true);
+    try {
+      const lists = await Promise.all(
+        ls.map((p) => listVocabTests(p.lang, 50).catch(() => [] as VocabTestHistoryItem[])),
+      );
+      if (historyReqRef.current !== req) return; // 期间又触发过刷新：丢弃本次
+      setHistory(
+        lists.flat().sort((a, b) =>
+          (b.finished_at ?? b.created_at).localeCompare(a.finished_at ?? a.created_at)),
+      );
+    } finally {
+      if (historyReqRef.current === req) setHistoryLoading(false);
+    }
+  };
 
   useEffect(() => {
     listPacks()
-      .then((r) => setPacks(r.packs.map((p) => ({ lang: p.lang, version: p.version }))))
+      .then((r) => {
+        const ps = r.packs.map((p) => ({ lang: p.lang, version: p.version }));
+        setPacks(ps);
+        void loadHistory(ps);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     setPracticeActive(phase === "run");
@@ -86,6 +117,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
       const r = await finishVocabTest(plan.id, next);
       setResult(r.result);
       setPhase("done");
+      void loadHistory(packs); // 刷新历史，结果页好跟上次同语言结果对比
     } catch (e) {
       // 提交失败：清保护期让用户立刻重按最后一题（答案仍在，服务端幂等）
       lockUntilRef.current = 0;
@@ -112,20 +144,16 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
     setExitAsk(true);
   };
 
-  /** 历史按语言绑定：竞态时旧语言的迟到响应直接丢弃 */
-  const openHistory = async (l: string) => {
-    const req = ++historyReqRef.current;
-    setHistory([]);
-    setHistoryLoading(true);
-    try {
-      const items = await listVocabTests(l);
-      if (historyReqRef.current === req && langRef.current === l) setHistory(items);
-    } catch {
-      if (historyReqRef.current === req && langRef.current === l) setHistory([]);
-    } finally {
-      if (historyReqRef.current === req) setHistoryLoading(false);
+  // 每条记录的同语言上一次结果（history 已倒序，向后找同语言即为上一次）
+  const prevById = new Map<string, VocabTestHistoryItem>();
+  {
+    const lastByLang = new Map<string, VocabTestHistoryItem>();
+    for (const h of history) {
+      const p = lastByLang.get(h.lang);
+      if (p) prevById.set(h.id, p);
+      lastByLang.set(h.lang, h);
     }
-  };
+  }
 
   // ---------------- setup ----------------
   if (phase === "setup") {
@@ -151,7 +179,7 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
               {packs.map((p) => (
                 <button
                   key={p.lang}
-                  onClick={() => { setLang(p.lang); langRef.current = p.lang; openHistory(p.lang); }}
+                  onClick={() => setLang(p.lang)}
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${
                     lang === p.lang
                       ? "bg-emerald-600 text-white dark:bg-emerald-500"
@@ -183,24 +211,39 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
           >
             {loading ? "正在抽样…" : lang ? `开始自测（${langName(lang)}）` : "先选语言"}
           </button>
-          {lang && (historyLoading || history.length > 0) && (
+          {(historyLoading || history.length > 0) && (
             <div>
-              <p className="eyebrow text-zinc-400">历史结果（{langName(lang)}）</p>
+              <p className="eyebrow text-zinc-400">历史结果（全部语言）</p>
               {historyLoading && <p className="mt-2 text-xs text-zinc-400">加载历史…</p>}
               <ul className="mt-2 space-y-1.5">
-                {history.slice(0, 5).map((h) => (
-                  <li key={h.id} className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-xs dark:bg-zinc-900">
-                    <span className="text-zinc-500 dark:text-zinc-400">{h.created_at.slice(0, 10)}</span>
-                    <span className="font-medium">
-                      约 {h.result?.estimate.toLocaleString()} 词
-                      <span className="ml-1 text-zinc-400">
-                        [{h.result?.low.toLocaleString()}–{h.result?.high.toLocaleString()}]
+                {history.slice(0, 10).map((h) => {
+                  const prev = prevById.get(h.id);
+                  const delta = h.result && prev?.result ? h.result.estimate - prev.result.estimate : null;
+                  return (
+                    <li key={h.id} className="flex flex-col gap-1 rounded-xl bg-white px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-3 dark:bg-zinc-900">
+                      <span className="flex min-w-0 items-center gap-2 text-zinc-500 dark:text-zinc-400">
+                        <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          {langName(h.lang)}
+                        </span>
+                        <span className="whitespace-nowrap">{fmtDateTime(h.finished_at ?? h.created_at)}</span>
+                        <span className="text-zinc-400">· {h.question_count} 题</span>
                       </span>
-                    </span>
-                  </li>
-                ))}
+                      <span className="shrink-0 font-medium sm:text-right">
+                        约 {h.result?.estimate.toLocaleString()} 词
+                        <span className="ml-1 text-zinc-400">
+                          [{h.result?.low.toLocaleString()}–{h.result?.high.toLocaleString()}]
+                        </span>
+                        {delta !== null && delta !== 0 && (
+                          <span className={`ml-1.5 ${delta > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`}>
+                            {delta > 0 ? "+" : ""}{delta.toLocaleString()}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
-              <p className="mt-1 text-xs text-zinc-400">词典版本或范围不同时结果不可直接比较</p>
+              <p className="mt-1 text-xs text-zinc-400">右侧增减 = 与同语言上一次结果相比；词典版本或范围不同时不可直接比较</p>
             </div>
           )}
         </div>
@@ -277,6 +320,10 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
   // ---------------- done ----------------
   if (!result) return null;
   const pct = result.population_size > 0 ? Math.round((result.estimate / result.population_size) * 100) : 0;
+  // 同语言上一次结果（history 倒序；当前这次可能还在刷新或已入列，排除自身）
+  const prev = plan ? history.find((h) => h.lang === plan.lang && h.id !== plan.id && h.result) : undefined;
+  const delta = prev?.result ? result.estimate - prev.result.estimate : null;
+  const packChanged = !!prev && !!plan && prev.pack_version !== plan.pack_version;
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-zinc-50 dark:bg-zinc-950">
       <PanelHeader title="自测结果" onClose={onClose} />
@@ -294,6 +341,18 @@ export default function VocabularyTestPanel({ onClose }: { onClose: () => void }
           <p className="mt-2 text-xs text-zinc-400">
             自报结果：区间不含自评偏差与词典覆盖偏差，答题数 {(answers.length).toLocaleString()}
           </p>
+          {prev?.result && (
+            <p className="mt-2 border-t border-zinc-100 pt-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              上次（{fmtDateTime(prev.finished_at ?? prev.created_at)}）约{" "}
+              {prev.result.estimate.toLocaleString()} 词
+              {delta !== null && delta !== 0 && (
+                <span className={delta > 0 ? "text-emerald-600 dark:text-emerald-400" : ""}>
+                  ，本次 {delta > 0 ? "+" : ""}{delta.toLocaleString()}
+                </span>
+              )}
+              {packChanged && <span className="text-zinc-400">（词典版本不同，仅供参考）</span>}
+            </p>
+          )}
         </div>
         <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
           <p className="eyebrow text-zinc-400">按词频层的认识比例</p>

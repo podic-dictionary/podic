@@ -10,12 +10,15 @@ export default function SearchBar({
   langs,
   onSearch,
   onClear,
+  focusSeq = 0,
 }: {
   langs: string;
   /** exact=true 精确查询（候选选定/历史点击）：只出该词词条，不做前缀/模糊扩散 */
   onSearch: (q: string, lang?: Lang, exact?: boolean) => void;
   /** 一键清空后通知父级重置结果区（回到空态） */
   onClear?: () => void;
+  /** 外部请求聚焦输入框的序号（顶栏点语言跳查词）：每次变化聚焦一次 */
+  focusSeq?: number;
 }) {
   const { languages } = useSettings();
   const langName = (code: string) => {
@@ -38,6 +41,11 @@ export default function SearchBar({
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
+
+  // 顶栏点语言切到查词：等父级把视图切到可见后（effect 在 commit 之后跑）再聚焦
+  useEffect(() => {
+    if (focusSeq) inputRef.current?.focus();
+  }, [focusSeq]);
 
   // 最近查询里前缀匹配当前输入的条目（保留在联想前面）
   const matchedHistory = (v: string) => {

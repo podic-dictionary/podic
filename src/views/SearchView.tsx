@@ -7,7 +7,12 @@ import FallbackCard from "../components/FallbackCard";
 import SearchBar from "../components/SearchBar";
 import type { Entry, Lang } from "../types";
 
-export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lang) => void }) {
+export default function SearchView({ lang, onLangChange, focusSeq }: {
+  lang: Lang;
+  onLangChange: (l: Lang) => void;
+  /** 顶栏点语言跳查词时递增，传给输入框聚焦 */
+  focusSeq?: number;
+}) {
   const [results, setResults] = useState<Entry[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -133,6 +138,7 @@ export default function SearchView({ lang, onLangChange }: { lang: Lang; onLangC
     <div className="mx-auto max-w-2xl p-4">
       <SearchBar
         langs={lang}
+        focusSeq={focusSeq}
         onSearch={onSearch}
         onClear={() => {
           ++reqSeq.current; // 作废在途主查询，旧结果不得在清空后回填
