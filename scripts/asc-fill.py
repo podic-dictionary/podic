@@ -61,7 +61,7 @@ LOCALES = {
         "keywords": "dictionary,offline,english,french,japanese,german,spanish,russian,italian,portuguese,chinese",
         "promotionalText": "Open source. Fully offline. 8 dictionaries, practice, vocab test and daily sentence. Bring your own AI key.",
         "subtitle": "Open-source offline dictionary",
-        "whatsNew": "New: wordbook practice (meaning/spelling/listening with mastery tracking), per-language vocabulary size test, and a daily sentence (dictionary example first, AI fallback). System TTS read-aloud for words and examples, plus navigation and UX fixes. Much smaller app size.",
+        "whatsNew": "New: offline text-to-speech engine with per-language engine, voice and speed settings; AI-generated example sentences when a word has no dictionary example; updated English and French dictionary data; reading fixes. Lookup and translation polish: one-tap clear in the translate box, tap a language in the header to jump straight to search, and vocabulary-test history with trend comparison.",
     },
     "zh-Hans": {
         "description": (
@@ -81,7 +81,7 @@ LOCALES = {
         "keywords": "词典,英语,法语,日语,德语,西班牙语,俄语,意大利语,葡萄牙语,离线,开源",
         "promotionalText": "开源、离线、无广告；生词练习、词汇量自测、每日一句；AI 能力自带 Key 即可用。",
         "subtitle": "开源离线词典 八语互查",
-        "whatsNew": "新增生词本练习（词义/拼写/听音，熟练度追踪）、分语言词汇量自测、每日一句（词典例句优先、AI 生成兜底）；系统 TTS 朗读单词与例句；返回键导航与多项体验修复；安装包体积大幅优化。",
+        "whatsNew": "新增离线语音引擎，可按语言选择引擎、音色与语速；词条无例句时可在原位用 AI 生成并标注；英/法词典数据更新；阅读分词修复。查词与翻译体验优化：翻译输入框一键清空、点顶部语言直达查词、单词量测试可看历史与变化趋势。",
     },
 }
 
@@ -434,22 +434,26 @@ if "--submit" in sys.argv:
     open_sub = api("GET", f"/v1/apps/{APP_ID}/reviewSubmissions?filter[platform]=IOS", raise_on_error=False)
     container = None
     if "__err" not in open_sub:
-        states = {"READY_TO_SUBMIT", "IN_PROGRESS"}
+        # ReviewSubmission 的实际状态名：READY_FOR_REVIEW 是「已建容器未提交」，
+        # 复用它挂 item 再 submitted=true；旧代码写的 READY_TO_SUBMIT/IN_PROGRESS 并不存在
+        states = {"READY_FOR_REVIEW", "WAITING_FOR_REVIEW", "IN_PROGRESS"}
         for rs in open_sub.get("data", []):
             if rs["attributes"]["state"] in states:
                 container = rs
                 break
     if container is None:
-        container = api("POST", "/v1/reviewSubmissions",
+        resp = api("POST", "/v1/reviewSubmissions",
             {"data": {"type": "reviewSubmissions", "attributes": {"platform": "IOS"},
                       "relationships": {"app": {"data": {"type": "apps", "id": APP_ID}}}}},
             raise_on_error=False)
-        if "__err" in container:
-            print(f"[8] 创建 reviewSubmission 失败: {container.get('body', '')[:400]}")
+        if "__err" in resp:
+            print(f"[8] 创建 reviewSubmission 失败: {resp.get('body', '')[:400]}")
             print("  - 请到 ASC 网页手动 Submit for Review")
             sys.exit(1)
-    rid = container["data"]["id"]
-    print(f"[8] reviewSubmission {rid[:8]}… state={container['data']['attributes']['state']}")
+        # 新建走 POST 返回 {"data": {...}}，复用列表项是裸资源对象 {"id": ...}：统一取资源
+        container = resp["data"]
+    rid = container["id"]
+    print(f"[8] reviewSubmission {rid[:8]}… state={container['attributes']['state']}")
     # item：查已挂的 items 里有没有本版本
     items = api("GET", f"/v1/reviewSubmissions/{rid}/items")["data"]
     have_item = any(i["relationships"]["appStoreVersion"]["data"]["id"] == vid for i in items)
@@ -470,6 +474,6 @@ if "--submit" in sys.argv:
         print(f"[8] 提交失败: {done.get('body', '')[:400]}")
         print("  - 请到 ASC 网页手动 Submit for Review")
     else:
-        print(f"[8] 已提交审核 ✓ state={done['data']['attributes']['state']}（过审后按 releaseType={container['data']['attributes'].get('submittedAppVersion', {}).get('releaseType', 'AFTER_APPROVAL')} 发布）")
+        print(f"[8] 已提交审核 ✓ state={done['data']['attributes']['state']}")
 else:
     print("  - 确认无误后点 Submit for Review（或加 --submit 由 API 提交）")
