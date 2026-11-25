@@ -31,6 +31,13 @@ targets:
       path: Sources/Info.plist
       properties:
         UILaunchScreen: {}
+        # iOS 26+ 不接 UIScene 生命周期会在启动时直接崩（EXC_BREAKPOINT）
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleDisplayName: Podic
