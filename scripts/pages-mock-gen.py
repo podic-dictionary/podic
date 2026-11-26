@@ -154,6 +154,20 @@ window.fetch = async function(url, opts){
   }
   if (path === "/api/settings") return jsonRes(MOCK.SETTINGS);
   if (path === "/api/settings/test-provider") return jsonRes({"ok": true, "latency_ms": 128});
+  // 端侧 TTS：网页 demo 没有原生引擎，返回空列表，前端自动退回系统语音
+  if (path === "/api/tts/models") return jsonRes({"models": []});
+  if (path === "/api/tts/tasks") return jsonRes({"tasks": []});
+  // 每日一句：预置一条词典例句，保证印章入口在 demo 里可用
+  if (path === "/api/daily-sentence" && method === "POST") {
+    return jsonRes({
+      word: {headword: "serendipity", entry_id: 900001, ipa: null, gloss: "意外发现美好事物的运气"},
+      level: {mode: "auto", band: 2, reason: "演示数据：按词频随机抽词"},
+      bands: [{id: 0, count: 1200}, {id: 1, count: 2400}, {id: 2, count: 3100}, {id: 3, count: 900}],
+      sentence: {text: "Serendipity often finds those who keep looking.",
+                 translation: ["机缘常眷顾那些不停寻找的人。"],
+                 source: "pack", cached: true, id: 1},
+    });
+  }
   if (path === "/api/examples") {
     // 例句：hello 配两条演示，其余词条空（前端 r.items 直接用，不能缺字段）
     const id = q.get("id");
@@ -277,7 +291,19 @@ window.fetch = async function(url, opts){
       estimate: est, low: Math.max(0, est - 2200), high: Math.min(20000, est + 2200),
       population_size: 20000, bands, method: "demo"}});
   }
-  if (path === "/api/vocab-tests") return jsonRes({items: []});
+  // 测试历史：预置三次英语结果，让趋势图在 demo 里可见
+  if (path === "/api/vocab-tests" && method === "GET") {
+    const lang = q.get("lang") || "en";
+    if (lang !== "en") return jsonRes({items: []});
+    const mk = (id, day, estimate) => ({
+      id, lang, pack_version: "demo-1.0", domain_rule: "demo", population_size: 20000,
+      question_count: 60, created_at: day + " 09:00:00", finished_at: day + " 09:04:12",
+      result: {estimate, low: estimate - 2200, high: estimate + 2200, population_size: 20000,
+               bands: [], method: "demo"}});
+    return jsonRes({items: [mk("demo-h3", "2026-11-09", 7800),
+                            mk("demo-h2", "2026-10-26", 7100),
+                            mk("demo-h1", "2026-10-12", 6200)]});
+  }
 
   // ---- 阅读：文章增改（空 paragraphs 渲染为纯文本，可保命不崩） ----
   if (path === "/api/articles" && method === "POST") {
